@@ -1,7 +1,7 @@
 BINARY := minerals
 PKG := ./cmd/minerals
 
-.PHONY: build run test fmt vet tidy clean
+.PHONY: build run test fmt vet tidy clean fmt-frontend fmt-check-frontend lint-frontend
 
 build:
 	go build -o bin/$(BINARY) $(PKG)
@@ -51,3 +51,13 @@ migrate-create:
 
 test-integration:
 	go test -tags integration ./...
+
+# ── Frontend (mi-p5h) ─────────────────────────────────────────────
+fmt-frontend:
+	cd frontend && npx prettier --write .
+
+fmt-check-frontend:
+	cd frontend && npx prettier --check .
+
+lint-frontend:
+	cd frontend && npx eslint .
