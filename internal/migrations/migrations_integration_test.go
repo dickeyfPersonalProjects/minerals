@@ -1,0 +1,345 @@
+//go:build integration
+
+package migrations_test
+
+import (
+	"context"
+	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// migrationsDir resolves the absolute path to the repo's migrations/
+// directory from this test file's location.
+func migrationsDir(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not resolve caller path")
+	}
+	// internal/migrations/<this file> → repo root is two levels up.
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	abs, err := filepath.Abs(filepath.Join(repoRoot, "migrations"))
+	if err != nil {
+		t.Fatalf("resolve migrations dir: %v", err)
+	}
+	return abs
+}
+
+// dsnWithSearchPath returns the DSN with `search_path=<schema>` appended
+// so golang-migrate (and pgx connections) operate inside an isolated
+// per-test schema.
+func dsnWithSearchPath(t *testing.T, raw, schema string) string {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse DATABASE_URL: %v", err)
+	}
+	q := u.Query()
+	q.Set("search_path", schema)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// TestMigrations_UpDownUp exercises the full round-trip required by the
+// bead: up → introspect → down → introspect → up. Each test run uses a
+// unique schema so concurrent runs and prior failures don't collide.
+func TestMigrations_UpDownUp(t *testing.T) {
+	rawDSN := os.Getenv("DATABASE_URL")
+	if rawDSN == "" {
+		t.Skip("DATABASE_URL not set; skipping migrations integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	schema := "mig_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+
+	adminPool, err := pgxpool.New(ctx, rawDSN)
+	if err != nil {
+		t.Fatalf("connect admin pool: %v", err)
+	}
+
+	if _, err := adminPool.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		adminPool.Close()
+		t.Fatalf("create schema: %v", err)
+	}
+	// t.Cleanup runs LIFO: drop the schema first (while the pool is
+	// still open), then close the pool.
+	t.Cleanup(adminPool.Close)
+	t.Cleanup(func() {
+		cleanCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if _, err := adminPool.Exec(cleanCtx, "DROP SCHEMA "+schema+" CASCADE"); err != nil {
+			t.Logf("cleanup: drop schema %s: %v", schema, err)
+		}
+	})
+
+	scopedDSN := dsnWithSearchPath(t, rawDSN, schema)
+	migrationsURL := "file://" + migrationsDir(t)
+
+	m, err := migrate.New(migrationsURL, scopedDSN)
+	if err != nil {
+		t.Fatalf("migrate.New: %v", err)
+	}
+	defer func() {
+		if srcErr, dbErr := m.Close(); srcErr != nil || dbErr != nil {
+			t.Logf("migrate.Close: src=%v db=%v", srcErr, dbErr)
+		}
+	}()
+
+	// Up.
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+	assertSchemaPresent(ctx, t, adminPool, schema)
+
+	// Down.
+	if err := m.Down(); err != nil {
+		t.Fatalf("migrate down: %v", err)
+	}
+	assertSchemaAbsent(ctx, t, adminPool, schema)
+
+	// Up again — idempotent reapply must succeed cleanly.
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrate up (second): %v", err)
+	}
+	assertSchemaPresent(ctx, t, adminPool, schema)
+}
+
+// expectedTables is the list of tables 0001_init.up.sql creates.
+var expectedTables = []string{
+	"specimens",
+	"collectors",
+	"files",
+	"specimen_collectors",
+	"photos",
+	"journal_entries",
+	"journal_entry_files",
+}
+
+// expectedIndexes covers the GIN tsvector index plus every FK index
+// the bead's acceptance criteria require.
+var expectedIndexes = []string{
+	"specimens_search_tsv_idx",
+	"specimen_collectors_collector_id_idx",
+	"photos_specimen_id_idx",
+	"photos_file_id_idx",
+	"journal_entries_specimen_id_idx",
+	"journal_entry_files_file_id_idx",
+}
+
+// expectedEnums lists the enum types created by the migration.
+var expectedEnums = []string{"specimen_type", "specimen_visibility"}
+
+func assertSchemaPresent(ctx context.Context, t *testing.T, pool *pgxpool.Pool, schema string) {
+	t.Helper()
+	for _, table := range expectedTables {
+		if !tableExists(ctx, t, pool, schema, table) {
+			t.Errorf("expected table %s.%s to exist after up", schema, table)
+		}
+	}
+	for _, idx := range expectedIndexes {
+		if !indexExists(ctx, t, pool, schema, idx) {
+			t.Errorf("expected index %s.%s to exist after up", schema, idx)
+		}
+	}
+	for _, enum := range expectedEnums {
+		if !enumExists(ctx, t, pool, schema, enum) {
+			t.Errorf("expected enum type %s.%s to exist after up", schema, enum)
+		}
+	}
+	// Sanity-check key constraints/columns to prove the schema matches.
+	assertColumn(ctx, t, pool, schema, "specimens", "author_id", isNotNull(true), hasDefault(false))
+	assertColumn(ctx, t, pool, schema, "specimens", "type_data", isNotNull(true), hasDefault(true))
+	assertColumn(ctx, t, pool, schema, "specimens", "search_tsv", isGenerated(true))
+	assertColumn(ctx, t, pool, schema, "files", "uploaded_by", isNotNull(true), hasDefault(false))
+	assertColumn(ctx, t, pool, schema, "journal_entries", "author_id", isNotNull(true), hasDefault(false))
+	assertColumn(ctx, t, pool, schema, "collectors", "author_id", isNotNull(true), hasDefault(false))
+	assertColumn(ctx, t, pool, schema, "specimens", "id", dataType("uuid"))
+	assertColumn(ctx, t, pool, schema, "files", "s3_key", isNotNull(true))
+
+	// Foreign keys exist where expected.
+	for _, fk := range []struct{ table, column, refTable string }{
+		{"photos", "specimen_id", "specimens"},
+		{"photos", "file_id", "files"},
+		{"journal_entries", "specimen_id", "specimens"},
+		{"journal_entry_files", "entry_id", "journal_entries"},
+		{"journal_entry_files", "file_id", "files"},
+		{"specimen_collectors", "specimen_id", "specimens"},
+		{"specimen_collectors", "collector_id", "collectors"},
+	} {
+		if !fkExists(ctx, t, pool, schema, fk.table, fk.column, fk.refTable) {
+			t.Errorf("expected FK %s.%s → %s.id", fk.table, fk.column, fk.refTable)
+		}
+	}
+}
+
+func assertSchemaAbsent(ctx context.Context, t *testing.T, pool *pgxpool.Pool, schema string) {
+	t.Helper()
+	for _, table := range expectedTables {
+		if tableExists(ctx, t, pool, schema, table) {
+			t.Errorf("expected table %s.%s to be gone after down", schema, table)
+		}
+	}
+	for _, enum := range expectedEnums {
+		if enumExists(ctx, t, pool, schema, enum) {
+			t.Errorf("expected enum %s.%s to be gone after down", schema, enum)
+		}
+	}
+}
+
+// --- pg_catalog introspection helpers ---
+
+func tableExists(ctx context.Context, t *testing.T, pool *pgxpool.Pool, schema, table string) bool {
+	t.Helper()
+	const q = `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_class c
+			JOIN pg_namespace n ON n.oid = c.relnamespace
+			WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind = 'r'
+		)`
+	var ok bool
+	if err := pool.QueryRow(ctx, q, schema, table).Scan(&ok); err != nil {
+		t.Fatalf("tableExists query: %v", err)
+	}
+	return ok
+}
+
+func indexExists(ctx context.Context, t *testing.T, pool *pgxpool.Pool, schema, index string) bool {
+	t.Helper()
+	const q = `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_class c
+			JOIN pg_namespace n ON n.oid = c.relnamespace
+			WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind = 'i'
+		)`
+	var ok bool
+	if err := pool.QueryRow(ctx, q, schema, index).Scan(&ok); err != nil {
+		t.Fatalf("indexExists query: %v", err)
+	}
+	return ok
+}
+
+func enumExists(ctx context.Context, t *testing.T, pool *pgxpool.Pool, schema, name string) bool {
+	t.Helper()
+	const q = `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_type t
+			JOIN pg_namespace n ON n.oid = t.typnamespace
+			WHERE n.nspname = $1 AND t.typname = $2 AND t.typtype = 'e'
+		)`
+	var ok bool
+	if err := pool.QueryRow(ctx, q, schema, name).Scan(&ok); err != nil {
+		t.Fatalf("enumExists query: %v", err)
+	}
+	return ok
+}
+
+func fkExists(ctx context.Context, t *testing.T, pool *pgxpool.Pool, schema, table, column, refTable string) bool {
+	t.Helper()
+	const q = `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_constraint c
+			JOIN pg_class src ON src.oid = c.conrelid
+			JOIN pg_namespace srcns ON srcns.oid = src.relnamespace
+			JOIN pg_class dst ON dst.oid = c.confrelid
+			JOIN pg_attribute a ON a.attrelid = src.oid AND a.attnum = ANY(c.conkey)
+			WHERE c.contype = 'f'
+			  AND srcns.nspname = $1
+			  AND src.relname = $2
+			  AND a.attname = $3
+			  AND dst.relname = $4
+			  AND array_length(c.conkey, 1) = 1
+		)`
+	var ok bool
+	if err := pool.QueryRow(ctx, q, schema, table, column, refTable).Scan(&ok); err != nil {
+		t.Fatalf("fkExists query: %v", err)
+	}
+	return ok
+}
+
+// columnAssertion is a fluent option set for assertColumn.
+type columnAssertion struct {
+	notNull   *bool
+	hasDef    *bool
+	generated *bool
+	udtName   string
+}
+
+type colOpt func(*columnAssertion)
+
+func isNotNull(v bool) colOpt   { return func(a *columnAssertion) { a.notNull = &v } }
+func hasDefault(v bool) colOpt  { return func(a *columnAssertion) { a.hasDef = &v } }
+func isGenerated(v bool) colOpt { return func(a *columnAssertion) { a.generated = &v } }
+func dataType(name string) colOpt {
+	return func(a *columnAssertion) { a.udtName = name }
+}
+
+func assertColumn(ctx context.Context, t *testing.T, pool *pgxpool.Pool, schema, table, column string, opts ...colOpt) {
+	t.Helper()
+	a := columnAssertion{}
+	for _, o := range opts {
+		o(&a)
+	}
+
+	const q = `
+		SELECT
+			is_nullable,
+			column_default,
+			COALESCE(is_generated, 'NEVER'),
+			udt_name
+		FROM information_schema.columns
+		WHERE table_schema = $1 AND table_name = $2 AND column_name = $3`
+
+	var (
+		isNullable    string
+		columnDefault *string
+		isGen         string
+		udt           string
+	)
+	if err := pool.QueryRow(ctx, q, schema, table, column).Scan(&isNullable, &columnDefault, &isGen, &udt); err != nil {
+		t.Errorf("introspect %s.%s.%s: %v", schema, table, column, err)
+		return
+	}
+
+	if a.notNull != nil {
+		got := isNullable == "NO"
+		if got != *a.notNull {
+			t.Errorf("%s.%s.%s NOT NULL: want=%v got=%v", schema, table, column, *a.notNull, got)
+		}
+	}
+	if a.hasDef != nil {
+		got := columnDefault != nil
+		if got != *a.hasDef {
+			t.Errorf("%s.%s.%s has default: want=%v got=%v (default=%v)", schema, table, column, *a.hasDef, got, derefStr(columnDefault))
+		}
+	}
+	if a.generated != nil {
+		got := isGen == "ALWAYS"
+		if got != *a.generated {
+			t.Errorf("%s.%s.%s generated: want=%v got=%q", schema, table, column, *a.generated, isGen)
+		}
+	}
+	if a.udtName != "" && udt != a.udtName {
+		t.Errorf("%s.%s.%s data type: want=%s got=%s", schema, table, column, a.udtName, udt)
+	}
+}
+
+func derefStr(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return *s
+}
