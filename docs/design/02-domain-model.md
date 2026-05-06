@@ -1,6 +1,9 @@
 # §2 — Domain model
 
 Decided 2026-05-06 in design session.
+Updated 2026-05-06: locked **UUIDv7** as the UUID generation flavor for
+all PKs (RFC 9562). See "Catalog numbering" decision and the schema
+sketch note below.
 
 ## Summary
 
@@ -22,11 +25,23 @@ typed Go structs keep that data disciplined at the application boundary.
 - **Single `specimens` table with `type` enum + JSONB `type_data`.** Common
   columns are shared; type-specific fields live in JSONB validated against
   Go structs (`MineralData`, `RockData`, `MeteoriteData`).
-- **Catalog numbering: UUID PK + nullable human `catalog_number`.** UUIDs
-  in URLs (immutable, never collide). `catalog_number` is a unique nullable
-  text column the overseer fills in when desired. Specimens can be created
-  without one. Auto-generation (e.g. `FD-2026-0042`) is a future
-  enhancement, not v1.
+- **Catalog numbering: UUIDv7 PK + nullable human `catalog_number`.**
+  UUIDs in URLs (immutable, never collide, system-generated).
+  `catalog_number` is a unique nullable text column the overseer fills in
+  when desired. Specimens can be created without one. Auto-generation
+  (e.g. `FD-2026-0042`) is a future enhancement, not v1.
+
+  **UUIDv7 specifically** (RFC 9562, finalized 2024) — 48-bit
+  Unix-millisecond timestamp prefix + random suffix. Time-ordered like
+  bigserial (B-tree-friendly, append-locality on insert), globally unique
+  like UUIDv4 (no central allocator, opaque to clients). Within a few
+  percent of bigserial performance at scale; vastly better than UUIDv4
+  whose random distribution causes index fragmentation and page splits.
+
+  Tradeoff: UUIDv7 reveals creation timestamp to anyone who can see the
+  UUID. For v1 (single overseer, private specimens served only to
+  authenticated requests) this is a non-concern. Re-evaluate this
+  property when public sharing of specimens lands.
 - **Locality: `locality_text` (free-form, primary display) + `locality`
   JSONB (optional structured fields).** Structured shape:
   `{country, region, site, lat, lon, mindat_id}`, all optional. Search and
@@ -49,6 +64,10 @@ typed Go structs keep that data disciplined at the application boundary.
 This is the shape we're committing to; exact column names and types may be
 refined when migrations land. Authoritative artifact is the migration
 files in `migrations/`, not this document.
+
+Postgres column type is `uuid` (a 16-byte storage type, agnostic to which
+UUID flavor produced the value). The application generates **UUIDv7** for
+all new rows; the storage type is the same.
 
 ```
 specimens
