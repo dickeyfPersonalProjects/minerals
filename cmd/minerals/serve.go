@@ -109,6 +109,7 @@ func runServe(_ []string) error {
 		WebHandler:      web.Handler(),
 		Collectors:      db.NewCollectorPostgres(pool),
 		Photos:          photoDeps,
+		Specimens:       db.NewSpecimenPostgres(pool),
 	}
 	handler := api.New(deps)
 

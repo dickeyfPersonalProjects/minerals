@@ -5,14 +5,6 @@ import "github.com/jackc/pgx/v5/pgxpool"
 // Placeholder repository structs. Subsequent feature beads add real
 // CRUD methods that satisfy the interfaces in internal/domain.
 
-// SpecimenPostgres is the Postgres-backed domain.SpecimenRepo.
-type SpecimenPostgres struct{ pool *pgxpool.Pool }
-
-// NewSpecimenPostgres constructs a SpecimenPostgres bound to pool.
-func NewSpecimenPostgres(pool *pgxpool.Pool) *SpecimenPostgres {
-	return &SpecimenPostgres{pool: pool}
-}
-
 // JournalEntryPostgres is the Postgres-backed domain.JournalEntryRepo.
 type JournalEntryPostgres struct{ pool *pgxpool.Pool }
 
@@ -24,3 +16,4 @@ func NewJournalEntryPostgres(pool *pgxpool.Pool) *JournalEntryPostgres {
 // CollectorPostgres lives in collector_postgres.go (mi-yvt / B-1).
 // FilePostgres lives in file_postgres.go (mi-jpu / B-3).
 // PhotoPostgres lives in photo_postgres.go (mi-jpu / B-3).
+// SpecimenPostgres lives in specimen_postgres.go (mi-quf / B-2).

@@ -94,6 +94,55 @@ export interface paths {
         patch: operations["patch-photo"];
         trace?: never;
     };
+    "/api/v1/specimens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List specimens
+         * @description Cursor-paginated list of specimens. Default ordering is `created_at DESC, id DESC`. When `?q=` is present, ordering switches to `ts_rank DESC, created_at DESC, id DESC` and a cursor previously issued under default ordering is rejected (clients discard cursors when filters or `q` change). `?collector_id=` is accepted but currently returns an empty page (B-2 stub; B-4 will populate the linkage).
+         */
+        get: operations["list-specimens"];
+        put?: never;
+        /**
+         * Create a specimen
+         * @description Creates a new specimen. Returns 409 when `catalog_number` is non-unique. The `type` field is immutable after creation (see PATCH).
+         */
+        post: operations["create-specimen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/specimens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a specimen by id */
+        get: operations["get-specimen"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a specimen
+         * @description Deletes the specimen. Cascades to specimen_collectors. Returns 409 when the specimen still has photos or journal entries (those cascades are deferred to B-3 and beyond).
+         */
+        delete: operations["delete-specimen"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a specimen
+         * @description Partial update; omitted fields keep previous values. `type_data` is merged at the top level. Sending a `type` that differs from the stored value is rejected with 409 (specimen reclassification means delete + recreate per design §2).
+         */
+        patch: operations["patch-specimen"];
+        trace?: never;
+    };
     "/api/v1/specimens/{id}/photos": {
         parameters: {
             query?: never;
@@ -257,12 +306,103 @@ export interface components {
             /** @description Optional free-form notes. */
             notes?: string;
         };
+        CreateSpecimenBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/CreateSpecimenBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: date-time
+             * @description Acquisition date.
+             */
+            acquired_at?: string;
+            /** @description Where the specimen was acquired. */
+            acquired_from?: string;
+            /** @description Optional unique catalog number. */
+            catalog_number?: string;
+            /** @description Markdown description; defaults to empty. */
+            description?: string;
+            /** @description Structured dimensions. */
+            dimensions?: components["schemas"]["Dimensions"];
+            /** @description Structured locality. */
+            locality?: components["schemas"]["Locality"];
+            /** @description Free-form locality. */
+            locality_text?: string;
+            /**
+             * Format: double
+             * @description Mass in grams.
+             */
+            mass_g?: number;
+            /** @description Display name. */
+            name: string;
+            /**
+             * Format: int64
+             * @description Acquisition price in cents.
+             */
+            price_cents?: number;
+            /** @description Free-form provenance notes. */
+            source_notes?: string;
+            /**
+             * @description Specimen kind. Immutable after creation.
+             * @enum {string}
+             */
+            type: "mineral" | "rock" | "meteorite";
+            /** @description Type-specific fields; shape selected by the type field. */
+            type_data?: components["schemas"]["MineralData"] | components["schemas"]["RockData"] | components["schemas"]["MeteoriteData"];
+            /**
+             * @description Sharing visibility; defaults to private.
+             * @enum {string}
+             */
+            visibility?: "private" | "unlisted" | "public";
+        };
+        Dimensions: {
+            /** Format: double */
+            height_mm?: number;
+            /** Format: double */
+            length_mm?: number;
+            /** Format: double */
+            width_mm?: number;
+        };
         FormFile: {
             ContentType: string;
             Filename: string;
             IsSet: boolean;
             /** Format: int64 */
             Size: number;
+        };
+        Locality: {
+            country?: string;
+            /** Format: double */
+            lat?: number;
+            /** Format: double */
+            lon?: number;
+            mindat_id?: string;
+            region?: string;
+            site?: string;
+        };
+        MeteoriteData: {
+            classification?: string;
+            fall_or_find?: string;
+            /** Format: date-time */
+            fall_or_find_date?: string;
+            metbull_ref?: string;
+            official_name?: string;
+            /** Format: double */
+            total_known_weight_g?: number;
+        };
+        MineralData: {
+            chemical_formula?: string;
+            color?: string;
+            crystal_system?: string;
+            fluorescence?: string;
+            luster?: string;
+            mindat_id?: string;
+            mineral_species?: string[] | null;
+            /** Format: double */
+            mohs_hardness?: number;
+            radioactive?: boolean;
         };
         PatchCollectorBody: {
             /**
@@ -293,6 +433,57 @@ export interface components {
              * @description New taken_at; pass null to clear, omit to leave unchanged.
              */
             taken_at?: string;
+        };
+        PatchSpecimenBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/PatchSpecimenBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: date-time
+             * @description Omit to leave unchanged.
+             */
+            acquired_at?: string;
+            /** @description Omit to leave unchanged. */
+            acquired_from?: string;
+            /** @description Omit to leave unchanged; pass null to clear. */
+            catalog_number?: string;
+            /** @description Omit to leave unchanged. */
+            description?: string;
+            /** @description Omit to leave unchanged. */
+            dimensions?: components["schemas"]["Dimensions"];
+            /** @description Omit to leave unchanged. */
+            locality?: components["schemas"]["Locality"];
+            /** @description Omit to leave unchanged. */
+            locality_text?: string;
+            /**
+             * Format: double
+             * @description Omit to leave unchanged.
+             */
+            mass_g?: number;
+            /** @description Omit to leave unchanged. */
+            name?: string;
+            /**
+             * Format: int64
+             * @description Omit to leave unchanged.
+             */
+            price_cents?: number;
+            /** @description Omit to leave unchanged. */
+            source_notes?: string;
+            /**
+             * @description Sending a value other than the stored type is rejected with 409 (immutable per design §2).
+             * @enum {string}
+             */
+            type?: "mineral" | "rock" | "meteorite";
+            /** @description Top-level merge: present keys overwrite, explicit null clears, omitted keys preserved. */
+            type_data?: components["schemas"]["MineralData"] | components["schemas"]["RockData"] | components["schemas"]["MeteoriteData"];
+            /**
+             * @description Omit to leave unchanged.
+             * @enum {string}
+             */
+            visibility?: "private" | "unlisted" | "public";
         };
         PhotoListBody: {
             /**
@@ -359,6 +550,88 @@ export interface components {
             ok: boolean;
             /** Format: int64 */
             version?: number;
+        };
+        RockData: {
+            composition?: string;
+            formation_context?: string;
+            rock_type?: string;
+        };
+        SpecimenListBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/SpecimenListBody.json
+             */
+            readonly $schema?: string;
+            /** @description Page of specimens. */
+            items: components["schemas"]["SpecimenView"][] | null;
+            /** @description Cursor for the next page; null at end of results. */
+            next_cursor: string | null;
+        };
+        SpecimenView: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/SpecimenView.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: date-time
+             * @description Acquisition date (RFC 3339, time component ignored).
+             */
+            acquired_at: string | null;
+            /** @description Where the specimen was acquired (free text). */
+            acquired_from: string | null;
+            /** @description UUID of the user who created the row (CONTRACT.md §13). */
+            author_id: string;
+            /** @description Optional human catalog number; unique across all specimens when set. */
+            catalog_number: string | null;
+            /**
+             * Format: date-time
+             * @description RFC 3339 creation timestamp.
+             */
+            created_at: string;
+            /** @description Markdown description; defaults to empty string. */
+            description: string;
+            /** @description Optional structured dimensions. */
+            dimensions: components["schemas"]["Dimensions"];
+            /** @description UUIDv7 primary key. */
+            id: string;
+            /** @description Optional structured locality. */
+            locality: components["schemas"]["Locality"];
+            /** @description Free-form locality (primary display). */
+            locality_text: string | null;
+            /**
+             * Format: double
+             * @description Mass in grams.
+             */
+            mass_g: number | null;
+            /** @description Display name. */
+            name: string;
+            /**
+             * Format: int64
+             * @description Acquisition price in cents.
+             */
+            price_cents: number | null;
+            /** @description Free-form provenance notes. */
+            source_notes: string | null;
+            /**
+             * @description Specimen kind discriminator (immutable after creation).
+             * @enum {string}
+             */
+            type: "mineral" | "rock" | "meteorite";
+            /** @description Type-specific fields; shape governed by the parent type field. */
+            type_data: components["schemas"]["MineralData"] | components["schemas"]["RockData"] | components["schemas"]["MeteoriteData"];
+            /**
+             * Format: date-time
+             * @description RFC 3339 last-update timestamp.
+             */
+            updated_at: string;
+            /**
+             * @description Sharing visibility.
+             * @enum {string}
+             */
+            visibility: "private" | "unlisted" | "public";
         };
     };
     responses: never;
@@ -862,6 +1135,375 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "list-specimens": {
+        parameters: {
+            query?: {
+                /** @description Page size (1-200; defaults to 50, values above 200 silently clamped). */
+                limit?: number;
+                /** @description Opaque pagination cursor returned by the previous page (CONTRACT.md §10.3). */
+                cursor?: string;
+                /** @description Filter by specimen type. */
+                type?: "mineral" | "rock" | "meteorite";
+                /** @description Filter by visibility. */
+                visibility?: "private" | "unlisted" | "public";
+                /** @description true returns rows with a catalog_number set; false returns rows without. Omit to disable the filter. */
+                has_catalog_number?: "true" | "false";
+                /** @description Inclusive lower bound on acquired_at (YYYY-MM-DD). */
+                acquired_after?: string;
+                /** @description Inclusive upper bound on acquired_at (YYYY-MM-DD). */
+                acquired_before?: string;
+                /** @description Filter by collector. STUB in v1 (B-2): the param is accepted but always returns an empty page until the specimen↔collector linkage is wired by B-4 (mi-jpu sibling). */
+                collector_id?: string;
+                /** @description Full-text search; when present, ordering switches to ts_rank DESC and any cursor previously issued under default ordering becomes invalid. */
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecimenListBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "create-specimen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSpecimenBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecimenView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "get-specimen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Specimen UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecimenView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "delete-specimen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Specimen UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "patch-specimen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Specimen UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchSpecimenBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecimenView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

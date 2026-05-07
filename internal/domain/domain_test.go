@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -25,5 +26,62 @@ func TestNewID_ProducesDistinctValues(t *testing.T) {
 			t.Fatalf("NewID returned a duplicate at iter %d: %s", i, id)
 		}
 		seen[id] = struct{}{}
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestMineralData_Validate(t *testing.T) {
+	// Empty struct (all pointers nil) is valid — type_data fields
+	// are sparse/optional in v1.
+	if err := (MineralData{}).Validate(); err != nil {
+		t.Errorf("empty MineralData.Validate(): %v", err)
+	}
+	good := MineralData{MohsHardness: ptr(7.5), Color: ptr("blue")}
+	if err := good.Validate(); err != nil {
+		t.Errorf("good MineralData.Validate(): %v", err)
+	}
+
+	bad := MineralData{MohsHardness: ptr(11.5)}
+	err := bad.Validate()
+	if !errors.Is(err, ErrSpecimenTypeDataInvalid) {
+		t.Errorf("MohsHardness=11.5: got %v, want ErrSpecimenTypeDataInvalid", err)
+	}
+	negative := MineralData{MohsHardness: ptr(-1.0)}
+	if err := negative.Validate(); !errors.Is(err, ErrSpecimenTypeDataInvalid) {
+		t.Errorf("MohsHardness=-1: got %v, want ErrSpecimenTypeDataInvalid", err)
+	}
+}
+
+func TestRockData_Validate(t *testing.T) {
+	if err := (RockData{}).Validate(); err != nil {
+		t.Errorf("empty RockData.Validate(): %v", err)
+	}
+	for _, ok := range []string{"igneous", "sedimentary", "metamorphic"} {
+		if err := (RockData{RockType: ptr(ok)}).Validate(); err != nil {
+			t.Errorf("RockData{%q}.Validate(): %v", ok, err)
+		}
+	}
+	err := (RockData{RockType: ptr("plutonic")}).Validate()
+	if !errors.Is(err, ErrSpecimenTypeDataInvalid) {
+		t.Errorf("RockType=plutonic: got %v", err)
+	}
+}
+
+func TestMeteoriteData_Validate(t *testing.T) {
+	if err := (MeteoriteData{}).Validate(); err != nil {
+		t.Errorf("empty MeteoriteData.Validate(): %v", err)
+	}
+	if err := (MeteoriteData{FallOrFind: ptr("fall")}).Validate(); err != nil {
+		t.Errorf("FallOrFind=fall: %v", err)
+	}
+	if err := (MeteoriteData{FallOrFind: ptr("find")}).Validate(); err != nil {
+		t.Errorf("FallOrFind=find: %v", err)
+	}
+	if err := (MeteoriteData{FallOrFind: ptr("crashed")}).Validate(); !errors.Is(err, ErrSpecimenTypeDataInvalid) {
+		t.Errorf("FallOrFind=crashed: got %v", err)
+	}
+	if err := (MeteoriteData{TotalKnownWeightG: ptr(-5.0)}).Validate(); !errors.Is(err, ErrSpecimenTypeDataInvalid) {
+		t.Errorf("TotalKnownWeightG<0: got %v", err)
 	}
 }
