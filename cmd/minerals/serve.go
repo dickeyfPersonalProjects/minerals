@@ -143,9 +143,9 @@ func verifySchemaVersion(ctx context.Context, dbURL string) error {
 	}
 	if cur != expected {
 		return fmt.Errorf(
-			"schema version mismatch: binary expects v%d, database is at v%d. "+
-				"In development, run: make migrate-up. "+
-				"In production, run the migrate Job before rolling the deployment.",
+			"schema version mismatch: binary expects v%d, database is at v%d "+
+				"(in development, run: make migrate-up; "+
+				"in production, run the migrate Job before rolling the deployment)",
 			expected, cur)
 	}
 	slog.Info("schema version verified", "version", cur)
