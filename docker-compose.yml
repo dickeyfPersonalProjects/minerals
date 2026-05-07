@@ -1,11 +1,29 @@
 # Dev services per CONTRACT.md §2 (top-level structure) and §3
 # (local dev workflow). Defaults match internal/config/config.go
-# and the §15 env var inventory; running `make migrate-up` and
-# `make run` against this compose stack should work with no .env.
+# and the §15 env var inventory.
 #
-# Production runs on k3s via kustomize/base/ + a separate GitOps
-# repo; this file is dev-only (CONTRACT §2 forbids a prod compose
-# variant).
+# Two operating modes (CONTRACT §3):
+#
+#   1. Standard onboarding (full stack):
+#        docker compose up -d        # postgres + minio + migrate + app on :8080
+#
+#   2. Hot-reload dev (deps only — host runs `make run` and Vite):
+#        docker compose up -d postgres minio
+#        # then `make run` and `cd frontend && npm run dev` on the host
+#
+# Migrations: the `app` service auto-applies pending migrations on
+# startup whenever ENV=dev (see cmd/minerals/serve.go autoMigrateDev,
+# mi-8ky). This is the bead's "entrypoint shim" choice — preferred over
+# a separate `migrate` init container because (a) it keeps the
+# Dockerfile's ENTRYPOINT/CMD generic and the runtime image distroless
+# (no shell to chain commands), and (b) avoids the
+# `service_completed_successfully` dependency pattern that podman-compose
+# 1.0.6 doesn't reliably handle. In prod (ENV=prod) the schema is still
+# owned by the separate migrate Job per design §6.4 — `serve` does NOT
+# auto-migrate there.
+#
+# Production runs on k3s via kustomize/base/ + a separate GitOps repo;
+# this file is dev-only (CONTRACT §2 forbids a prod compose variant).
 
 services:
   postgres:
@@ -45,6 +63,30 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  app:
+    # Built from the local Dockerfile so `docker compose up -d` always
+    # runs the working-tree code (no ghcr pull, no version drift).
+    # On startup, the binary auto-applies pending migrations because
+    # ENV=dev (see header comment).
+    build:
+      context: .
+    image: minerals-app:dev
+    container_name: minerals-app
+    environment:
+      DATABASE_URL: postgres://minerals:minerals@postgres:5432/minerals?sslmode=disable
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_BUCKET: minerals-dev
+      ENV: dev
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
 # The minerals-dev bucket is auto-created by the Go binary on dev
 # startup (see cmd/minerals/serve.go and internal/storage.EnsureBucket

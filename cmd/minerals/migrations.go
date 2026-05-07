@@ -135,6 +135,28 @@ func toPgxMigrateURL(dbURL string) (string, error) {
 	return u.String(), nil
 }
 
+// autoMigrateDev applies any pending migrations against dbURL. It is
+// only called from the dev startup path (mi-8ky / serve.go) so that a
+// fresh `docker compose up -d` lands a usable app on :8080 without
+// requiring a separate `make migrate-up` first. In prod the schema is
+// owned by the migrate Job per design §6.4 — this function is not
+// invoked there. A no-op (nil) when migrations/ is empty or already
+// at the highest version.
+func autoMigrateDev(ctx context.Context, dbURL string) error {
+	m, err := newMigrate(ctx, dbURL)
+	if err != nil {
+		return err
+	}
+	defer func() { _, _ = m.Close() }()
+	if err := m.Up(); err != nil {
+		if errors.Is(err, migrate.ErrNoChange) {
+			return nil
+		}
+		return fmt.Errorf("migrate up: %w", err)
+	}
+	return nil
+}
+
 // schemaVersion reports the current applied migration version. If no
 // migrations have been applied (or migrations/ is empty), returns
 // (0, false, nil).
