@@ -48,6 +48,7 @@ type Deps struct {
 	SchemaVersion   SchemaVersionFn
 	ExpectedVersion uint
 	WebHandler      http.Handler // SPA fallback handler
+	Specimens       SpecimensDeps
 }
 
 // New returns an http.Handler with the v1 routes wired up. Callers
@@ -73,6 +74,15 @@ func New(deps Deps) http.Handler {
 
 	humaAPI := humago.New(mux, cfg)
 	registerSystemOperations(humaAPI, deps)
+
+	// Protected operations: register via a huma.Group so the auth
+	// middleware (Auth + RequireUser) runs before the handler. The
+	// group shares the underlying mux/registry with humaAPI; the
+	// generated OpenAPI spec at /api/v1/openapi.json includes the
+	// protected operations alongside the public ones.
+	protected := huma.NewGroup(humaAPI)
+	protected.UseMiddleware(humaAuthMiddleware)
+	registerSpecimenOperations(protected, deps.Specimens)
 
 	// Protected /api/v1/* fallback. Real handlers land in feature
 	// beads; for now any unmatched /api/v1/ path falls through to a

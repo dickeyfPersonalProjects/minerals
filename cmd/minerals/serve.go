@@ -77,12 +77,14 @@ func runServe(_ []string) error {
 		return fmt.Errorf("serve: read embedded migrations: %w", err)
 	}
 
+	specimenRepo := db.NewSpecimenPostgres(pool)
 	deps := api.Deps{
 		DB:              dbPinger{pool: pool},
 		Storage:         store,
 		SchemaVersion:   func(ctx context.Context) (uint, bool, error) { return schemaVersion(ctx, cfg.DatabaseURL) },
 		ExpectedVersion: expected,
 		WebHandler:      web.Handler(),
+		Specimens:       api.SpecimensDeps{Repo: specimenRepo, Pool: pool},
 	}
 	handler := api.New(deps)
 

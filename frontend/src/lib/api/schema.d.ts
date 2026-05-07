@@ -24,6 +24,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/specimens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List specimens */
+        get: operations["list-specimens"];
+        put?: never;
+        /** Create a specimen */
+        post: operations["create-specimen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/specimens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a specimen by id */
+        get: operations["get-specimen"];
+        put?: never;
+        post?: never;
+        /** Delete a specimen */
+        delete: operations["delete-specimen"];
+        options?: never;
+        head?: never;
+        /** Update a specimen */
+        patch: operations["patch-specimen"];
+        trace?: never;
+    };
     "/docs": {
         parameters: {
             query?: never;
@@ -88,6 +125,14 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        Dimensions: {
+            /** Format: double */
+            height_mm?: number;
+            /** Format: double */
+            length_mm?: number;
+            /** Format: double */
+            width_mm?: number;
+        };
         ErrorDetail: {
             /** @description Where the error occurred, e.g. 'body.items[3].tags' or 'path.thing-id' */
             location?: string;
@@ -135,6 +180,38 @@ export interface components {
              */
             type: string;
         };
+        Locality: {
+            country?: string;
+            /** Format: double */
+            lat?: number;
+            /** Format: double */
+            lon?: number;
+            mindat_id?: string;
+            region?: string;
+            site?: string;
+        };
+        MeteoriteData: {
+            classification?: string;
+            fall_or_find?: string;
+            /** Format: date-time */
+            fall_or_find_date?: string;
+            metbull_ref?: string;
+            official_name?: string;
+            /** Format: double */
+            total_known_weight_g?: number;
+        };
+        MineralData: {
+            chemical_formula?: string;
+            color?: string;
+            crystal_system?: string;
+            fluorescence?: string;
+            luster?: string;
+            mindat_id?: string;
+            mineral_species?: string[] | null;
+            /** Format: double */
+            mohs_hardness?: number;
+            radioactive?: boolean;
+        };
         ReadyzBody: {
             /**
              * Format: uri
@@ -152,6 +229,109 @@ export interface components {
             ok: boolean;
             /** Format: int64 */
             version?: number;
+        };
+        RockData: {
+            composition?: string;
+            formation_context?: string;
+            rock_type?: string;
+        };
+        SpecimenCreateBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/SpecimenCreateBody.json
+             */
+            readonly $schema?: string;
+            /** Format: date */
+            acquired_at?: string;
+            acquired_from?: string;
+            catalog_number?: string;
+            description?: string;
+            dimensions?: components["schemas"]["Dimensions"];
+            locality?: components["schemas"]["Locality"];
+            locality_text?: string;
+            /** Format: double */
+            mass_g?: number;
+            name: string;
+            /** Format: int64 */
+            price_cents?: number;
+            source_notes?: string;
+            /**
+             * @description discriminator for type_data
+             * @enum {string}
+             */
+            type: "mineral" | "rock" | "meteorite";
+            /** @description Polymorphic type-specific fields. The matching variant is determined by the parent specimen's `type`: MineralData when type=mineral, RockData when type=rock, MeteoriteData when type=meteorite. Server-side validation enforces the matching shape after dispatching on `type`. */
+            type_data?: components["schemas"]["MineralData"] | components["schemas"]["RockData"] | components["schemas"]["MeteoriteData"];
+            /** @enum {string} */
+            visibility?: "private" | "unlisted" | "public";
+        };
+        SpecimenPatchBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/SpecimenPatchBody.json
+             */
+            readonly $schema?: string;
+            /** Format: date */
+            acquired_at?: string;
+            acquired_from?: string;
+            catalog_number?: string;
+            description?: string;
+            dimensions?: components["schemas"]["Dimensions"];
+            locality?: components["schemas"]["Locality"];
+            locality_text?: string;
+            /** Format: double */
+            mass_g?: number;
+            name?: string;
+            /** Format: int64 */
+            price_cents?: number;
+            source_notes?: string;
+            type?: string;
+            type_data?: unknown;
+            /** @enum {string} */
+            visibility?: "private" | "unlisted" | "public";
+        };
+        SpecimenView: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/SpecimenView.json
+             */
+            readonly $schema?: string;
+            acquired_at?: string;
+            acquired_from?: string;
+            author_id: string;
+            catalog_number?: string;
+            /** Format: date-time */
+            created_at: string;
+            description: string;
+            dimensions?: components["schemas"]["Dimensions"];
+            id: string;
+            locality?: components["schemas"]["Locality"];
+            locality_text?: string;
+            /** Format: double */
+            mass_g?: number;
+            name: string;
+            /** Format: int64 */
+            price_cents?: number;
+            source_notes?: string;
+            type: string;
+            /** @description Polymorphic type-specific fields. The matching variant is determined by the parent specimen's `type`: MineralData when type=mineral, RockData when type=rock, MeteoriteData when type=meteorite. Server-side validation enforces the matching shape after dispatching on `type`. */
+            type_data: components["schemas"]["MineralData"] | components["schemas"]["RockData"] | components["schemas"]["MeteoriteData"];
+            /** Format: date-time */
+            updated_at: string;
+            visibility: string;
+        };
+        SpecimensListBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/SpecimensListBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["SpecimenView"][] | null;
+            next_cursor: string | null;
         };
     };
     responses: never;
@@ -177,6 +357,193 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-specimens": {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string;
+                type?: "mineral" | "rock" | "meteorite";
+                visibility?: "private" | "unlisted" | "public";
+                has_catalog_number?: "true" | "false";
+                acquired_after?: string;
+                acquired_before?: string;
+                q?: string;
+                /** @description v1 stub: returns empty list pending B-4 */
+                collector_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecimensListBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-specimen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpecimenCreateBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecimenView"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-specimen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecimenView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-specimen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "patch-specimen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpecimenPatchBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecimenView"];
+                };
             };
             /** @description Error */
             default: {

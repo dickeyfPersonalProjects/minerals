@@ -145,7 +145,9 @@ func TestHSTSOnlyOverHTTPS(t *testing.T) {
 func TestApiV1NotFoundReturnsEnvelope(t *testing.T) {
 	h := New(Deps{})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/specimens/abc", nil)
+	// Path with no registered route hits the protected catch-all and
+	// must surface the §10 envelope.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/no-such-resource", nil)
 	h.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNotFound {

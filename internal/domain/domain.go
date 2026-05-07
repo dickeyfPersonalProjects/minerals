@@ -56,16 +56,18 @@ type Tx interface {
 // Sentinel errors returned from repo boundaries (per §11). Handlers
 // branch on these via errors.Is, never on pgx internals.
 var (
-	ErrSpecimenNotFound     = fmt.Errorf("specimen not found")
-	ErrSpecimenConflict     = fmt.Errorf("specimen conflict")
-	ErrPhotoNotFound        = fmt.Errorf("photo not found")
-	ErrPhotoConflict        = fmt.Errorf("photo conflict")
-	ErrJournalEntryNotFound = fmt.Errorf("journal entry not found")
-	ErrJournalEntryConflict = fmt.Errorf("journal entry conflict")
-	ErrFileNotFound         = fmt.Errorf("file not found")
-	ErrFileConflict         = fmt.Errorf("file conflict")
-	ErrCollectorNotFound    = fmt.Errorf("collector not found")
-	ErrCollectorConflict    = fmt.Errorf("collector conflict")
+	ErrSpecimenNotFound      = fmt.Errorf("specimen not found")
+	ErrSpecimenConflict      = fmt.Errorf("specimen conflict")
+	ErrSpecimenReferenced    = fmt.Errorf("specimen referenced by children")
+	ErrSpecimenTypeImmutable = fmt.Errorf("specimen type is immutable")
+	ErrPhotoNotFound         = fmt.Errorf("photo not found")
+	ErrPhotoConflict         = fmt.Errorf("photo conflict")
+	ErrJournalEntryNotFound  = fmt.Errorf("journal entry not found")
+	ErrJournalEntryConflict  = fmt.Errorf("journal entry conflict")
+	ErrFileNotFound          = fmt.Errorf("file not found")
+	ErrFileConflict          = fmt.Errorf("file conflict")
+	ErrCollectorNotFound     = fmt.Errorf("collector not found")
+	ErrCollectorConflict     = fmt.Errorf("collector conflict")
 )
 
 // Page is the cursor-pagination request shape (per §10).
@@ -77,12 +79,16 @@ type Page struct {
 // Cursor is the opaque pagination cursor returned by list queries.
 type Cursor string
 
-// SpecimenFilter holds the v1 list filters (per design §4.4).
+// SpecimenFilter holds the v1 list filters (per design §4.4 +
+// CONTRACT §10.4).
 type SpecimenFilter struct {
-	Type        *SpecimenType
-	Visibility  *Visibility
-	CollectorID *uuid.UUID
-	Query       string
+	Type             *SpecimenType
+	Visibility       *Visibility
+	CollectorID      *uuid.UUID
+	HasCatalogNumber *bool   // tri-state: nil = ignore, true/false = filter
+	AcquiredAfter    *string // YYYY-MM-DD inclusive lower bound
+	AcquiredBefore   *string // YYYY-MM-DD inclusive upper bound
+	Query            string
 }
 
 // Locality is the structured side of specimens.locality. All fields
