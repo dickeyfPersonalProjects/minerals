@@ -62,6 +62,10 @@ type Deps struct {
 	// nil leaves /api/v1/specimens unregistered; the catch-all 404
 	// handles requests in that case.
 	Specimens domain.SpecimenRepo
+	// Journal is wired with a real repo + the §17 markdown renderer
+	// in production (mi-y6b / C-1). nil leaves /api/v1/journal and
+	// /api/v1/specimens/{id}/journal unregistered.
+	Journal *JournalServiceDeps
 }
 
 // New returns an http.Handler with the v1 routes wired up. Callers
@@ -95,12 +99,16 @@ func New(deps Deps) http.Handler {
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "specimens", Description: "CRUD for the specimens catalog (mi-quf / B-2). type_data shape per design §2.",
 	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "journal", Description: "Per-specimen journal entries with server-rendered markdown (mi-y6b / C-1; CONTRACT.md §17 pipeline).",
+	})
 
 	humaAPI := humago.New(mux, cfg)
 	registerSystemOperations(humaAPI, deps)
 	registerCollectorOperations(humaAPI, deps.Collectors)
 	registerPhotoOperations(humaAPI, mux, deps.Photos)
 	registerSpecimenOperations(humaAPI, deps.Specimens)
+	registerJournalOperations(humaAPI, deps.Journal)
 
 	// Protected /api/v1/* fallback. Real handlers land in feature
 	// beads; for now any unmatched /api/v1/ path falls through to a
