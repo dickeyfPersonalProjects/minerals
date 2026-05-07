@@ -56,17 +56,20 @@ type Tx interface {
 // Sentinel errors returned from repo boundaries (per §11). Handlers
 // branch on these via errors.Is, never on pgx internals.
 var (
-	ErrSpecimenNotFound     = fmt.Errorf("specimen not found")
-	ErrSpecimenConflict     = fmt.Errorf("specimen conflict")
-	ErrPhotoNotFound        = fmt.Errorf("photo not found")
-	ErrPhotoConflict        = fmt.Errorf("photo conflict")
-	ErrJournalEntryNotFound = fmt.Errorf("journal entry not found")
-	ErrJournalEntryConflict = fmt.Errorf("journal entry conflict")
-	ErrFileNotFound         = fmt.Errorf("file not found")
-	ErrFileConflict         = fmt.Errorf("file conflict")
-	ErrCollectorNotFound    = fmt.Errorf("collector not found")
-	ErrCollectorConflict    = fmt.Errorf("collector conflict")
-	ErrCollectorReferenced  = fmt.Errorf("collector referenced")
+	ErrSpecimenNotFound        = fmt.Errorf("specimen not found")
+	ErrSpecimenConflict        = fmt.Errorf("specimen conflict")
+	ErrSpecimenReferenced      = fmt.Errorf("specimen referenced")
+	ErrSpecimenTypeImmutable   = fmt.Errorf("specimen type immutable")
+	ErrSpecimenTypeDataInvalid = fmt.Errorf("specimen type_data invalid")
+	ErrPhotoNotFound           = fmt.Errorf("photo not found")
+	ErrPhotoConflict           = fmt.Errorf("photo conflict")
+	ErrJournalEntryNotFound    = fmt.Errorf("journal entry not found")
+	ErrJournalEntryConflict    = fmt.Errorf("journal entry conflict")
+	ErrFileNotFound            = fmt.Errorf("file not found")
+	ErrFileConflict            = fmt.Errorf("file conflict")
+	ErrCollectorNotFound       = fmt.Errorf("collector not found")
+	ErrCollectorConflict       = fmt.Errorf("collector conflict")
+	ErrCollectorReferenced     = fmt.Errorf("collector referenced")
 )
 
 // Page is the cursor-pagination request shape (per §10).
@@ -86,10 +89,13 @@ type CollectorFilter struct {
 
 // SpecimenFilter holds the v1 list filters (per design §4.4).
 type SpecimenFilter struct {
-	Type        *SpecimenType
-	Visibility  *Visibility
-	CollectorID *uuid.UUID
-	Query       string
+	Type             *SpecimenType
+	Visibility       *Visibility
+	CollectorID      *uuid.UUID
+	Query            string
+	HasCatalogNumber *bool
+	AcquiredAfter    *time.Time
+	AcquiredBefore   *time.Time
 }
 
 // Locality is the structured side of specimens.locality. All fields
@@ -205,6 +211,54 @@ type MeteoriteData struct {
 	OfficialName      *string    `json:"official_name,omitempty"`
 	TotalKnownWeightG *float64   `json:"total_known_weight_g,omitempty"`
 	MetbullRef        *string    `json:"metbull_ref,omitempty"`
+}
+
+// validRockTypes enumerates the v1 RockData.RockType vocabulary
+// (per design §2's "Type-specific data shapes").
+var validRockTypes = map[string]struct{}{
+	"igneous": {}, "sedimentary": {}, "metamorphic": {},
+}
+
+// validFallOrFind enumerates the v1 MeteoriteData.FallOrFind vocabulary.
+var validFallOrFind = map[string]struct{}{
+	"fall": {}, "find": {},
+}
+
+// Validate checks MineralData invariants beyond JSON-schema shape.
+// Empty pointers (the v1 default) are always valid — the struct is a
+// sparse bag of optional fields.
+func (m MineralData) Validate() error {
+	if m.MohsHardness != nil {
+		if *m.MohsHardness < 0 || *m.MohsHardness > 10 {
+			return fmt.Errorf("%w: mohs_hardness must be in [0,10]", ErrSpecimenTypeDataInvalid)
+		}
+	}
+	return nil
+}
+
+// Validate checks RockData invariants. Empty pointers are valid.
+func (r RockData) Validate() error {
+	if r.RockType != nil {
+		if _, ok := validRockTypes[*r.RockType]; !ok {
+			return fmt.Errorf("%w: rock_type must be one of igneous|sedimentary|metamorphic",
+				ErrSpecimenTypeDataInvalid)
+		}
+	}
+	return nil
+}
+
+// Validate checks MeteoriteData invariants. Empty pointers are valid.
+func (m MeteoriteData) Validate() error {
+	if m.FallOrFind != nil {
+		if _, ok := validFallOrFind[*m.FallOrFind]; !ok {
+			return fmt.Errorf("%w: fall_or_find must be one of fall|find",
+				ErrSpecimenTypeDataInvalid)
+		}
+	}
+	if m.TotalKnownWeightG != nil && *m.TotalKnownWeightG < 0 {
+		return fmt.Errorf("%w: total_known_weight_g must be >= 0", ErrSpecimenTypeDataInvalid)
+	}
+	return nil
 }
 
 // SpecimenRepo is the consumer-side interface for specimens persistence.
