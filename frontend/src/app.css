@@ -1,0 +1,64 @@
+@import 'tailwindcss';
+
+/* Class-based dark mode (CONTRACT.md §7b) — toggled by `.dark` on <html>.
+   Tailwind v4 expresses this as a custom variant; v3-style `darkMode: 'class'`
+   in tailwind.config.js is unnecessary. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Theme palette — CSS variables drive both themes from the same surface. */
+:root {
+  color-scheme: light;
+  --color-bg: oklch(99% 0 0);
+  --color-surface: oklch(97% 0.005 260);
+  --color-surface-2: oklch(94% 0.005 260);
+  --color-border: oklch(88% 0.008 260);
+  --color-text: oklch(20% 0.02 260);
+  --color-text-muted: oklch(45% 0.02 260);
+  --color-accent: oklch(55% 0.16 260);
+  --color-accent-fg: oklch(99% 0 0);
+  --color-mineral: oklch(60% 0.13 220);
+  --color-rock: oklch(55% 0.08 80);
+  --color-meteorite: oklch(45% 0.05 30);
+}
+
+.dark {
+  color-scheme: dark;
+  --color-bg: oklch(16% 0.01 260);
+  --color-surface: oklch(22% 0.012 260);
+  --color-surface-2: oklch(28% 0.014 260);
+  --color-border: oklch(34% 0.014 260);
+  --color-text: oklch(96% 0.005 260);
+  --color-text-muted: oklch(72% 0.012 260);
+  --color-accent: oklch(75% 0.16 260);
+  --color-accent-fg: oklch(16% 0.01 260);
+  --color-mineral: oklch(78% 0.14 220);
+  --color-rock: oklch(75% 0.1 80);
+  --color-meteorite: oklch(72% 0.08 30);
+}
+
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-2: var(--color-surface-2);
+  --color-border: var(--color-border);
+  --color-text: var(--color-text);
+  --color-text-muted: var(--color-text-muted);
+  --color-accent: var(--color-accent);
+  --color-accent-fg: var(--color-accent-fg);
+  --color-mineral: var(--color-mineral);
+  --color-rock: var(--color-rock);
+  --color-meteorite: var(--color-meteorite);
+  --font-sans:
+    'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+html,
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+body {
+  font-family: var(--font-sans);
+  min-height: 100vh;
+}
