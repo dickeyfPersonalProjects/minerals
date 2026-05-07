@@ -1,0 +1,122 @@
+name: PR validation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: minerals
+          POSTGRES_PASSWORD: minerals
+          POSTGRES_DB: minerals
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U minerals"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+
+    env:
+      DATABASE_URL: postgres://minerals:minerals@localhost:5432/minerals?sslmode=disable
+      MINIO_ENDPOINT: http://localhost:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt check
+        run: make SHELL=/bin/bash fmt-check
+
+      - name: go vet
+        run: make vet
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+      - name: Unit tests
+        run: make test
+
+      - name: Detect migrations
+        id: migrations
+        run: |
+          if compgen -G 'migrations/*.up.sql' > /dev/null; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::migrations/ is empty — skipping integration tests"
+          fi
+
+      - name: Integration tests
+        if: steps.migrations.outputs.present == 'true'
+        run: make test-integration
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect frontend
+        id: detect
+        run: |
+          if [ -f frontend/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::frontend/ not present — skipping frontend gates"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.detect.outputs.present == 'true'
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm ci
+        if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: npm ci
+
+      - name: prettier check
+        if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: npx prettier --check .
+
+      - name: eslint
+        if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: npx eslint .
+
+      - name: tests
+        if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: npm test
