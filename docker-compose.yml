@@ -1,0 +1,55 @@
+# Dev services per CONTRACT.md §2 (top-level structure) and §3
+# (local dev workflow). Defaults match internal/config/config.go
+# and the §15 env var inventory; running `make migrate-up` and
+# `make run` against this compose stack should work with no .env.
+#
+# Production runs on k3s via kustomize/base/ + a separate GitOps
+# repo; this file is dev-only (CONTRACT §2 forbids a prod compose
+# variant).
+
+services:
+  postgres:
+    image: docker.io/library/postgres:16
+    container_name: minerals-postgres
+    environment:
+      POSTGRES_USER: minerals
+      POSTGRES_PASSWORD: minerals
+      POSTGRES_DB: minerals
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minerals -d minerals"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    # Pinned tag matches the version used by .github/workflows/main.yml
+    # so CI and local dev exercise the same MinIO build. Bumping this
+    # is fine, but bump both places together.
+    image: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: minerals-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+# The minerals-dev bucket is auto-created by the Go binary on dev
+# startup (see cmd/minerals/serve.go and internal/storage.EnsureBucket
+# per CONTRACT §3, §12). No mc-init sidecar needed.
+
+volumes:
+  postgres-data:
+  minio-data:
