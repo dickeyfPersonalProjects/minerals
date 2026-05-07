@@ -1442,6 +1442,51 @@ import (
   Stores are sufficient for this app's complexity. Reach for more
   only with coordination.
 
+### Styling
+
+- **`tailwindcss` is the sanctioned utility-first CSS framework.**
+  Allowed in `frontend/`. Other frameworks (daisyUI, Bulma,
+  Bootstrap, Material UI) require coordination.
+- Per-component scoped Svelte styles (`<style>` blocks) are still
+  allowed and preferred for component-local overrides that don't
+  fit cleanly in utility classes.
+- Global styles go in `frontend/src/app.css` — typically just the
+  `@tailwind` directives plus minimal CSS variables for the theme
+  palette.
+- A polecat MUST NOT add a CSS-in-JS library (styled-components and
+  equivalents) — Svelte's scoped CSS + tailwind is the contract.
+
+### Theming
+
+The SPA ships with a **dark theme as default** plus a light theme
+toggle. Both themes are first-class:
+
+- **Dark theme is the default applied state on first visit.**
+- A theme toggle MUST be present in the SPA chrome (header or nav).
+- Theme choice MUST persist across page loads (typically via
+  `localStorage` under a stable key like `minerals.theme`).
+- Theme respects the user's `prefers-color-scheme` media query when
+  no explicit choice has been persisted (system preference wins
+  initially; the toggle records an explicit override).
+- Implementation MAY use either `class="dark"` toggling on `<html>`
+  (tailwind's `darkMode: 'class'`) or `data-theme="..."` attributes
+  — polecat picks; document the choice in the relevant PR.
+
+Both themes MUST clear basic legibility / contrast checks (WCAG AA
+contrast ratio for body text). Polecat is not required to run an
+audit tool, but body text against background SHOULD be checked
+visually with a contrast picker.
+
+### Routing
+
+- **`svelte-spa-router`** is the sanctioned client-side router for
+  v1. Hash-based routing (`/#/specimens`, `/#/specimens/{id}`)
+  rather than history-API routing — keeps backend serving simple
+  (the embed.FS handler always serves `index.html` for unknown
+  paths regardless).
+- Route definitions live in `frontend/src/routes/` (one file per
+  top-level route) plus a small `routes.ts` map.
+
 ### API access
 
 - The frontend talks to the backend **only through the generated
@@ -3166,6 +3211,8 @@ Frontend pre-approvals:
 | Linting | `eslint`, `eslint-plugin-svelte` |
 | Formatting | `prettier`, `prettier-plugin-svelte` |
 | OpenAPI client codegen | `openapi-typescript` (devDep) + `openapi-fetch` (runtime) — type-only, no runtime tax (locked in by mi-cy4) |
+| CSS framework | `tailwindcss` (with `@tailwindcss/postcss` or the standard PostCSS pipeline) |
+| Client-side router | `svelte-spa-router` (hash-based) |
 
 A polecat introducing a competitor to anything in these tables
 (e.g. swapping `pgx` for `database/sql` + `lib/pq`, or Svelte
