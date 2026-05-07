@@ -73,6 +73,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/photos/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a photo
+         * @description Removes the photos row, the files row, and all three MinIO objects (original + display + thumbnail). Best-effort MinIO cleanup; DB transaction is the source of truth.
+         */
+        delete: operations["delete-photo"];
+        options?: never;
+        head?: never;
+        /** Update a photo's taken_at and/or position */
+        patch: operations["patch-photo"];
+        trace?: never;
+    };
+    "/api/v1/specimens/{id}/photos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a specimen's photos
+         * @description Cursor-paginated list ordered by (position, created_at) ascending — the manual ordering the user controls.
+         */
+        get: operations["list-specimen-photos"];
+        put?: never;
+        /**
+         * Upload a photo for a specimen
+         * @description Multipart upload (`file` form field). Server-side EXIF allowlist filter (drops GPS, XMP, MakerNotes per CONTRACT.md §12), display + thumbnail variant generation, transactional MinIO + Postgres write.
+         */
+        post: operations["upload-photo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/docs": {
         parameters: {
             query?: never;
@@ -212,6 +257,13 @@ export interface components {
             /** @description Optional free-form notes. */
             notes?: string;
         };
+        FormFile: {
+            ContentType: string;
+            Filename: string;
+            IsSet: boolean;
+            /** Format: int64 */
+            Size: number;
+        };
         PatchCollectorBody: {
             /**
              * Format: uri
@@ -223,6 +275,72 @@ export interface components {
             name?: string;
             /** @description New notes; omit to leave unchanged. Pass JSON null to clear. */
             notes?: string;
+        };
+        PatchPhotoBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/PatchPhotoBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: int64
+             * @description New manual ordering position; omit to leave unchanged.
+             */
+            position?: number;
+            /**
+             * Format: date-time
+             * @description New taken_at; pass null to clear, omit to leave unchanged.
+             */
+            taken_at?: string;
+        };
+        PhotoListBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/PhotoListBody.json
+             */
+            readonly $schema?: string;
+            items: components["schemas"]["PhotoView"][] | null;
+            next_cursor: string | null;
+        };
+        PhotoView: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/PhotoView.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: int64
+             * @description Byte size of the stored original (post EXIF filter).
+             */
+            byte_size: number;
+            /** @description Content-Type stored on the original file. */
+            content_type: string;
+            /**
+             * Format: date-time
+             * @description RFC 3339 creation timestamp.
+             */
+            created_at: string;
+            /** @description UUID of the underlying files row. */
+            file_id: string;
+            /** @description UUIDv7 primary key. */
+            id: string;
+            /**
+             * Format: int64
+             * @description Manual ordering; 1-indexed within the specimen's photos.
+             */
+            position: number;
+            /** @description Hex SHA-256 of the stored original bytes. */
+            sha256: string;
+            /** @description Owning specimen. */
+            specimen_id: string;
+            /**
+             * Format: date-time
+             * @description When the photo was taken; defaulted from EXIF DateTimeOriginal when not provided.
+             */
+            taken_at: string | null;
         };
         ReadyzBody: {
             /**
@@ -626,6 +744,312 @@ export interface operations {
             };
             /** @description Error */
             default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "delete-photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "patch-photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchPhotoBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "list-specimen-photos": {
+        parameters: {
+            query?: {
+                /** @description Page size (1-200; defaults to 50). */
+                limit?: number;
+                /** @description Opaque pagination cursor returned by the previous page. */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoListBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "upload-photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description The image file to upload.
+                     */
+                    file: string;
+                    /** @description Optional ISO 8601 timestamp; defaults to EXIF DateTimeOriginal when present. */
+                    taken_at?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Request Entity Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

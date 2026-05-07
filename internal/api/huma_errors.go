@@ -51,9 +51,33 @@ var installOnce sync.Once
 func installEnvelopeErrors() {
 	installOnce.Do(func() {
 		huma.NewError = func(status int, msg string, errs ...error) huma.StatusError {
+			// Remap MaxBytesReader-triggered errors to 413 with the
+			// §12 envelope; huma surfaces them as 422 by default
+			// because they bubble up through multipart-parse
+			// validation, but the §12 size cap is canonically 413.
+			if isPayloadTooLargeMessage(msg, errs) {
+				return newAPIError(http.StatusRequestEntityTooLarge,
+					"payload_too_large",
+					"upload exceeds the configured size limit", nil)
+			}
 			return newAPIError(status, codeForStatus(status), msg, collectDetails(errs))
 		}
 	})
+}
+
+func isPayloadTooLargeMessage(msg string, errs []error) bool {
+	if strings.Contains(msg, "request body too large") {
+		return true
+	}
+	for _, e := range errs {
+		if e == nil {
+			continue
+		}
+		if strings.Contains(e.Error(), "request body too large") {
+			return true
+		}
+	}
+	return false
 }
 
 // codeForStatus picks a stable snake_case code for each common HTTP

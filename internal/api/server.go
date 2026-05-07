@@ -54,6 +54,10 @@ type Deps struct {
 	// not registered and /api/v1/collectors falls through to the
 	// catch-all 404.
 	Collectors domain.CollectorRepo
+	// Photos is wired with the photo upload pipeline in production
+	// (mi-jpu / B-3). Tests that don't exercise photos leave it nil
+	// and the routes are not registered.
+	Photos *PhotoServiceDeps
 }
 
 // New returns an http.Handler with the v1 routes wired up. Callers
@@ -81,10 +85,14 @@ func New(deps Deps) http.Handler {
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "collectors", Description: "CRUD for the collectors directory (mi-yvt / B-1).",
 	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "photos", Description: "Specimen photo upload, download, variant generation (mi-jpu / B-3).",
+	})
 
 	humaAPI := humago.New(mux, cfg)
 	registerSystemOperations(humaAPI, deps)
 	registerCollectorOperations(humaAPI, deps.Collectors)
+	registerPhotoOperations(humaAPI, mux, deps.Photos)
 
 	// Protected /api/v1/* fallback. Real handlers land in feature
 	// beads; for now any unmatched /api/v1/ path falls through to a

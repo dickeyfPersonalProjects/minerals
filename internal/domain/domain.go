@@ -222,7 +222,12 @@ type PhotoRepo interface {
 	GetByID(ctx context.Context, id uuid.UUID) (Photo, error)
 	Update(ctx context.Context, tx Tx, p Photo) error
 	Delete(ctx context.Context, tx Tx, id uuid.UUID) error
-	ListBySpecimen(ctx context.Context, specimenID uuid.UUID) ([]Photo, error)
+	ListBySpecimen(ctx context.Context, specimenID uuid.UUID, page Page) ([]Photo, Cursor, error)
+	// MaxPosition returns the largest `position` value currently in
+	// use on the specimen's photos, or 0 if there are none. The
+	// service layer uses this to default a new photo's position to
+	// max+1 (per §12 — manual ordering, no auto-shuffle).
+	MaxPosition(ctx context.Context, tx Tx, specimenID uuid.UUID) (int, error)
 }
 
 // JournalEntryRepo is the consumer-side interface for journal_entries
