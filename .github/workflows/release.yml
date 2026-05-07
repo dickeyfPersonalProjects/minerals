@@ -33,14 +33,6 @@ jobs:
           --health-timeout 3s
           --health-retries 10
 
-      minio:
-        image: bitnami/minio:latest
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        ports:
-          - 9000:9000
-
     env:
       DATABASE_URL: postgres://minerals:minerals@localhost:5432/minerals?sslmode=disable
       MINIO_ENDPOINT: http://localhost:9000
@@ -49,6 +41,36 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # MinIO is started via `docker run` rather than a GHA service container
+      # because the official `minio/minio` image requires `server /data` as its
+      # CMD, and GHA service container syntax has no field for CMD/args
+      # (`options:` only forwards `docker create` flags like --entrypoint, which
+      # cannot supply trailing args). The previously-used `bitnami/minio:latest`
+      # tag was removed when Bitnami pulled their public free-tier images.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            --health-cmd 'curl -fsS http://localhost:9000/minio/health/live || exit 1' \
+            --health-interval=5s --health-timeout=3s --health-retries=10 \
+            minio/minio:RELEASE.2025-09-07T16-13-09Z \
+            server /data
+
+      - name: Wait for MinIO ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:9000/minio/health/live >/dev/null; then
+              echo "MinIO ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "MinIO did not become ready in 30s" >&2
+          docker logs minio >&2 || true
+          exit 1
 
       - uses: actions/setup-go@v5
         with:
@@ -62,9 +84,9 @@ jobs:
         run: make vet
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.12.2
           args: --timeout=5m
 
       - name: Unit tests

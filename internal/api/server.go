@@ -137,7 +137,7 @@ func readyzHandler(deps Deps) http.HandlerFunc {
 		}
 		body.Checks["storage"] = storageCheck
 
-		schemaCheck := check{OK: true}
+		var schemaCheck check
 		if deps.SchemaVersion != nil {
 			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 			defer cancel()
