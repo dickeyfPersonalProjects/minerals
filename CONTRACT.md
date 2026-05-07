@@ -439,10 +439,11 @@ This repo declares **what** to run; environment-specific deployment
 configuration lives in a separate GitOps repo. Two locations only:
 
 - **`docker-compose.yml`** at the repo root — single file declaring
-  the dev services (Postgres, MinIO). At the root because that's
-  where `docker compose up -d` and `podman compose up -d` look by
-  default; moving it forces every contributor to type `-f path/...`
-  in every command. The file is dev-only; not used in production.
+  the dev services (Postgres, MinIO, and the `app` build; see §3 for
+  the two operating modes). At the root because that's where
+  `docker compose up -d` and `podman compose up -d` look by default;
+  moving it forces every contributor to type `-f path/...` in every
+  command. The file is dev-only; not used in production.
 - **`kustomize/base/`** at the repo root (when k3s deployment work
   begins) — Kustomize base manifests for the app's Kubernetes
   resources (Deployment, Service, ConfigMap stubs, etc.). **Base
@@ -498,56 +499,71 @@ so you don't need a C toolchain unless you're hacking on something
 that specifically requires it (and per §16, that's not a polecat-level
 decision anyway).
 
-## First-time setup
+## Two operating modes
 
-After cloning the repo:
+Local dev runs in one of two modes. Pick by service selection at
+`docker compose up` time — there are no profiles, no separate compose
+files, no env-var toggles (per the IaC layout rule below).
+
+### Mode A — Standard onboarding (full stack in containers)
+
+The default. `docker compose up -d` (no service args) brings up
+Postgres, MinIO, and the `app` service built from the local
+`Dockerfile`. The app listens on `:8080` and serves the embedded SPA
+— open <http://localhost:8080> from a fresh clone.
 
 ```bash
-# 1. Bring up Postgres + MinIO
-docker compose up -d
-
-# 2. Apply migrations to the fresh DB
-make migrate-up
-
-# 3. Install frontend dependencies
-cd frontend && npm ci && cd ..
-
-# 4. (Optional) Verify the backend builds and the health endpoint works
-make build
-PORT=8080 ./bin/minerals serve &
-curl -fsS http://localhost:8080/healthz   # → "ok"
-kill %1
+git clone <repo-url> minerals && cd minerals
+docker compose up -d                          # OR `make compose-up`
+curl -fsS http://localhost:8080/healthz       # → "ok"
 ```
+
+This is the path a contributor or operator should use for: a
+read-only browse of the running app, smoke-testing a release, or any
+scenario where the working tree is the source of truth and rebuilding
+on every code change is acceptable. The `app` image is rebuilt by
+`docker compose up -d` whenever the Dockerfile context changes; for
+faster iteration, switch to Mode B.
+
+The `serve` subcommand auto-applies pending migrations on startup
+when `ENV=dev`, so a fresh `docker compose up -d` lands a usable app
+on `:8080` without a separate `make migrate-up` step (see
+`cmd/minerals/serve.go autoMigrateDev`). In prod (`ENV=prod`) the
+schema is owned by the separate migrate Job per design §6.4 — `serve`
+does NOT auto-migrate there.
+
+### Mode B — Hot-reload dev (deps in containers, app on the host)
+
+For Vite HMR and fast Go rebuilds, run only Postgres + MinIO in
+containers and run the backend + frontend natively on the host:
+
+```bash
+make compose-deps                             # = docker compose up -d postgres minio
+make migrate-up                               # apply migrations to the dev DB
+cd frontend && npm ci && cd ..                # one-time
+
+# Two terminals:
+make run                                      # backend on :8080
+cd frontend && npm run dev                    # Vite on :5173 (proxies to :8080)
+```
+
+Browse to **http://localhost:5173**. Vite serves the SPA with HMR;
+`/api/...` and `/docs` requests are proxied to `localhost:8080` (the
+host-side Go server) — see design §6.5 for why this is same-origin
+in both dev and prod.
+
+`make run` and the `:5173` Vite proxy collide with Mode A's `app`
+container on `:8080`; pick one mode at a time. To switch from Mode A
+to Mode B, `make compose-down` first (or `docker compose stop app
+migrate`).
 
 The MinIO bucket (`minerals-dev` by default) is auto-created by the
 Go binary on first startup if it doesn't exist — no separate `mc mb`
 needed. The Postgres database (`minerals`) is created by the
-docker-compose container's `POSTGRES_DB` env var.
+postgres container's `POSTGRES_DB` env var.
 
 If any of these steps fails, see "Common issues" below before
 proceeding.
-
-## Daily inner loop
-
-Two terminals, one for each side of the stack:
-
-```bash
-# Terminal 1 — backend
-make run
-
-# Terminal 2 — frontend with HMR
-cd frontend && npm run dev
-```
-
-Browser to **http://localhost:5173**. Vite serves the SPA with HMR;
-`/api/...` and `/docs` requests are proxied through to
-`localhost:8080` (the Go server) — see design §6.5 for why this is
-same-origin in both dev and prod.
-
-If `docker compose up -d` was skipped or the containers were torn
-down, the backend will fail at startup with a clear error pointing
-at the missing dependency (Postgres or MinIO). Bring the containers
-up and retry.
 
 ## Running tests
 
@@ -580,6 +596,11 @@ make migrate-down N=1    roll back N migrations (default 1)
 make migrate-create NAME=add_x   scaffold a new migration pair
 
 make gen-api-client      regenerate the frontend API client from the OpenAPI spec
+
+make compose-up          full stack:  docker compose up -d
+make compose-deps        deps only:   docker compose up -d postgres minio
+make compose-down        tear down:   docker compose down
+make compose-down-v      tear + wipe: docker compose down -v
 ```
 
 A polecat MUST keep the Makefile targets working as the canonical
@@ -591,9 +612,10 @@ this section.
 To wipe the dev DB and MinIO entirely (start fresh):
 
 ```bash
-docker compose down -v       # -v removes the volumes too
-docker compose up -d
-make migrate-up
+make compose-down-v          # -v removes the volumes too
+make compose-up              # in Mode A, the app auto-applies migrations on startup
+# OR for Mode B:
+make compose-deps && make migrate-up
 ```
 
 This is destructive; it loses every specimen, photo, and journal

@@ -1,0 +1,47 @@
+# See CONTRACT §2 ".dockerignore discipline" for the rationale and the
+# rules around what may/must not be added here. Keep this file in sync
+# with that section if you change either.
+
+# VCS and CI metadata
+.git/
+.github/
+.gitignore
+
+# Build outputs (rebuilt inside container stages)
+/bin/
+/dist/
+frontend/dist/
+internal/web/dist/
+
+# Dependencies (rebuilt inside container stages)
+node_modules/
+frontend/node_modules/
+
+# Test and coverage artifacts
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Secrets / env files
+.env
+.env.local
+.env.*.local
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Documentation (not needed at build time; excluded to avoid cache
+# invalidation on doc-only commits — see CONTRACT §2 "Why excluding
+# docs/ and *.md is safe")
+docs/
+*.md
+
+# Gas Town local state
+.dolt-data/
+.beads/
+.runtime/
+.claude/

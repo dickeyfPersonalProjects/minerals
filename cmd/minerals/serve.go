@@ -68,6 +68,16 @@ func runServe(_ []string) error {
 		}
 	}
 
+	if cfg.IsDev() {
+		// Auto-apply pending migrations on dev startup so a fresh
+		// `docker compose up -d` (mi-8ky) lands a usable app on :8080
+		// without requiring a separate `make migrate-up` first. In
+		// prod (ENV=prod) we keep the strict mismatch behavior — the
+		// schema is owned by the migrate Job per design §6.4.
+		if err := autoMigrateDev(rootCtx, cfg.DatabaseURL); err != nil {
+			return fmt.Errorf("serve: auto-migrate (dev): %w", err)
+		}
+	}
 	if err := verifySchemaVersion(rootCtx, cfg.DatabaseURL); err != nil {
 		return err
 	}

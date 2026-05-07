@@ -77,3 +77,23 @@ openapi-spec:
 
 gen-api-client: openapi-spec
 	cd frontend && npx openapi-typescript src/lib/api/openapi.json -o src/lib/api/schema.d.ts
+
+# ── Compose lifecycle (mi-8ky) ────────────────────────────────────
+# Two operating modes per CONTRACT §3:
+#   compose-up   — full stack (postgres + minio + migrate + app on :8080),
+#                  the standard onboarding flow.
+#   compose-deps — deps only (postgres + minio); pair with `make run`
+#                  and `cd frontend && npm run dev` for hot-reload dev.
+.PHONY: compose-up compose-deps compose-down compose-down-v
+
+compose-up:
+	docker compose up -d
+
+compose-deps:
+	docker compose up -d postgres minio
+
+compose-down:
+	docker compose down
+
+compose-down-v:
+	docker compose down -v

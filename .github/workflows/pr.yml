@@ -162,11 +162,15 @@ jobs:
   compose-smoke:
     name: Compose smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
       - name: docker compose up
+        # Per mi-8ky, the default-mode contract is: this single command
+        # brings up postgres + minio + migrate + app, with the app
+        # reachable on :8080. The image build for `app` adds ~1-2 min
+        # on a cold runner; the bumped timeout-minutes accommodates it.
         run: docker compose up -d
 
       - name: Wait for Postgres healthy
@@ -202,6 +206,24 @@ jobs:
 
       - name: MinIO smoke (health/live)
         run: curl -fsS http://localhost:9000/minio/health/live
+
+      - name: Wait for app /healthz
+        # mi-8ky acceptance: default-mode `docker compose up -d` brings
+        # the app up too. App auto-applies migrations on dev startup;
+        # allow up to 120s for the cold-start chain.
+        run: |
+          for i in $(seq 1 120); do
+            body=$(curl -fsS http://localhost:8080/healthz 2>/dev/null || true)
+            if [ "$body" = "ok" ]; then
+              echo "App ready after ${i}s (body: ${body})"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "App did not respond ok on /healthz in 120s" >&2
+          docker compose ps >&2 || true
+          docker compose logs app >&2 || true
+          exit 1
 
       - name: docker compose down
         if: always()
