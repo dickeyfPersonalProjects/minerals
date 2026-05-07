@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { client } from './lib/api';
+
   type Status = { kind: 'pending' } | { kind: 'up' } | { kind: 'down'; reason: string };
 
   let status: Status = $state({ kind: 'pending' });
@@ -6,12 +8,13 @@
   $effect(() => {
     const controller = new AbortController();
 
-    fetch('/healthz', { signal: controller.signal })
-      .then((res) => {
-        if (res.ok) {
+    client
+      .GET('/healthz', { signal: controller.signal, parseAs: 'text' })
+      .then(({ response }) => {
+        if (response.ok) {
           status = { kind: 'up' };
         } else {
-          status = { kind: 'down', reason: `HTTP ${res.status}` };
+          status = { kind: 'down', reason: `HTTP ${response.status}` };
         }
       })
       .catch((err: unknown) => {

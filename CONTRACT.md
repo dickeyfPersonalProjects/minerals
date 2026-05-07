@@ -3129,7 +3129,7 @@ without coordination:
 | EXIF parsing & filtering | `github.com/dsoprea/go-exif/v3` (subject to allowlist coverage — see §12) |
 | Markdown parsing | `github.com/yuin/goldmark` (recommended; see §17 sanitizer pipeline) |
 | HTML sanitization | `github.com/microcosm-cc/bluemonday` (per §17) |
-| OpenAPI / type-derived API | TBD — implementing polecat picks one of `huma`, `fuego`, or `ogen` (per design §4.6.A) |
+| OpenAPI / type-derived API | `github.com/danielgtaylor/huma/v2` (MIT, OpenAPI 3.1, stdlib `net/http` via `humago` adapter; locked in by mi-cy4 — see PR for justification) |
 | Image resize | `golang.org/x/image/draw` (high-quality kernel) |
 | WebP decode | `golang.org/x/image/webp` |
 | Linting | `github.com/golangci/golangci-lint` |
@@ -3143,6 +3143,7 @@ Frontend pre-approvals:
 | Testing | `vitest`, `@testing-library/svelte` |
 | Linting | `eslint`, `eslint-plugin-svelte` |
 | Formatting | `prettier`, `prettier-plugin-svelte` |
+| OpenAPI client codegen | `openapi-typescript` (devDep) + `openapi-fetch` (runtime) — type-only, no runtime tax (locked in by mi-cy4) |
 
 A polecat introducing a competitor to anything in these tables
 (e.g. swapping `pgx` for `database/sql` + `lib/pq`, or Svelte
