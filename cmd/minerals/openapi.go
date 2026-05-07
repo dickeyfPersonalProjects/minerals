@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,8 +10,33 @@ import (
 	"net/http/httptest"
 	"os"
 
+	"github.com/google/uuid"
+
 	"github.com/dickeyfPersonalProjects/minerals/internal/api"
+	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
 )
+
+// specStubCollectorRepo is a never-called stand-in so the type-derived
+// OpenAPI spec advertises the collectors routes during codegen. The
+// `openapi` subcommand only triggers spec marshalling — handlers
+// are never dispatched against it.
+type specStubCollectorRepo struct{}
+
+func (specStubCollectorRepo) Create(context.Context, domain.Tx, domain.Collector) error {
+	return domain.ErrCollectorNotFound
+}
+func (specStubCollectorRepo) GetByID(context.Context, uuid.UUID) (domain.Collector, error) {
+	return domain.Collector{}, domain.ErrCollectorNotFound
+}
+func (specStubCollectorRepo) Update(context.Context, domain.Tx, domain.Collector) error {
+	return domain.ErrCollectorNotFound
+}
+func (specStubCollectorRepo) Delete(context.Context, domain.Tx, uuid.UUID) error {
+	return domain.ErrCollectorNotFound
+}
+func (specStubCollectorRepo) List(context.Context, domain.CollectorFilter, domain.Page) ([]domain.Collector, domain.Cursor, error) {
+	return nil, "", nil
+}
 
 // runOpenAPI writes the type-derived OpenAPI spec served by the
 // running server at /api/v1/openapi.json to stdout. The frontend
@@ -25,7 +51,7 @@ func runOpenAPI(args []string) error {
 	// Silence the request log so stdout stays clean JSON.
 	slog.SetDefault(slog.New(slog.NewJSONHandler(io.Discard, nil)))
 
-	handler := api.New(api.Deps{})
+	handler := api.New(api.Deps{Collectors: specStubCollectorRepo{}})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.json", nil)
 	handler.ServeHTTP(rec, req)

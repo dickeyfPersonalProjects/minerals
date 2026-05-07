@@ -37,10 +37,4 @@ func NewFilePostgres(pool *pgxpool.Pool) *FilePostgres {
 	return &FilePostgres{pool: pool}
 }
 
-// CollectorPostgres is the Postgres-backed domain.CollectorRepo.
-type CollectorPostgres struct{ pool *pgxpool.Pool }
-
-// NewCollectorPostgres constructs a CollectorPostgres bound to pool.
-func NewCollectorPostgres(pool *pgxpool.Pool) *CollectorPostgres {
-	return &CollectorPostgres{pool: pool}
-}
+// CollectorPostgres lives in collector_postgres.go (mi-yvt / B-1).

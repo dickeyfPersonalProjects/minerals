@@ -66,6 +66,7 @@ var (
 	ErrFileConflict         = fmt.Errorf("file conflict")
 	ErrCollectorNotFound    = fmt.Errorf("collector not found")
 	ErrCollectorConflict    = fmt.Errorf("collector conflict")
+	ErrCollectorReferenced  = fmt.Errorf("collector referenced")
 )
 
 // Page is the cursor-pagination request shape (per §10).
@@ -76,6 +77,12 @@ type Page struct {
 
 // Cursor is the opaque pagination cursor returned by list queries.
 type Cursor string
+
+// CollectorFilter holds the v1 list filters for collectors. Only
+// Query (free-form name search via ILIKE) is supported in v1.
+type CollectorFilter struct {
+	Query string
+}
 
 // SpecimenFilter holds the v1 list filters (per design §4.4).
 type SpecimenFilter struct {
@@ -242,5 +249,5 @@ type CollectorRepo interface {
 	GetByID(ctx context.Context, id uuid.UUID) (Collector, error)
 	Update(ctx context.Context, tx Tx, c Collector) error
 	Delete(ctx context.Context, tx Tx, id uuid.UUID) error
-	List(ctx context.Context, page Page) ([]Collector, Cursor, error)
+	List(ctx context.Context, filter CollectorFilter, page Page) ([]Collector, Cursor, error)
 }
