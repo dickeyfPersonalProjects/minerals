@@ -53,6 +53,31 @@ export interface paths {
         patch: operations["patch-collector"];
         trace?: never;
     };
+    "/api/v1/journal/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a journal entry by id */
+        get: operations["get-journal-entry"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a journal entry
+         * @description Returns 409 when the entry still has attachments (`journal_entry_files` rows). Attachment deletion lands in C-2.
+         */
+        delete: operations["delete-journal-entry"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a journal entry
+         * @description Updates `body_md` (and re-renders `body_html`). `created_at` is immutable; supplying it in the body is rejected with 400.
+         */
+        patch: operations["patch-journal-entry"];
+        trace?: never;
+    };
     "/api/v1/openapi.json": {
         parameters: {
             query?: never;
@@ -161,6 +186,30 @@ export interface paths {
          */
         put: operations["put-specimen-collectors"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/specimens/{id}/journal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a specimen's journal entries
+         * @description Cursor-paginated list ordered `created_at DESC, id DESC` (CONTRACT.md §10.3). Each entry includes `body_html` alongside `body_md`.
+         */
+        get: operations["list-specimen-journal-entries"];
+        put?: never;
+        /**
+         * Create a journal entry for a specimen
+         * @description Creates an entry whose body is rendered server-side via the CONTRACT.md §17 markdown pipeline. `created_at` is server-set and immutable after creation.
+         */
+        post: operations["create-journal-entry"];
         delete?: never;
         options?: never;
         head?: never;
@@ -330,6 +379,16 @@ export interface components {
             /** @description Optional free-form notes. */
             notes?: string;
         };
+        CreateJournalBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/CreateJournalBody.json
+             */
+            readonly $schema?: string;
+            /** @description Markdown source for the entry. Server renders to HTML at write and read time. */
+            body_md: string;
+        };
         CreateSpecimenBody: {
             /**
              * Format: uri
@@ -396,6 +455,46 @@ export interface components {
             /** Format: int64 */
             Size: number;
         };
+        JournalListBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/JournalListBody.json
+             */
+            readonly $schema?: string;
+            /** @description Page of journal entries (most-recent first). */
+            items: components["schemas"]["JournalView"][] | null;
+            /** @description Cursor for the next page; null at end of results. */
+            next_cursor: string | null;
+        };
+        JournalView: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/JournalView.json
+             */
+            readonly $schema?: string;
+            /** @description UUID of the user who created the entry (CONTRACT.md §13). */
+            author_id: string;
+            /** @description Server-rendered, sanitized HTML (CONTRACT.md §17 pipeline). */
+            body_html: string;
+            /** @description Raw markdown source (editable for typo fixes). */
+            body_md: string;
+            /**
+             * Format: date-time
+             * @description RFC 3339 creation timestamp; immutable after creation.
+             */
+            created_at: string;
+            /** @description UUIDv7 primary key. */
+            id: string;
+            /** @description Owning specimen. */
+            specimen_id: string;
+            /**
+             * Format: date-time
+             * @description RFC 3339 last-update timestamp.
+             */
+            updated_at: string;
+        };
         Locality: {
             country?: string;
             /** Format: double */
@@ -439,6 +538,21 @@ export interface components {
             name?: string;
             /** @description New notes; omit to leave unchanged. Pass JSON null to clear. */
             notes?: string;
+        };
+        PatchJournalBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/PatchJournalBody.json
+             */
+            readonly $schema?: string;
+            /** @description New markdown source. Omit to leave unchanged. */
+            body_md?: string;
+            /**
+             * Format: date-time
+             * @description REJECTED. created_at is immutable per design §2; supplying any value (including the existing one) returns 400.
+             */
+            created_at?: string;
         };
         PatchPhotoBody: {
             /**
@@ -1025,6 +1139,221 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "get-journal-entry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Journal entry UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JournalView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "delete-journal-entry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Journal entry UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "patch-journal-entry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Journal entry UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchJournalBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JournalView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1675,6 +2004,143 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SpecimenCollectorsBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "list-specimen-journal-entries": {
+        parameters: {
+            query?: {
+                /** @description Page size (1-200; defaults to 50, values above 200 silently clamped). */
+                limit?: number;
+                /** @description Opaque pagination cursor returned by the previous page (CONTRACT.md §10.3). */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Specimen UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JournalListBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "create-journal-entry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Specimen UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateJournalBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JournalView"];
                 };
             };
             /** @description Bad Request */
