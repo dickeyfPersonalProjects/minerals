@@ -53,6 +53,26 @@ export interface paths {
         patch: operations["patch-collector"];
         trace?: never;
     };
+    "/api/v1/journal-files/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove an attachment from a journal entry
+         * @description Deletes the journal_entry_files join row, the files row, and the MinIO object (best-effort). The DB transaction is the source of truth; if the MinIO delete fails the orphan-cleanup job picks it up later (deferred for v1).
+         */
+        delete: operations["delete-journal-file"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/journal/{id}": {
         parameters: {
             query?: never;
@@ -76,6 +96,30 @@ export interface paths {
          * @description Updates `body_md` (and re-renders `body_html`). `created_at` is immutable; supplying it in the body is rejected with 400.
          */
         patch: operations["patch-journal-entry"];
+        trace?: never;
+    };
+    "/api/v1/journal/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a journal entry's attachments
+         * @description Returns attachments ordered by (position ASC, created_at ASC). v1 returns the full set in one response; pagination is deferred (entries have at most a handful of attachments in practice).
+         */
+        get: operations["list-journal-files"];
+        put?: never;
+        /**
+         * Attach a file to a journal entry
+         * @description Multipart upload (`file` form field). Single file per request. Allowlist-gated content types (CONTRACT.md §12), 100 MiB default cap, transactional MinIO + Postgres write. No image variants are generated for journal attachments — the photo-pipeline variants are specimen-gallery only.
+         */
+        post: operations["upload-journal-file"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/openapi.json": {
@@ -454,6 +498,47 @@ export interface components {
             IsSet: boolean;
             /** Format: int64 */
             Size: number;
+        };
+        JournalFileListBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/JournalFileListBody.json
+             */
+            readonly $schema?: string;
+            /** @description Attachments ordered by (position, created_at). */
+            items: components["schemas"]["JournalFileView"][] | null;
+        };
+        JournalFileView: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/JournalFileView.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: int64
+             * @description Byte size of the stored file.
+             */
+            byte_size: number;
+            /** @description Content-Type stored on the underlying file. */
+            content_type: string;
+            /**
+             * Format: date-time
+             * @description RFC 3339 attachment timestamp.
+             */
+            created_at: string;
+            /** @description Owning journal entry. */
+            entry_id: string;
+            /** @description UUID of the underlying files row; also the key suffix in object storage. */
+            file_id: string;
+            /**
+             * Format: int64
+             * @description Manual ordering; 1-indexed within the entry's attachments.
+             */
+            position: number;
+            /** @description Hex SHA-256 of the stored bytes. */
+            sha256: string;
         };
         JournalListBody: {
             /**
@@ -1166,6 +1251,72 @@ export interface operations {
             };
         };
     };
+    "delete-journal-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description File UUID of the attachment to remove. */
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     "get-journal-entry": {
         parameters: {
             query?: never;
@@ -1354,6 +1505,171 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "list-journal-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Journal entry UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JournalFileListBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "upload-journal-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Journal entry UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description The file to attach. Max size MAX_UPLOAD_BYTES (default 100 MiB).
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JournalFileView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Request Entity Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };

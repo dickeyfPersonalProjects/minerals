@@ -56,20 +56,21 @@ type Tx interface {
 // Sentinel errors returned from repo boundaries (per §11). Handlers
 // branch on these via errors.Is, never on pgx internals.
 var (
-	ErrSpecimenNotFound        = fmt.Errorf("specimen not found")
-	ErrSpecimenConflict        = fmt.Errorf("specimen conflict")
-	ErrSpecimenReferenced      = fmt.Errorf("specimen referenced")
-	ErrSpecimenTypeImmutable   = fmt.Errorf("specimen type immutable")
-	ErrSpecimenTypeDataInvalid = fmt.Errorf("specimen type_data invalid")
-	ErrPhotoNotFound           = fmt.Errorf("photo not found")
-	ErrPhotoConflict           = fmt.Errorf("photo conflict")
-	ErrJournalEntryNotFound    = fmt.Errorf("journal entry not found")
-	ErrJournalEntryConflict    = fmt.Errorf("journal entry conflict")
-	ErrFileNotFound            = fmt.Errorf("file not found")
-	ErrFileConflict            = fmt.Errorf("file conflict")
-	ErrCollectorNotFound       = fmt.Errorf("collector not found")
-	ErrCollectorConflict       = fmt.Errorf("collector conflict")
-	ErrCollectorReferenced     = fmt.Errorf("collector referenced")
+	ErrSpecimenNotFound          = fmt.Errorf("specimen not found")
+	ErrSpecimenConflict          = fmt.Errorf("specimen conflict")
+	ErrSpecimenReferenced        = fmt.Errorf("specimen referenced")
+	ErrSpecimenTypeImmutable     = fmt.Errorf("specimen type immutable")
+	ErrSpecimenTypeDataInvalid   = fmt.Errorf("specimen type_data invalid")
+	ErrPhotoNotFound             = fmt.Errorf("photo not found")
+	ErrPhotoConflict             = fmt.Errorf("photo conflict")
+	ErrJournalEntryNotFound      = fmt.Errorf("journal entry not found")
+	ErrJournalEntryConflict      = fmt.Errorf("journal entry conflict")
+	ErrJournalAttachmentNotFound = fmt.Errorf("journal attachment not found")
+	ErrFileNotFound              = fmt.Errorf("file not found")
+	ErrFileConflict              = fmt.Errorf("file conflict")
+	ErrCollectorNotFound         = fmt.Errorf("collector not found")
+	ErrCollectorConflict         = fmt.Errorf("collector conflict")
+	ErrCollectorReferenced       = fmt.Errorf("collector referenced")
 )
 
 // Page is the cursor-pagination request shape (per §10).
@@ -156,6 +157,16 @@ type JournalEntry struct {
 	BodyMD     string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+}
+
+// JournalEntryFile mirrors design §2 — the join row between a
+// journal entry and a stored file. Position controls display order
+// within an entry; created_at is set at attachment time.
+type JournalEntryFile struct {
+	EntryID   uuid.UUID
+	FileID    uuid.UUID
+	Position  int
+	CreatedAt time.Time
 }
 
 // Collector mirrors design §2.
@@ -292,6 +303,25 @@ type JournalEntryRepo interface {
 	Update(ctx context.Context, tx Tx, e JournalEntry) error
 	Delete(ctx context.Context, tx Tx, id uuid.UUID) error
 	ListBySpecimen(ctx context.Context, specimenID uuid.UUID, page Page) ([]JournalEntry, Cursor, error)
+}
+
+// JournalEntryFileRepo is the consumer-side interface for the
+// journal_entry_files join table (mi-720 / C-2). Attachments are
+// listed in (position ASC, created_at ASC, file_id ASC) order. The
+// repo does NOT delete the underlying files row — the service layer
+// removes both rows in a single transaction, then best-effort cleans
+// up the MinIO object (per CONTRACT.md §12).
+type JournalEntryFileRepo interface {
+	Create(ctx context.Context, tx Tx, j JournalEntryFile) error
+	GetByFileID(ctx context.Context, fileID uuid.UUID) (JournalEntryFile, error)
+	ListByEntry(ctx context.Context, entryID uuid.UUID) ([]JournalEntryFile, error)
+	Delete(ctx context.Context, tx Tx, fileID uuid.UUID) error
+	// MaxPosition returns the largest `position` value currently in
+	// use among the entry's attachments, or 0 if there are none. The
+	// service layer uses this to default a new attachment's position
+	// to max+1 (matching the photos pattern — manual ordering, no
+	// auto-shuffle).
+	MaxPosition(ctx context.Context, tx Tx, entryID uuid.UUID) (int, error)
 }
 
 // FileRepo is the consumer-side interface for files persistence.

@@ -70,6 +70,11 @@ type Deps struct {
 	// expose GET/PUT /api/v1/specimens/{id}/collectors. nil leaves
 	// the chain endpoints unregistered.
 	SpecimenCollectors domain.SpecimenCollectorRepo
+	// JournalFiles is wired with the journal-attachment upload
+	// pipeline in production (mi-720 / C-2). nil leaves the
+	// /api/v1/journal/{id}/files, /api/v1/journal-files/{file_id},
+	// and /api/v1/files/{file_id} routes unregistered.
+	JournalFiles *JournalFileServiceDeps
 }
 
 // New returns an http.Handler with the v1 routes wired up. Callers
@@ -106,6 +111,9 @@ func New(deps Deps) http.Handler {
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "journal", Description: "Per-specimen journal entries with server-rendered markdown (mi-y6b / C-1; CONTRACT.md §17 pipeline).",
 	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "journal-files", Description: "File attachments on journal entries (mi-720 / C-2). Reuses the §12 upload pipeline; no variant generation.",
+	})
 
 	humaAPI := humago.New(mux, cfg)
 	registerSystemOperations(humaAPI, deps)
@@ -114,6 +122,7 @@ func New(deps Deps) http.Handler {
 	registerSpecimenOperations(humaAPI, deps.Specimens)
 	registerJournalOperations(humaAPI, deps.Journal)
 	registerSpecimenCollectorOperations(humaAPI, deps.Specimens, deps.SpecimenCollectors)
+	registerJournalFileOperations(humaAPI, mux, deps.JournalFiles)
 
 	// Protected /api/v1/* fallback. Real handlers land in feature
 	// beads; for now any unmatched /api/v1/ path falls through to a

@@ -2461,12 +2461,26 @@ the orphan that "S3 first, DB second" can produce.
   mismatched Content-Type headers, but the rejection authority
   remains the declared inner Content-Type.
 
-### Journal-entry attachments (`POST /api/v1/journal-entries/{id}/files`)
+### Journal-entry attachments (`POST /api/v1/journal/{id}/files`)
 
-- Allowlist for v1 is **TBD** — the journal feature design
-  hasn't locked the allowlist yet. The default is the same as
-  photos until that decision lands.
+- Allowlist for v1 (locked by mi-720 / C-2):
+  - `application/pdf` — primary non-image attachment (lab
+    certs, XRD scans, analytical reports).
+  - `image/jpeg`, `image/png`, `image/webp` — accepted as raw
+    files. **No variants are generated** for journal-attached
+    images; the photo-pipeline variants are reserved for the
+    specimen gallery (per "Variant generation" below). HEIC is
+    intentionally absent for the same reason as photos (§16
+    pure-Go constraint).
+  - `text/plain`, `text/csv`, `text/markdown` — field notes
+    and tabular lab data.
+  - `application/json`, `application/xml` — machine-readable
+    analysis output.
+- Anything else → 415 with `details.allowed` listing the set.
 - Same 100 MiB ceiling.
+- Single file per request: the form field is `file` (singular,
+  required); a polecat MUST NOT accept `files[]`-style multi-
+  file uploads in v1 — multi-attachment is a sequence of POSTs.
 
 ### Size cap
 
