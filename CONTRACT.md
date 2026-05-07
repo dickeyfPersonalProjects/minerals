@@ -425,7 +425,13 @@ that README is unaffected.
 - Automated smoke-testing of README quickstart commands in CI (a job
   that bootstraps from scratch and runs the documented commands).
   Until this lands, manual verification on a fresh clone is the
-  required gate.
+  required gate. **Partially closed** by mi-7r2: the `compose-smoke`
+  job in `pr.yml` and `main.yml` exercises `docker compose up -d`
+  against the committed `docker-compose.yml` and validates Postgres +
+  MinIO come up healthy, so README drift on the compose layer no
+  longer slips past CI. The remaining piece — running every
+  README-documented command (`make migrate-up`, `make run`, etc.) —
+  is still deferred.
 
 ## Infrastructure-as-code layout
 
