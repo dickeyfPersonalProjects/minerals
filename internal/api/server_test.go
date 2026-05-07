@@ -35,7 +35,10 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
-func TestOpenAPIPlaceholder(t *testing.T) {
+// TestOpenAPISpecHasExpectedPaths verifies the type-derived OpenAPI
+// spec served at /api/v1/openapi.json includes every system endpoint
+// registered through huma. Required by mi-cy4 acceptance.
+func TestOpenAPISpecHasExpectedPaths(t *testing.T) {
 	h := New(Deps{})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.json", nil)
@@ -43,6 +46,9 @@ func TestOpenAPIPlaceholder(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "json") {
+		t.Errorf("Content-Type = %q, want JSON", ct)
 	}
 	var body struct {
 		OpenAPI string `json:"openapi"`
@@ -55,9 +61,25 @@ func TestOpenAPIPlaceholder(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.OpenAPI == "" || body.Info.Title != "minerals" {
-		t.Errorf("unexpected body: %+v", body)
+	if !strings.HasPrefix(body.OpenAPI, "3.") {
+		t.Errorf("openapi version = %q, want 3.x", body.OpenAPI)
 	}
+	if body.Info.Title == "" || body.Info.Version == "" {
+		t.Errorf("info = %+v, want non-empty title/version", body.Info)
+	}
+	for _, want := range []string{"/healthz", "/readyz", "/docs", "/api/v1/openapi.json"} {
+		if _, ok := body.Paths[want]; !ok {
+			t.Errorf("spec missing path %q (have %v)", want, keysOf(body.Paths))
+		}
+	}
+}
+
+func keysOf(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 func TestDocsPlaceholder(t *testing.T) {

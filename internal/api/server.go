@@ -1,14 +1,14 @@
 // Package api wires the HTTP server: middleware chain, public vs
-// protected route groups, and the v1 placeholder handlers
-// (healthz, readyz, openapi, docs). Real CRUD lands in subsequent
-// feature beads (per CONTRACT.md §13 / §10).
+// protected route groups, and the v1 endpoints (healthz, readyz,
+// openapi, docs). Real CRUD lands in subsequent feature beads (per
+// CONTRACT.md §13 / §10).
 //
-// Router choice: stdlib net/http ServeMux. Go 1.22+ supports method-
-// scoped patterns (e.g. "GET /healthz") and per-segment wildcards.
-// That's enough for v1; chi/gorilla buy little for the routes we
-// have. If a future need (sub-routers, regex captures) actually
-// pushes against the stdlib limits, a swap can happen as a
-// coordinated decision rather than a default-from-day-one.
+// Framework: github.com/danielgtaylor/huma/v2 with the humago
+// adapter (per design §4.6.A; CONTRACT.md §16). Huma is type-derived
+// — operations register handler signatures and huma generates the
+// OpenAPI 3.1 spec from them. The humago adapter wraps the stdlib
+// http.ServeMux so middleware and the SPA fallback continue to use
+// vanilla net/http.
 package api
 
 import (
@@ -17,6 +17,9 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
 	"github.com/dickeyfPersonalProjects/minerals/internal/auth"
 )
@@ -52,147 +55,269 @@ type Deps struct {
 func New(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 
-	publicMW := []func(http.Handler) http.Handler{
-		Recovery,
-		RequestID,
-		SecurityHeaders,
-		CSP,
-		Logging,
+	// Huma config: spec at /api/v1/openapi.json (per §10), docs and
+	// openapi auto-mount disabled — we register them as explicit
+	// huma operations so they appear in the generated spec (per
+	// bead acceptance criteria).
+	cfg := huma.DefaultConfig("Minerals API", "0.0.1")
+	cfg.OpenAPIPath = ""
+	cfg.DocsPath = ""
+	cfg.Info.Description = "Minerals collection management API. " +
+		"v1 surface: liveness, readiness, OpenAPI spec, docs."
+	cfg.Servers = []*huma.Server{
+		{URL: "/", Description: "Same-origin (SPA proxy in dev, embedded SPA in prod)"},
 	}
-	protectedMW := append(append([]func(http.Handler) http.Handler{},
-		publicMW...),
-		auth.Auth, auth.RequireUser,
-	)
+	cfg.Tags = []*huma.Tag{
+		{Name: "system", Description: "Operational endpoints: liveness, readiness, spec, docs."},
+	}
 
-	// Public: liveness, readiness, OpenAPI spec, docs page.
-	mux.Handle("GET /healthz", Chain(http.HandlerFunc(healthzHandler), publicMW...))
-	mux.Handle("GET /readyz", Chain(http.HandlerFunc(readyzHandler(deps)), publicMW...))
-	mux.Handle("GET /api/v1/openapi.json", Chain(http.HandlerFunc(openapiHandler), publicMW...))
-	mux.Handle("GET /docs", Chain(http.HandlerFunc(docsHandler), publicMW...))
+	humaAPI := humago.New(mux, cfg)
+	registerSystemOperations(humaAPI, deps)
 
-	// Protected /api/v1/* group. Real handlers land in feature beads;
-	// for now, any unmatched /api/v1/ path falls through to a 404
-	// envelope after the auth chain has run.
+	// Protected /api/v1/* fallback. Real handlers land in feature
+	// beads; for now any unmatched /api/v1/ path falls through to a
+	// 404 envelope after the auth chain has run.
 	apiNotFound := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such endpoint", nil)
 	})
-	mux.Handle("/api/v1/", Chain(apiNotFound, protectedMW...))
+	mux.Handle("/api/v1/", Chain(apiNotFound, auth.Auth, auth.RequireUser))
 
 	// SPA fallback (public): everything else is the embedded SPA.
 	if deps.WebHandler != nil {
-		mux.Handle("/", Chain(deps.WebHandler, publicMW...))
+		mux.Handle("/", deps.WebHandler)
 	}
 
-	return mux
+	// Apply public middleware to the entire mux. The /api/v1/*
+	// chain composes with auth wrappers above, preserving the
+	// historical order: Recovery → RequestID → SecHeaders → CSP →
+	// Logging → [auth.Auth → auth.RequireUser →] handler.
+	publicMW := []func(http.Handler) http.Handler{
+		Recovery, RequestID, SecurityHeaders, CSP, Logging,
+	}
+	return Chain(mux, publicMW...)
 }
 
-func healthzHandler(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("ok"))
+// healthzOutput uses a body callback so the handler can write the
+// "ok" plain-text body verbatim (no JSON envelope) while still
+// having the operation participate in the OpenAPI spec.
+type healthzOutput struct {
+	Body func(huma.Context)
 }
 
-// readyzHandler runs the §14 readiness checks: DB ping (2s timeout),
-// bucket head (2s timeout), schema version match. Returns 200 if all
-// pass, 503 with a per-check JSON body otherwise.
-func readyzHandler(deps Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		type check struct {
-			OK      bool   `json:"ok"`
-			Error   string `json:"error,omitempty"`
-			Version uint   `json:"version,omitempty"`
-		}
-		body := struct {
-			Ready  bool             `json:"ready"`
-			Checks map[string]check `json:"checks"`
-		}{Checks: map[string]check{}}
+// readyzCheck mirrors the §14 readiness probe shape.
+type readyzCheck struct {
+	OK      bool   `json:"ok"`
+	Error   string `json:"error,omitempty"`
+	Version uint   `json:"version,omitempty"`
+}
 
+type readyzBody struct {
+	Ready  bool                   `json:"ready"`
+	Checks map[string]readyzCheck `json:"checks"`
+}
+
+type readyzOutput struct {
+	// Status overrides the HTTP status — 200 if ready, 503 otherwise.
+	Status int
+	Body   readyzBody
+}
+
+// openapiOutput streams the generated spec verbatim.
+type openapiOutput struct {
+	Body func(huma.Context)
+}
+
+// docsOutput streams the Redoc HTML page.
+type docsOutput struct {
+	Body func(huma.Context)
+}
+
+// registerSystemOperations registers the v1 system endpoints with
+// huma. After registration the operations appear in the spec served
+// at /api/v1/openapi.json.
+func registerSystemOperations(api huma.API, deps Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID: "healthz",
+		Method:      http.MethodGet,
+		Path:        "/healthz",
+		Summary:     "Liveness probe",
+		Description: "Returns 200 with body \"ok\" if the process is alive. Performs no dependency checks.",
+		Tags:        []string{"system"},
+	}, func(_ context.Context, _ *struct{}) (*healthzOutput, error) {
+		return &healthzOutput{
+			Body: func(c huma.Context) {
+				c.SetHeader("Content-Type", "text/plain; charset=utf-8")
+				_, _ = c.BodyWriter().Write([]byte("ok"))
+			},
+		}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "readyz",
+		Method:      http.MethodGet,
+		Path:        "/readyz",
+		Summary:     "Readiness probe",
+		Description: "Verifies database, storage, and schema version. Returns 200 if all checks pass, 503 with per-check detail otherwise.",
+		Tags:        []string{"system"},
+		Errors:      []int{http.StatusServiceUnavailable},
+	}, makeReadyzHandler(deps))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "openapi",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/openapi.json",
+		Summary:     "OpenAPI 3.1 specification",
+		Description: "The machine-readable contract for this API, generated from registered handler types.",
+		Tags:        []string{"system"},
+	}, makeOpenAPIHandler(api))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "docs",
+		Method:      http.MethodGet,
+		Path:        "/docs",
+		Summary:     "API documentation (Redoc)",
+		Description: "Single-page Redoc viewer that loads the OpenAPI spec from /api/v1/openapi.json.",
+		Tags:        []string{"system"},
+	}, docsHandler)
+}
+
+func makeReadyzHandler(deps Deps) func(context.Context, *struct{}) (*readyzOutput, error) {
+	return func(ctx context.Context, _ *struct{}) (*readyzOutput, error) {
+		body := readyzBody{Checks: map[string]readyzCheck{}}
 		ready := true
 
-		dbCheck := check{OK: true}
+		dbCheck := readyzCheck{OK: true}
 		if deps.DB != nil {
-			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-			defer cancel()
-			if err := deps.DB.Ping(ctx); err != nil {
-				dbCheck = check{OK: false, Error: err.Error()}
+			cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			if err := deps.DB.Ping(cctx); err != nil {
+				dbCheck = readyzCheck{OK: false, Error: err.Error()}
 				ready = false
 			}
+			cancel()
 		} else {
-			dbCheck = check{OK: false, Error: "no db wired"}
+			dbCheck = readyzCheck{OK: false, Error: "no db wired"}
 			ready = false
 		}
 		body.Checks["database"] = dbCheck
 
-		storageCheck := check{OK: true}
+		storageCheck := readyzCheck{OK: true}
 		if deps.Storage != nil {
-			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-			defer cancel()
-			if err := deps.Storage.HeadBucket(ctx); err != nil {
-				storageCheck = check{OK: false, Error: err.Error()}
+			cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			if err := deps.Storage.HeadBucket(cctx); err != nil {
+				storageCheck = readyzCheck{OK: false, Error: err.Error()}
 				ready = false
 			}
+			cancel()
 		} else {
-			storageCheck = check{OK: false, Error: "no storage wired"}
+			storageCheck = readyzCheck{OK: false, Error: "no storage wired"}
 			ready = false
 		}
 		body.Checks["storage"] = storageCheck
 
-		var schemaCheck check
+		var schemaCheck readyzCheck
 		if deps.SchemaVersion != nil {
-			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-			defer cancel()
-			ver, dirty, err := deps.SchemaVersion(ctx)
+			cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			ver, dirty, err := deps.SchemaVersion(cctx)
+			cancel()
 			switch {
 			case err != nil:
-				schemaCheck = check{OK: false, Error: err.Error()}
+				schemaCheck = readyzCheck{OK: false, Error: err.Error()}
 				ready = false
 			case dirty:
-				schemaCheck = check{OK: false, Error: "schema is dirty", Version: ver}
+				schemaCheck = readyzCheck{OK: false, Error: "schema is dirty", Version: ver}
 				ready = false
 			case deps.ExpectedVersion != 0 && ver != deps.ExpectedVersion:
-				schemaCheck = check{
+				schemaCheck = readyzCheck{
 					OK:      false,
 					Error:   fmt.Sprintf("expected version %d, found %d", deps.ExpectedVersion, ver),
 					Version: ver,
 				}
 				ready = false
 			default:
-				schemaCheck = check{OK: true, Version: ver}
+				schemaCheck = readyzCheck{OK: true, Version: ver}
 			}
 		} else {
-			// No SchemaVersion fn supplied — treat as "no migrations yet";
-			// readyz still requires DB and storage to be up, but doesn't
-			// require schema-version evidence.
-			schemaCheck = check{OK: true}
+			// Treat as "no migrations yet" — readyz still requires DB
+			// and storage to be up but doesn't gate on schema-version
+			// evidence.
+			schemaCheck = readyzCheck{OK: true}
 		}
 		body.Checks["schema"] = schemaCheck
 
 		body.Ready = ready
-
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		out := &readyzOutput{Body: body}
 		if ready {
-			w.WriteHeader(http.StatusOK)
+			out.Status = http.StatusOK
 		} else {
-			w.WriteHeader(http.StatusServiceUnavailable)
+			out.Status = http.StatusServiceUnavailable
 		}
-		_ = json.NewEncoder(w).Encode(body)
+		return out, nil
 	}
 }
 
-// openapiHandler returns the v1 placeholder spec. The real spec is
-// generated by the chosen OpenAPI framework when that bead lands
-// (per design §4.6.A).
-func openapiHandler(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_, _ = w.Write([]byte(
-		`{"openapi":"3.0.0","info":{"title":"minerals","version":"0.0.1"},"paths":{}}`))
+// makeOpenAPIHandler captures the live huma.API so the spec returned
+// reflects every registered operation. The spec is marshalled per
+// request — the surface is small and v1 doesn't merit the caching
+// dance that huma's auto-handler does internally.
+func makeOpenAPIHandler(api huma.API) func(context.Context, *struct{}) (*openapiOutput, error) {
+	return func(_ context.Context, _ *struct{}) (*openapiOutput, error) {
+		return &openapiOutput{
+			Body: func(c huma.Context) {
+				spec, err := json.Marshal(api.OpenAPI())
+				if err != nil {
+					c.SetStatus(http.StatusInternalServerError)
+					_, _ = c.BodyWriter().Write([]byte(`{"error":{"code":"openapi_marshal","message":"failed to render spec"}}`))
+					return
+				}
+				c.SetHeader("Content-Type", "application/json; charset=utf-8")
+				_, _ = c.BodyWriter().Write(spec)
+			},
+		}, nil
+	}
 }
 
-// docsHandler returns the v1 placeholder documentation page. Redoc
-// lands when the OpenAPI framework is wired.
-func docsHandler(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(
-		"<!doctype html><html><head><title>minerals docs</title></head>" +
-			"<body><h1>minerals</h1><p>Redoc will live here.</p></body></html>"))
+// redocHTML is a self-contained Redoc page. The Redoc bundle is
+// loaded from the cdn.redoc.ly CDN with subresource integrity
+// pinning. The /docs response sets a route-scoped CSP that allows
+// the Redoc origin and worker — the global CSP (script-src 'self')
+// would otherwise block the bundle. Polecats touching this CSP MUST
+// keep the allowlist minimal and pinned (no wildcards, no
+// 'unsafe-eval').
+const redocHTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minerals API · Redoc</title>
+<style>body{margin:0;padding:0;}</style>
+</head>
+<body>
+<redoc spec-url="/api/v1/openapi.json"></redoc>
+<script src="https://cdn.redoc.ly/redoc/v2.5.0/bundles/redoc.standalone.js" integrity="sha384-7Q+50QavCV4WWj9zV8zAmSANyAEXnlpgyo8GOq6y4hETtY5PHl7KeruvBA08fzMo" crossorigin="anonymous"></script>
+</body>
+</html>
+`
+
+// docsCSP is the per-route CSP for /docs. It overrides the global
+// §17 CSP just for this endpoint to allow the Redoc bundle from the
+// pinned CDN. Inline styles and blob workers are required by Redoc.
+const docsCSP = "default-src 'self'; " +
+	"script-src 'self' https://cdn.redoc.ly; " +
+	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+	"font-src 'self' https://fonts.gstatic.com data:; " +
+	"img-src 'self' data: https:; " +
+	"worker-src 'self' blob:; " +
+	"connect-src 'self'; " +
+	"frame-ancestors 'none'; " +
+	"base-uri 'self'; " +
+	"form-action 'self'"
+
+func docsHandler(_ context.Context, _ *struct{}) (*docsOutput, error) {
+	return &docsOutput{
+		Body: func(c huma.Context) {
+			c.SetHeader("Content-Type", "text/html; charset=utf-8")
+			c.SetHeader("Content-Security-Policy", docsCSP)
+			_, _ = c.BodyWriter().Write([]byte(redocHTML))
+		},
+	}, nil
 }

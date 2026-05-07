@@ -61,3 +61,19 @@ fmt-check-frontend:
 
 lint-frontend:
 	cd frontend && npx eslint .
+
+# ── API client codegen (mi-cy4) ───────────────────────────────────
+# Dumps the type-derived OpenAPI spec from the in-process server and
+# regenerates the typed frontend client at frontend/src/lib/api/.
+# Generated files are committed (per CONTRACT.md §2: "generated but
+# tracked"). Run after backend handler signatures change.
+.PHONY: gen-api-client openapi-spec
+
+OPENAPI_SPEC := frontend/src/lib/api/openapi.json
+
+openapi-spec:
+	@mkdir -p $(dir $(OPENAPI_SPEC))
+	go run $(PKG) openapi > $(OPENAPI_SPEC)
+
+gen-api-client: openapi-spec
+	cd frontend && npx openapi-typescript src/lib/api/openapi.json -o src/lib/api/schema.d.ts
