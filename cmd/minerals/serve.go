@@ -110,6 +110,9 @@ func runServe(_ []string) error {
 		Collectors:      db.NewCollectorPostgres(pool),
 		Photos:          photoDeps,
 		Specimens:       db.NewSpecimenPostgres(pool),
+		Journal: &api.JournalServiceDeps{
+			Entries: db.NewJournalEntryPostgres(pool),
+		},
 	}
 	handler := api.New(deps)
 

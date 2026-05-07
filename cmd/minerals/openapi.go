@@ -106,6 +106,27 @@ func (specStubSpecimenRepo) List(context.Context, domain.SpecimenFilter, domain.
 	return nil, "", nil
 }
 
+// specStubJournalRepo is the never-called stand-in so the spec
+// advertises /api/v1/journal and /api/v1/specimens/{id}/journal
+// during `make gen-api-client` codegen (mi-y6b / C-1).
+type specStubJournalRepo struct{}
+
+func (specStubJournalRepo) Create(context.Context, domain.Tx, domain.JournalEntry) error {
+	return domain.ErrJournalEntryNotFound
+}
+func (specStubJournalRepo) GetByID(context.Context, uuid.UUID) (domain.JournalEntry, error) {
+	return domain.JournalEntry{}, domain.ErrJournalEntryNotFound
+}
+func (specStubJournalRepo) Update(context.Context, domain.Tx, domain.JournalEntry) error {
+	return domain.ErrJournalEntryNotFound
+}
+func (specStubJournalRepo) Delete(context.Context, domain.Tx, uuid.UUID) error {
+	return domain.ErrJournalEntryNotFound
+}
+func (specStubJournalRepo) ListBySpecimen(context.Context, uuid.UUID, domain.Page) ([]domain.JournalEntry, domain.Cursor, error) {
+	return nil, "", nil
+}
+
 // runOpenAPI writes the type-derived OpenAPI spec served by the
 // running server at /api/v1/openapi.json to stdout. The frontend
 // codegen Makefile target consumes the output. Uses an in-process
@@ -131,6 +152,9 @@ func runOpenAPI(args []string) error {
 			},
 		},
 		Specimens: specStubSpecimenRepo{},
+		Journal: &api.JournalServiceDeps{
+			Entries: specStubJournalRepo{},
+		},
 	})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.json", nil)
