@@ -76,6 +76,32 @@ func (c *Client) Upload(ctx context.Context, key string, body io.Reader, content
 	return nil
 }
 
+// ErrAlreadyExists is returned by UploadIfNotExists when the conditional
+// put rejected the write because an object with that key already exists.
+var ErrAlreadyExists = errors.New("storage: object already exists")
+
+// UploadIfNotExists is the conditional-put variant required by §12 for
+// the original-bytes write step: it sends If-None-Match: * so the
+// underlying object store (MinIO / S3) refuses to overwrite an existing
+// key. Returns ErrAlreadyExists on the rejection path; other errors
+// surface as wrapped errors.
+func (c *Client) UploadIfNotExists(ctx context.Context, key string, body io.Reader, contentType string) error {
+	_, err := c.api.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(c.bucket),
+		Key:         aws.String(key),
+		Body:        body,
+		ContentType: aws.String(contentType),
+		IfNoneMatch: aws.String("*"),
+	})
+	if err != nil {
+		if isPreconditionFailed(err) {
+			return ErrAlreadyExists
+		}
+		return fmt.Errorf("storage: upload %s: %w", key, err)
+	}
+	return nil
+}
+
 // Download fetches the object at key. The caller MUST close the
 // returned io.ReadCloser. Headers carry the object's stored metadata
 // (Content-Type, Content-Length, ETag) for the handler to set on the
@@ -86,6 +112,9 @@ func (c *Client) Download(ctx context.Context, key string) (io.ReadCloser, http.
 		Key:    aws.String(key),
 	})
 	if err != nil {
+		if isNotFound(err) {
+			return nil, nil, ErrNotFound
+		}
 		return nil, nil, fmt.Errorf("storage: download %s: %w", key, err)
 	}
 	hdr := http.Header{}
@@ -100,6 +129,10 @@ func (c *Client) Download(ctx context.Context, key string) (io.ReadCloser, http.
 	}
 	return out.Body, hdr, nil
 }
+
+// ErrNotFound is returned by Download when the requested key does not
+// exist in the bucket.
+var ErrNotFound = errors.New("storage: object not found")
 
 // Delete removes the object at key. Missing objects are not treated
 // as errors (idempotent semantics).
@@ -149,6 +182,16 @@ func (c *Client) HeadBucket(ctx context.Context) error {
 		return fmt.Errorf("storage: head bucket %s: %w", c.bucket, err)
 	}
 	return nil
+}
+
+// isPreconditionFailed reports whether err is a 412 from S3 (the
+// outcome of a failed If-None-Match: * conditional put).
+func isPreconditionFailed(err error) bool {
+	var resp *smithyhttp.ResponseError
+	if errors.As(err, &resp) && resp.HTTPStatusCode() == http.StatusPreconditionFailed {
+		return true
+	}
+	return false
 }
 
 // isNotFound reports whether err is a "404"-like response from S3.

@@ -13,14 +13,6 @@ func NewSpecimenPostgres(pool *pgxpool.Pool) *SpecimenPostgres {
 	return &SpecimenPostgres{pool: pool}
 }
 
-// PhotoPostgres is the Postgres-backed domain.PhotoRepo.
-type PhotoPostgres struct{ pool *pgxpool.Pool }
-
-// NewPhotoPostgres constructs a PhotoPostgres bound to pool.
-func NewPhotoPostgres(pool *pgxpool.Pool) *PhotoPostgres {
-	return &PhotoPostgres{pool: pool}
-}
-
 // JournalEntryPostgres is the Postgres-backed domain.JournalEntryRepo.
 type JournalEntryPostgres struct{ pool *pgxpool.Pool }
 
@@ -29,12 +21,6 @@ func NewJournalEntryPostgres(pool *pgxpool.Pool) *JournalEntryPostgres {
 	return &JournalEntryPostgres{pool: pool}
 }
 
-// FilePostgres is the Postgres-backed domain.FileRepo.
-type FilePostgres struct{ pool *pgxpool.Pool }
-
-// NewFilePostgres constructs a FilePostgres bound to pool.
-func NewFilePostgres(pool *pgxpool.Pool) *FilePostgres {
-	return &FilePostgres{pool: pool}
-}
-
 // CollectorPostgres lives in collector_postgres.go (mi-yvt / B-1).
+// FilePostgres lives in file_postgres.go (mi-jpu / B-3).
+// PhotoPostgres lives in photo_postgres.go (mi-jpu / B-3).

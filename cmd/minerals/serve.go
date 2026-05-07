@@ -12,11 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dickeyfPersonalProjects/minerals/internal/api"
 	"github.com/dickeyfPersonalProjects/minerals/internal/config"
 	"github.com/dickeyfPersonalProjects/minerals/internal/db"
+	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
 	"github.com/dickeyfPersonalProjects/minerals/internal/storage"
 	"github.com/dickeyfPersonalProjects/minerals/internal/web"
 )
@@ -87,6 +89,18 @@ func runServe(_ []string) error {
 		return fmt.Errorf("serve: read embedded migrations: %w", err)
 	}
 
+	photoDeps := &api.PhotoServiceDeps{
+		Photos:         db.NewPhotoPostgres(pool),
+		Files:          db.NewFilePostgres(pool),
+		Storage:        store,
+		MaxUploadBytes: cfg.MaxUploadBytes,
+		RunInTx: func(ctx context.Context, fn func(tx domain.Tx) error) error {
+			return db.RunInTx(ctx, pool, func(pgxTx pgx.Tx) error {
+				return fn(pgxTx)
+			})
+		},
+	}
+
 	deps := api.Deps{
 		DB:              dbPinger{pool: pool},
 		Storage:         store,
@@ -94,6 +108,7 @@ func runServe(_ []string) error {
 		ExpectedVersion: expected,
 		WebHandler:      web.Handler(),
 		Collectors:      db.NewCollectorPostgres(pool),
+		Photos:          photoDeps,
 	}
 	handler := api.New(deps)
 

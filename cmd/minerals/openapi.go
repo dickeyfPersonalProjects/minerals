@@ -16,6 +16,53 @@ import (
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
 )
 
+// specStubPhotoRepo, specStubFileRepo, specStubStorage are never-called
+// stand-ins so the type-derived OpenAPI spec advertises the photos
+// routes during codegen (mi-jpu / B-3).
+type specStubPhotoRepo struct{}
+
+func (specStubPhotoRepo) Create(context.Context, domain.Tx, domain.Photo) error {
+	return domain.ErrPhotoNotFound
+}
+func (specStubPhotoRepo) GetByID(context.Context, uuid.UUID) (domain.Photo, error) {
+	return domain.Photo{}, domain.ErrPhotoNotFound
+}
+func (specStubPhotoRepo) Update(context.Context, domain.Tx, domain.Photo) error {
+	return domain.ErrPhotoNotFound
+}
+func (specStubPhotoRepo) Delete(context.Context, domain.Tx, uuid.UUID) error {
+	return domain.ErrPhotoNotFound
+}
+func (specStubPhotoRepo) ListBySpecimen(context.Context, uuid.UUID, domain.Page) ([]domain.Photo, domain.Cursor, error) {
+	return nil, "", nil
+}
+func (specStubPhotoRepo) MaxPosition(context.Context, domain.Tx, uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+type specStubFileRepo struct{}
+
+func (specStubFileRepo) Create(context.Context, domain.Tx, domain.File) error {
+	return domain.ErrFileNotFound
+}
+func (specStubFileRepo) GetByID(context.Context, uuid.UUID) (domain.File, error) {
+	return domain.File{}, domain.ErrFileNotFound
+}
+func (specStubFileRepo) Delete(context.Context, domain.Tx, uuid.UUID) error {
+	return domain.ErrFileNotFound
+}
+
+type specStubStorage struct{}
+
+func (specStubStorage) Upload(context.Context, string, io.Reader, string) error { return nil }
+func (specStubStorage) UploadIfNotExists(context.Context, string, io.Reader, string) error {
+	return nil
+}
+func (specStubStorage) Download(context.Context, string) (io.ReadCloser, http.Header, error) {
+	return nil, nil, nil
+}
+func (specStubStorage) Delete(context.Context, string) error { return nil }
+
 // specStubCollectorRepo is a never-called stand-in so the type-derived
 // OpenAPI spec advertises the collectors routes during codegen. The
 // `openapi` subcommand only triggers spec marshalling — handlers
@@ -51,7 +98,18 @@ func runOpenAPI(args []string) error {
 	// Silence the request log so stdout stays clean JSON.
 	slog.SetDefault(slog.New(slog.NewJSONHandler(io.Discard, nil)))
 
-	handler := api.New(api.Deps{Collectors: specStubCollectorRepo{}})
+	handler := api.New(api.Deps{
+		Collectors: specStubCollectorRepo{},
+		Photos: &api.PhotoServiceDeps{
+			Photos:         specStubPhotoRepo{},
+			Files:          specStubFileRepo{},
+			Storage:        specStubStorage{},
+			MaxUploadBytes: 100 * 1024 * 1024,
+			RunInTx: func(ctx context.Context, fn func(tx domain.Tx) error) error {
+				return fn(nil)
+			},
+		},
+	})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.json", nil)
 	handler.ServeHTTP(rec, req)
