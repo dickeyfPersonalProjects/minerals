@@ -427,6 +427,52 @@ that README is unaffected.
   Until this lands, manual verification on a fresh clone is the
   required gate.
 
+## Infrastructure-as-code layout
+
+This repo declares **what** to run; environment-specific deployment
+configuration lives in a separate GitOps repo. Two locations only:
+
+- **`docker-compose.yml`** at the repo root — single file declaring
+  the dev services (Postgres, MinIO). At the root because that's
+  where `docker compose up -d` and `podman compose up -d` look by
+  default; moving it forces every contributor to type `-f path/...`
+  in every command. The file is dev-only; not used in production.
+- **`kustomize/base/`** at the repo root (when k3s deployment work
+  begins) — Kustomize base manifests for the app's Kubernetes
+  resources (Deployment, Service, ConfigMap stubs, etc.). **Base
+  ONLY**: no overlays, no patches, no environment-specific values.
+
+### Why no Kustomize overlays in this repo
+
+Environment-specific deployment (dev cluster, prod cluster, any
+future variants) lives in the operator's separate **GitOps repo**.
+That repo references this repo's `kustomize/base/` as a remote base,
+applies overlays, and injects values (image tags, replica counts,
+ingress hostnames, secrets references) per environment.
+
+This separation:
+- Keeps secrets and environment-specific URLs out of the app repo
+- Lets the app repo stay public-friendly (no infra exposure)
+- Allows the same base to power any number of environments without
+  forks
+- Aligns with standard GitOps practice (Argo CD, Flux): app source +
+  base manifests in one repo, deployment overlays in another
+
+A polecat MUST NOT add `kustomize/overlays/`, `deploy/`, `helm/`,
+`terraform/`, or any other deployment-shape directory to this repo
+without coordination. If a directory like that becomes necessary,
+it's a contract change requiring its own PR.
+
+### Forbidden alternatives
+
+- **`dev/docker-compose.yml`** or `infra/compose.yaml` — adds a
+  required `-f` flag to every dev invocation. Do not.
+- **`kustomize/overlays/dev/`** or `kustomize/overlays/prod/` —
+  these are the GitOps repo's concern, not this repo's.
+- **`docker-compose.prod.yml`** or any production Compose variant —
+  production runs on k3s via Kustomize; there is no production
+  Compose deployment in this project.
+
 # §3 — Local development workflow
 
 This section is for anyone bringing the app up locally for the first
