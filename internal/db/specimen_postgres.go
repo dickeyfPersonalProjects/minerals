@@ -204,19 +204,14 @@ func (r *SpecimenPostgres) Delete(ctx context.Context, tx domain.Tx, id uuid.UUI
 // encodes (rank, created_at, id). Cursors issued under one ordering
 // are NOT valid under the other (per CONTRACT.md §10).
 //
-// Special case: when filter.CollectorID is set, we return an empty
-// result immediately — the specimen↔collector linkage table is
-// populated by B-4 (mi-jpu's sibling), not B-2. The query parameter
-// is accepted today so frontend code can wire it up; results turn
-// real once B-4 lands.
+// When filter.CollectorID is set the query joins against
+// specimen_collectors and returns specimens that have the given
+// collector anywhere in their chain (mi-zv3 / C-3 — replaces the
+// stub mi-quf left while the linkage table was unwired).
 func (r *SpecimenPostgres) List(
 	ctx context.Context, filter domain.SpecimenFilter, page domain.Page,
 ) ([]domain.Specimen, domain.Cursor, error) {
 	limit := clampLimit(page.Limit)
-
-	if filter.CollectorID != nil {
-		return []domain.Specimen{}, "", nil
-	}
 
 	if strings.TrimSpace(filter.Query) != "" {
 		return r.listRanked(ctx, filter, page, limit)
@@ -349,6 +344,11 @@ func (r *SpecimenPostgres) listRanked(
 // applySharedFilters appends WHERE clauses common to both default
 // and ranked list queries. Returns the augmented where slice and the
 // args slice with the new parameters appended.
+//
+// The collector_id filter uses EXISTS rather than a JOIN so a
+// specimen with multiple collectors in its chain doesn't appear
+// duplicated in the result, which would corrupt cursor pagination
+// (mi-zv3).
 func applySharedFilters(
 	where []string, args []any, filter domain.SpecimenFilter,
 ) ([]string, []any) {
@@ -374,6 +374,14 @@ func applySharedFilters(
 	if filter.AcquiredBefore != nil {
 		where = append(where, fmt.Sprintf("acquired_at <= $%d", len(args)+1))
 		args = append(args, *filter.AcquiredBefore)
+	}
+	if filter.CollectorID != nil {
+		where = append(where, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM specimen_collectors sc "+
+				"WHERE sc.specimen_id = specimens.id AND sc.collector_id = $%d)",
+			len(args)+1,
+		))
+		args = append(args, *filter.CollectorID)
 	}
 	return where, args
 }

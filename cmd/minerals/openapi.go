@@ -106,6 +106,18 @@ func (specStubSpecimenRepo) List(context.Context, domain.SpecimenFilter, domain.
 	return nil, "", nil
 }
 
+// specStubSpecimenCollectorRepo is a never-called stand-in so the
+// type-derived OpenAPI spec advertises the chain routes during
+// codegen (mi-zv3 / C-3).
+type specStubSpecimenCollectorRepo struct{}
+
+func (specStubSpecimenCollectorRepo) GetChain(context.Context, domain.Tx, uuid.UUID) ([]domain.SpecimenCollectorLink, error) {
+	return nil, nil
+}
+func (specStubSpecimenCollectorRepo) ReplaceChain(context.Context, domain.Tx, uuid.UUID, []uuid.UUID) error {
+	return nil
+}
+
 // runOpenAPI writes the type-derived OpenAPI spec served by the
 // running server at /api/v1/openapi.json to stdout. The frontend
 // codegen Makefile target consumes the output. Uses an in-process
@@ -130,7 +142,8 @@ func runOpenAPI(args []string) error {
 				return fn(nil)
 			},
 		},
-		Specimens: specStubSpecimenRepo{},
+		Specimens:          specStubSpecimenRepo{},
+		SpecimenCollectors: specStubSpecimenCollectorRepo{},
 	})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.json", nil)

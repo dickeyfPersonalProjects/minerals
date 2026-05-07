@@ -146,7 +146,7 @@ type listSpecimensInput struct {
 	HasCatalogNumber string `query:"has_catalog_number" enum:"true,false" doc:"true returns rows with a catalog_number set; false returns rows without. Omit to disable the filter."`
 	AcquiredAfter    string `query:"acquired_after" doc:"Inclusive lower bound on acquired_at (YYYY-MM-DD)."`
 	AcquiredBefore   string `query:"acquired_before" doc:"Inclusive upper bound on acquired_at (YYYY-MM-DD)."`
-	CollectorID      string `query:"collector_id" doc:"Filter by collector. STUB in v1 (B-2): the param is accepted but always returns an empty page until the specimen↔collector linkage is wired by B-4 (mi-jpu sibling)."`
+	CollectorID      string `query:"collector_id" doc:"Filter by collector: returns specimens that have the given collector anywhere in their chain (mi-zv3 / C-3)."`
 	Q                string `query:"q" doc:"Full-text search; when present, ordering switches to ts_rank DESC and any cursor previously issued under default ordering becomes invalid."`
 }
 
@@ -243,7 +243,7 @@ func registerSpecimenOperations(api huma.API, repo domain.SpecimenRepo) {
 		Path:        "/api/v1/specimens",
 		Summary:     "List specimens",
 		Description: "Cursor-paginated list of specimens. Default ordering is `created_at DESC, id DESC`. When `?q=` is present, ordering switches to `ts_rank DESC, created_at DESC, id DESC` and a cursor previously issued under default ordering is rejected (clients discard cursors when filters or `q` change). " +
-			"`?collector_id=` is accepted but currently returns an empty page (B-2 stub; B-4 will populate the linkage).",
+			"`?collector_id=` filters to specimens whose chain contains the given collector (mi-zv3).",
 		Tags:        []string{"specimens"},
 		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized},
 		Middlewares: mws,
