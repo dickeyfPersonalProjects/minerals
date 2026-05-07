@@ -127,6 +127,27 @@ func (specStubJournalRepo) ListBySpecimen(context.Context, uuid.UUID, domain.Pag
 	return nil, "", nil
 }
 
+// specStubJournalAttachmentRepo is the never-called stand-in so the
+// spec advertises the journal-files routes during codegen
+// (mi-720 / C-2).
+type specStubJournalAttachmentRepo struct{}
+
+func (specStubJournalAttachmentRepo) Create(context.Context, domain.Tx, domain.JournalEntryFile) error {
+	return domain.ErrJournalAttachmentNotFound
+}
+func (specStubJournalAttachmentRepo) GetByFileID(context.Context, uuid.UUID) (domain.JournalEntryFile, error) {
+	return domain.JournalEntryFile{}, domain.ErrJournalAttachmentNotFound
+}
+func (specStubJournalAttachmentRepo) ListByEntry(context.Context, uuid.UUID) ([]domain.JournalEntryFile, error) {
+	return nil, nil
+}
+func (specStubJournalAttachmentRepo) Delete(context.Context, domain.Tx, uuid.UUID) error {
+	return domain.ErrJournalAttachmentNotFound
+}
+func (specStubJournalAttachmentRepo) MaxPosition(context.Context, domain.Tx, uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 // specStubSpecimenCollectorRepo is a never-called stand-in so the
 // type-derived OpenAPI spec advertises the chain routes during
 // codegen (mi-zv3 / C-3).
@@ -168,6 +189,16 @@ func runOpenAPI(args []string) error {
 			Entries: specStubJournalRepo{},
 		},
 		SpecimenCollectors: specStubSpecimenCollectorRepo{},
+		JournalFiles: &api.JournalFileServiceDeps{
+			Entries:        specStubJournalRepo{},
+			Attachments:    specStubJournalAttachmentRepo{},
+			Files:          specStubFileRepo{},
+			Storage:        specStubStorage{},
+			MaxUploadBytes: 100 * 1024 * 1024,
+			RunInTx: func(ctx context.Context, fn func(tx domain.Tx) error) error {
+				return fn(nil)
+			},
+		},
 	})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.json", nil)

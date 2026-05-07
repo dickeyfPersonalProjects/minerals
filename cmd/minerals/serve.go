@@ -114,6 +114,18 @@ func runServe(_ []string) error {
 			Entries: db.NewJournalEntryPostgres(pool),
 		},
 		SpecimenCollectors: db.NewSpecimenCollectorPostgres(pool),
+		JournalFiles: &api.JournalFileServiceDeps{
+			Entries:        db.NewJournalEntryPostgres(pool),
+			Attachments:    db.NewJournalEntryFilePostgres(pool),
+			Files:          db.NewFilePostgres(pool),
+			Storage:        store,
+			MaxUploadBytes: cfg.MaxUploadBytes,
+			RunInTx: func(ctx context.Context, fn func(tx domain.Tx) error) error {
+				return db.RunInTx(ctx, pool, func(pgxTx pgx.Tx) error {
+					return fn(pgxTx)
+				})
+			},
+		},
 	}
 	handler := api.New(deps)
 
