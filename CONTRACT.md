@@ -388,6 +388,45 @@ invalidation on doc-only commits. The README and CONTRACT.md are
 useful for contributors browsing the repo on GitHub, but they're
 not build inputs.
 
+## README.md discipline
+
+The repo's `README.md` exists as a fast onboarding pointer, NOT a
+duplicate of CONTRACT.md or the design docs. Four rules govern it:
+
+- **Every command in `README.md` MUST be verified to work on a fresh
+  clone** before merge. A command that doesn't work is worse than no
+  command — it lies to a fresh contributor about how to start. Manual
+  verification by the polecat (or operator) is the gate; automated
+  smoke testing in CI is a deferred improvement (see below).
+- **The README's role is orientation + quickstart, then deferral to
+  CONTRACT.md.** It is NOT the place for design rationale, contract
+  rules, or operator runbooks. If a section starts to feel like a
+  CONTRACT.md chapter, move it to CONTRACT.md and leave a one-line
+  pointer in the README.
+- **Onboarding flow changes mandate README updates in the same PR.**
+  When env vars (per §15.4), Make targets, required tools, port
+  numbers, default credentials, or any "what does a fresh contributor
+  type to get the app running" fact changes, the README MUST be
+  updated in the same PR or the PR description MUST explicitly state
+  that the change does not affect onboarding flow. A reviewer can
+  refuse to merge a PR that changes onboarding without addressing
+  README.
+- **Brevity is a feature.** A README that grows past ~150 lines is
+  signaling that material belongs in CONTRACT.md or a dedicated doc.
+  Aim for: project name, one-paragraph "what is this," quickstart,
+  pointer block.
+
+A polecat MUST NOT close a bead that touches onboarding without
+either updating README in the same PR or noting in the PR description
+that README is unaffected.
+
+### Deferred to v2
+
+- Automated smoke-testing of README quickstart commands in CI (a job
+  that bootstraps from scratch and runs the documented commands).
+  Until this lands, manual verification on a fresh clone is the
+  required gate.
+
 # §3 — Local development workflow
 
 This section is for anyone bringing the app up locally for the first
