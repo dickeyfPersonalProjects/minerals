@@ -83,6 +83,7 @@ func runServe(_ []string) error {
 		SchemaVersion:   func(ctx context.Context) (uint, bool, error) { return schemaVersion(ctx, cfg.DatabaseURL) },
 		ExpectedVersion: expected,
 		WebHandler:      web.Handler(),
+		Collectors:      db.NewCollectorPostgres(pool),
 	}
 	handler := api.New(deps)
 

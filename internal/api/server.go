@@ -22,6 +22,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
 	"github.com/dickeyfPersonalProjects/minerals/internal/auth"
+	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
 )
 
 // Pinger reports whether the database accepts a `SELECT 1` round-trip.
@@ -48,11 +49,17 @@ type Deps struct {
 	SchemaVersion   SchemaVersionFn
 	ExpectedVersion uint
 	WebHandler      http.Handler // SPA fallback handler
+	// Collectors is wired with a real repo in production. Tests that
+	// don't exercise collectors leave it nil — the handler is then
+	// not registered and /api/v1/collectors falls through to the
+	// catch-all 404.
+	Collectors domain.CollectorRepo
 }
 
 // New returns an http.Handler with the v1 routes wired up. Callers
 // embed the result in their own *http.Server.
 func New(deps Deps) http.Handler {
+	installEnvelopeErrors()
 	mux := http.NewServeMux()
 
 	// Huma config: spec at /api/v1/openapi.json (per §10), docs and
@@ -71,8 +78,13 @@ func New(deps Deps) http.Handler {
 		{Name: "system", Description: "Operational endpoints: liveness, readiness, spec, docs."},
 	}
 
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "collectors", Description: "CRUD for the collectors directory (mi-yvt / B-1).",
+	})
+
 	humaAPI := humago.New(mux, cfg)
 	registerSystemOperations(humaAPI, deps)
+	registerCollectorOperations(humaAPI, deps.Collectors)
 
 	// Protected /api/v1/* fallback. Real handlers land in feature
 	// beads; for now any unmatched /api/v1/ path falls through to a
