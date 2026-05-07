@@ -310,3 +310,27 @@ type CollectorRepo interface {
 	Delete(ctx context.Context, tx Tx, id uuid.UUID) error
 	List(ctx context.Context, filter CollectorFilter, page Page) ([]Collector, Cursor, error)
 }
+
+// SpecimenCollectorLink is one row of a specimen's collector chain
+// joined with the collector it points at. position is 1-indexed and
+// matches the array order the user submitted in the PUT body.
+type SpecimenCollectorLink struct {
+	Collector Collector
+	Position  int
+}
+
+// SpecimenCollectorRepo is the consumer-side interface for the
+// specimen↔collector join table (mi-zv3 / C-3). The chain is edited
+// atomically via ReplaceChain — there is no per-link API surface.
+type SpecimenCollectorRepo interface {
+	// GetChain returns every link for specimen_id ordered by
+	// position ascending. An unknown specimen_id returns an empty
+	// slice (the API layer probes specimen existence separately so
+	// 404 vs empty-chain stays unambiguous).
+	GetChain(ctx context.Context, tx Tx, specimenID uuid.UUID) ([]SpecimenCollectorLink, error)
+	// ReplaceChain atomically replaces every row for specimen_id
+	// with the supplied collector_ids in order; the array index
+	// becomes the position (1-indexed). Returns ErrCollectorNotFound
+	// if any id is missing — no partial replace.
+	ReplaceChain(ctx context.Context, tx Tx, specimenID uuid.UUID, collectorIDs []uuid.UUID) error
+}

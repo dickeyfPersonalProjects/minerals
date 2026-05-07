@@ -53,31 +53,6 @@ export interface paths {
         patch: operations["patch-collector"];
         trace?: never;
     };
-    "/api/v1/journal/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get a journal entry by id */
-        get: operations["get-journal-entry"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete a journal entry
-         * @description Returns 409 when the entry still has attachments (`journal_entry_files` rows). Attachment deletion lands in C-2.
-         */
-        delete: operations["delete-journal-entry"];
-        options?: never;
-        head?: never;
-        /**
-         * Update a journal entry
-         * @description Updates `body_md` (and re-renders `body_html`). `created_at` is immutable; supplying it in the body is rejected with 400.
-         */
-        patch: operations["patch-journal-entry"];
-        trace?: never;
-    };
     "/api/v1/openapi.json": {
         parameters: {
             query?: never;
@@ -128,7 +103,7 @@ export interface paths {
         };
         /**
          * List specimens
-         * @description Cursor-paginated list of specimens. Default ordering is `created_at DESC, id DESC`. When `?q=` is present, ordering switches to `ts_rank DESC, created_at DESC, id DESC` and a cursor previously issued under default ordering is rejected (clients discard cursors when filters or `q` change). `?collector_id=` is accepted but currently returns an empty page (B-2 stub; B-4 will populate the linkage).
+         * @description Cursor-paginated list of specimens. Default ordering is `created_at DESC, id DESC`. When `?q=` is present, ordering switches to `ts_rank DESC, created_at DESC, id DESC` and a cursor previously issued under default ordering is rejected (clients discard cursors when filters or `q` change). `?collector_id=` filters to specimens whose chain contains the given collector (mi-zv3).
          */
         get: operations["list-specimens"];
         put?: never;
@@ -168,7 +143,7 @@ export interface paths {
         patch: operations["patch-specimen"];
         trace?: never;
     };
-    "/api/v1/specimens/{id}/journal": {
+    "/api/v1/specimens/{id}/collectors": {
         parameters: {
             query?: never;
             header?: never;
@@ -176,16 +151,16 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List a specimen's journal entries
-         * @description Cursor-paginated list ordered `created_at DESC, id DESC` (CONTRACT.md §10.3). Each entry includes `body_html` alongside `body_md`.
+         * Get a specimen's collector chain
+         * @description Returns the ordered collector chain for the specimen. Empty array when the specimen has no collectors. 404 when the specimen does not exist.
          */
-        get: operations["list-specimen-journal-entries"];
-        put?: never;
+        get: operations["get-specimen-collectors"];
         /**
-         * Create a journal entry for a specimen
-         * @description Creates an entry whose body is rendered server-side via the CONTRACT.md §17 markdown pipeline. `created_at` is server-set and immutable after creation.
+         * Replace a specimen's collector chain
+         * @description Atomically replaces every link in the chain with the supplied collector_ids in order (array index = position, 1-indexed). Pass an empty array to clear the chain. Returns 404 when the specimen does not exist; 404 when any collector_id does not exist; 400 when the body contains duplicate ids.
          */
-        post: operations["create-journal-entry"];
+        put: operations["put-specimen-collectors"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -355,16 +330,6 @@ export interface components {
             /** @description Optional free-form notes. */
             notes?: string;
         };
-        CreateJournalBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example //schemas/CreateJournalBody.json
-             */
-            readonly $schema?: string;
-            /** @description Markdown source for the entry. Server renders to HTML at write and read time. */
-            body_md: string;
-        };
         CreateSpecimenBody: {
             /**
              * Format: uri
@@ -431,46 +396,6 @@ export interface components {
             /** Format: int64 */
             Size: number;
         };
-        JournalListBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example //schemas/JournalListBody.json
-             */
-            readonly $schema?: string;
-            /** @description Page of journal entries (most-recent first). */
-            items: components["schemas"]["JournalView"][] | null;
-            /** @description Cursor for the next page; null at end of results. */
-            next_cursor: string | null;
-        };
-        JournalView: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example //schemas/JournalView.json
-             */
-            readonly $schema?: string;
-            /** @description UUID of the user who created the entry (CONTRACT.md §13). */
-            author_id: string;
-            /** @description Server-rendered, sanitized HTML (CONTRACT.md §17 pipeline). */
-            body_html: string;
-            /** @description Raw markdown source (editable for typo fixes). */
-            body_md: string;
-            /**
-             * Format: date-time
-             * @description RFC 3339 creation timestamp; immutable after creation.
-             */
-            created_at: string;
-            /** @description UUIDv7 primary key. */
-            id: string;
-            /** @description Owning specimen. */
-            specimen_id: string;
-            /**
-             * Format: date-time
-             * @description RFC 3339 last-update timestamp.
-             */
-            updated_at: string;
-        };
         Locality: {
             country?: string;
             /** Format: double */
@@ -514,21 +439,6 @@ export interface components {
             name?: string;
             /** @description New notes; omit to leave unchanged. Pass JSON null to clear. */
             notes?: string;
-        };
-        PatchJournalBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example //schemas/PatchJournalBody.json
-             */
-            readonly $schema?: string;
-            /** @description New markdown source. Omit to leave unchanged. */
-            body_md?: string;
-            /**
-             * Format: date-time
-             * @description REJECTED. created_at is immutable per design §2; supplying any value (including the existing one) returns 400.
-             */
-            created_at?: string;
         };
         PatchPhotoBody: {
             /**
@@ -647,6 +557,16 @@ export interface components {
              */
             taken_at: string | null;
         };
+        PutSpecimenCollectorsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/PutSpecimenCollectorsBody.json
+             */
+            readonly $schema?: string;
+            /** @description Ordered list of collector UUIDs. Array index becomes the chain position (1-indexed). Pass an empty array to clear the chain. */
+            collector_ids: string[] | null;
+        };
         ReadyzBody: {
             /**
              * Format: uri
@@ -669,6 +589,25 @@ export interface components {
             composition?: string;
             formation_context?: string;
             rock_type?: string;
+        };
+        SpecimenCollectorLinkView: {
+            /** @description The collector at this position in the chain. */
+            collector: components["schemas"]["CollectorView"];
+            /**
+             * Format: int64
+             * @description 1-indexed position within the chain.
+             */
+            position: number;
+        };
+        SpecimenCollectorsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/SpecimenCollectorsBody.json
+             */
+            readonly $schema?: string;
+            /** @description Collector chain in position-ascending order. Empty when the specimen has no collectors. */
+            items: components["schemas"]["SpecimenCollectorLinkView"][] | null;
         };
         SpecimenListBody: {
             /**
@@ -1113,221 +1052,6 @@ export interface operations {
             };
         };
     };
-    "get-journal-entry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Journal entry UUID. */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["JournalView"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    "delete-journal-entry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Journal entry UUID. */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description No Content */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    "patch-journal-entry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Journal entry UUID. */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PatchJournalBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["JournalView"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
     openapi: {
         parameters: {
             query?: never;
@@ -1508,7 +1232,7 @@ export interface operations {
                 acquired_after?: string;
                 /** @description Inclusive upper bound on acquired_at (YYYY-MM-DD). */
                 acquired_before?: string;
-                /** @description Filter by collector. STUB in v1 (B-2): the param is accepted but always returns an empty page until the specimen↔collector linkage is wired by B-4 (mi-jpu sibling). */
+                /** @description Filter by collector: returns specimens that have the given collector anywhere in their chain (mi-zv3 / C-3). */
                 collector_id?: string;
                 /** @description Full-text search; when present, ordering switches to ts_rank DESC and any cursor previously issued under default ordering becomes invalid. */
                 q?: string;
@@ -1860,14 +1584,9 @@ export interface operations {
             };
         };
     };
-    "list-specimen-journal-entries": {
+    "get-specimen-collectors": {
         parameters: {
-            query?: {
-                /** @description Page size (1-200; defaults to 50, values above 200 silently clamped). */
-                limit?: number;
-                /** @description Opaque pagination cursor returned by the previous page (CONTRACT.md §10.3). */
-                cursor?: string;
-            };
+            query?: never;
             header?: never;
             path: {
                 /** @description Specimen UUID. */
@@ -1883,7 +1602,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["JournalListBody"];
+                    "application/json": components["schemas"]["SpecimenCollectorsBody"];
                 };
             };
             /** @description Bad Request */
@@ -1897,6 +1616,15 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1924,7 +1652,7 @@ export interface operations {
             };
         };
     };
-    "create-journal-entry": {
+    "put-specimen-collectors": {
         parameters: {
             query?: never;
             header?: never;
@@ -1936,18 +1664,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateJournalBody"];
+                "application/json": components["schemas"]["PutSpecimenCollectorsBody"];
             };
         };
         responses: {
-            /** @description Created */
-            201: {
+            /** @description OK */
+            200: {
                 headers: {
-                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["JournalView"];
+                    "application/json": components["schemas"]["SpecimenCollectorsBody"];
                 };
             };
             /** @description Bad Request */

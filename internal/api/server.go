@@ -66,6 +66,10 @@ type Deps struct {
 	// in production (mi-y6b / C-1). nil leaves /api/v1/journal and
 	// /api/v1/specimens/{id}/journal unregistered.
 	Journal *JournalServiceDeps
+	// SpecimenCollectors is wired in production (mi-zv3 / C-3) to
+	// expose GET/PUT /api/v1/specimens/{id}/collectors. nil leaves
+	// the chain endpoints unregistered.
+	SpecimenCollectors domain.SpecimenCollectorRepo
 }
 
 // New returns an http.Handler with the v1 routes wired up. Callers
@@ -109,6 +113,7 @@ func New(deps Deps) http.Handler {
 	registerPhotoOperations(humaAPI, mux, deps.Photos)
 	registerSpecimenOperations(humaAPI, deps.Specimens)
 	registerJournalOperations(humaAPI, deps.Journal)
+	registerSpecimenCollectorOperations(humaAPI, deps.Specimens, deps.SpecimenCollectors)
 
 	// Protected /api/v1/* fallback. Real handlers land in feature
 	// beads; for now any unmatched /api/v1/ path falls through to a
