@@ -128,7 +128,7 @@ export interface paths {
         };
         /**
          * List specimens
-         * @description Cursor-paginated list of specimens. Default ordering is `created_at DESC, id DESC`. When `?q=` is present, ordering switches to `ts_rank DESC, created_at DESC, id DESC` and a cursor previously issued under default ordering is rejected (clients discard cursors when filters or `q` change). `?collector_id=` is accepted but currently returns an empty page (B-2 stub; B-4 will populate the linkage).
+         * @description Cursor-paginated list of specimens. Default ordering is `created_at DESC, id DESC`. When `?q=` is present, ordering switches to `ts_rank DESC, created_at DESC, id DESC` and a cursor previously issued under default ordering is rejected (clients discard cursors when filters or `q` change). `?collector_id=` filters to specimens whose chain contains the given collector (mi-zv3).
          */
         get: operations["list-specimens"];
         put?: never;
@@ -166,6 +166,30 @@ export interface paths {
          * @description Partial update; omitted fields keep previous values. `type_data` is merged at the top level. Sending a `type` that differs from the stored value is rejected with 409 (specimen reclassification means delete + recreate per design §2).
          */
         patch: operations["patch-specimen"];
+        trace?: never;
+    };
+    "/api/v1/specimens/{id}/collectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a specimen's collector chain
+         * @description Returns the ordered collector chain for the specimen. Empty array when the specimen has no collectors. 404 when the specimen does not exist.
+         */
+        get: operations["get-specimen-collectors"];
+        /**
+         * Replace a specimen's collector chain
+         * @description Atomically replaces every link in the chain with the supplied collector_ids in order (array index = position, 1-indexed). Pass an empty array to clear the chain. Returns 404 when the specimen does not exist; 404 when any collector_id does not exist; 400 when the body contains duplicate ids.
+         */
+        put: operations["put-specimen-collectors"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/specimens/{id}/journal": {
@@ -647,6 +671,16 @@ export interface components {
              */
             taken_at: string | null;
         };
+        PutSpecimenCollectorsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/PutSpecimenCollectorsBody.json
+             */
+            readonly $schema?: string;
+            /** @description Ordered list of collector UUIDs. Array index becomes the chain position (1-indexed). Pass an empty array to clear the chain. */
+            collector_ids: string[] | null;
+        };
         ReadyzBody: {
             /**
              * Format: uri
@@ -669,6 +703,25 @@ export interface components {
             composition?: string;
             formation_context?: string;
             rock_type?: string;
+        };
+        SpecimenCollectorLinkView: {
+            /** @description The collector at this position in the chain. */
+            collector: components["schemas"]["CollectorView"];
+            /**
+             * Format: int64
+             * @description 1-indexed position within the chain.
+             */
+            position: number;
+        };
+        SpecimenCollectorsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/SpecimenCollectorsBody.json
+             */
+            readonly $schema?: string;
+            /** @description Collector chain in position-ascending order. Empty when the specimen has no collectors. */
+            items: components["schemas"]["SpecimenCollectorLinkView"][] | null;
         };
         SpecimenListBody: {
             /**
@@ -1508,7 +1561,7 @@ export interface operations {
                 acquired_after?: string;
                 /** @description Inclusive upper bound on acquired_at (YYYY-MM-DD). */
                 acquired_before?: string;
-                /** @description Filter by collector. STUB in v1 (B-2): the param is accepted but always returns an empty page until the specimen↔collector linkage is wired by B-4 (mi-jpu sibling). */
+                /** @description Filter by collector: returns specimens that have the given collector anywhere in their chain (mi-zv3 / C-3). */
                 collector_id?: string;
                 /** @description Full-text search; when present, ordering switches to ts_rank DESC and any cursor previously issued under default ordering becomes invalid. */
                 q?: string;
@@ -1833,6 +1886,146 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "get-specimen-collectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Specimen UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecimenCollectorsBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "put-specimen-collectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Specimen UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutSpecimenCollectorsBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecimenCollectorsBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
