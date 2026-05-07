@@ -142,3 +142,62 @@ jobs:
         if: steps.detect.outputs.present == 'true'
         working-directory: frontend
         run: npm test
+
+  # Validates the committed docker-compose.yml end-to-end. The Backend
+  # job above brings up Postgres + MinIO via GHA service containers
+  # (and a `docker run` for MinIO), bypassing the compose file — so a
+  # polecat could break compose (versions, ports, credentials, missing
+  # services) without CI noticing. This job exercises the file the way
+  # a fresh contributor would after `git clone`.
+  #
+  # Health-check pattern: bounded poll loops on the host (pg_isready
+  # for Postgres, curl for MinIO) rather than relying on the compose
+  # file's own healthchecks. Polling from the host catches host-port-
+  # binding drift that an in-container healthcheck would miss.
+  compose-smoke:
+    name: Compose smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: docker compose up
+        run: docker compose up -d
+
+      - name: Wait for Postgres healthy
+        run: |
+          for i in $(seq 1 60); do
+            if pg_isready -h localhost -p 5432 -U minerals -d minerals >/dev/null 2>&1; then
+              echo "Postgres ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Postgres did not become ready in 60s" >&2
+          docker compose logs postgres >&2 || true
+          exit 1
+
+      - name: Wait for MinIO healthy
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:9000/minio/health/live >/dev/null; then
+              echo "MinIO ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "MinIO did not become ready in 60s" >&2
+          docker compose logs minio >&2 || true
+          exit 1
+
+      - name: Postgres smoke (SELECT 1)
+        env:
+          PGPASSWORD: minerals
+        run: psql -h localhost -p 5432 -U minerals -d minerals -c 'SELECT 1;'
+
+      - name: MinIO smoke (health/live)
+        run: curl -fsS http://localhost:9000/minio/health/live
+
+      - name: docker compose down
+        if: always()
+        run: docker compose down -v
