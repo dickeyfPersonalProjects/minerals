@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { link } from 'svelte-spa-router';
   import { client } from '../lib/api';
   import type { components } from '../lib/api/schema';
   import SpecimenCard from '../lib/SpecimenCard.svelte';
@@ -58,6 +59,14 @@
 <section>
   <header class="mb-4 flex items-end justify-between">
     <h1 class="text-2xl font-semibold tracking-tight text-[var(--color-text)]">Specimens</h1>
+    <a
+      href="/specimens/new"
+      use:link
+      data-testid="new-specimen-link"
+      class="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-[var(--color-accent-fg)] hover:opacity-90"
+    >
+      New specimen
+    </a>
   </header>
 
   {#if loadState.kind === 'loading'}

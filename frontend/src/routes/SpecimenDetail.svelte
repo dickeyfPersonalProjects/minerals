@@ -301,6 +301,16 @@
             </span>
           {/if}
         </div>
+        <div class="ml-auto pt-1">
+          <a
+            href={`/specimens/${specimen.id}/edit`}
+            use:link
+            data-testid="edit-specimen-link"
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+          >
+            Edit
+          </a>
+        </div>
       </div>
     </header>
 

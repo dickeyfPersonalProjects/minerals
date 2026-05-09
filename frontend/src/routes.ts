@@ -7,10 +7,14 @@
 import type { RouteDefinition } from 'svelte-spa-router';
 import Specimens from './routes/Specimens.svelte';
 import SpecimenDetail from './routes/SpecimenDetail.svelte';
+import SpecimenNew from './routes/SpecimenNew.svelte';
+import SpecimenEdit from './routes/SpecimenEdit.svelte';
 
 export const routes: RouteDefinition = {
   '/': Specimens,
   '/specimens': Specimens,
+  '/specimens/new': SpecimenNew,
   '/specimens/:id': SpecimenDetail,
+  '/specimens/:id/edit': SpecimenEdit,
   '*': Specimens,
 };
