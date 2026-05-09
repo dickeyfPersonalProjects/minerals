@@ -444,10 +444,15 @@ configuration lives in a separate GitOps repo. Two locations only:
   `docker compose up -d` and `podman compose up -d` look by default;
   moving it forces every contributor to type `-f path/...` in every
   command. The file is dev-only; not used in production.
-- **`kustomize/base/`** at the repo root (when k3s deployment work
-  begins) — Kustomize base manifests for the app's Kubernetes
-  resources (Deployment, Service, ConfigMap stubs, etc.). **Base
-  ONLY**: no overlays, no patches, no environment-specific values.
+- **`kustomize/base/`** at the repo root — Kustomize base manifests
+  for the app's Kubernetes resources: CNPG `Cluster`, MinIO
+  `Tenant`, app `Deployment` (with a migrate initContainer per §6.4),
+  `Service`, and `ConfigMap`. **Base ONLY**: no overlays, no patches,
+  no environment-specific values, no Namespace, no Ingress, no
+  Secrets — those live in the operator's GitOps repo. The base
+  references two external Secrets by name (`minerals-minio-config`
+  and `minerals-s3-creds`); the GitOps overlay provides them via
+  kubeseal.
 
 ### Why no Kustomize overlays in this repo
 
