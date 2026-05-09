@@ -1,0 +1,63 @@
+# =============================================================================
+# minerals — v1 Kustomize base
+# =============================================================================
+#
+# This is the v1 base for deploying the minerals app to Kubernetes (k3s).
+# It is consumed as a remote base by the operator's separate GitOps repo,
+# which adds:
+#   - the target Namespace
+#   - environment-specific overlays (image tags, replica counts, resource
+#     overrides if any)
+#   - Ingress + TLS (cert-manager / hostnames)
+#   - sealed Secrets (kubeseal) — see "Required external Secrets" below
+#   - NetworkPolicies (if used)
+#
+# Per CONTRACT.md §2 IaC layout: this repo declares WHAT to run; HOW it runs
+# in any specific environment lives in the GitOps repo. Do NOT add
+# kustomize/overlays/ here.
+#
+# -----------------------------------------------------------------------------
+# Required external Secrets (provided by the GitOps overlay, NOT in this base)
+# -----------------------------------------------------------------------------
+#
+#   - minerals-minio-config         (Opaque)
+#       key  config.env             contains:
+#                                     export MINIO_ROOT_USER=...
+#                                     export MINIO_ROOT_PASSWORD=...
+#       Consumed by: MinIO Tenant (spec.configuration.name)
+#
+#   - minerals-s3-creds             (Opaque)
+#       key  S3_ACCESS_KEY_ID
+#       key  S3_SECRET_ACCESS_KEY
+#       Consumed by: app Deployment envFrom. Operator creates a MinIO IAM
+#       user (or reuses root) and writes its creds here under the exact key
+#       names the app reads.
+#
+# Auto-generated Secrets (created by operators, NOT to be committed):
+#
+#   - minerals-pg-app               (CNPG-generated)
+#       key  uri                    Postgres DSN as DATABASE_URL
+#       key  username, password, host, dbname, port, jdbc-uri
+#
+# -----------------------------------------------------------------------------
+# Future Keycloak (NOT in v1): add another role to the CNPG Cluster's
+# managed.roles + a separate Database CRD reference. Do NOT add Ingress here
+# for Keycloak — that's the GitOps overlay's job (same as the app's Ingress).
+# =============================================================================
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# No namespace declared — overlay sets it.
+
+labels:
+  - includeSelectors: true
+    pairs:
+      app: minerals
+
+resources:
+  - postgres.yaml
+  - minio.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml

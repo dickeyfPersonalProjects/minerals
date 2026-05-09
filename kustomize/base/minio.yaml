@@ -1,0 +1,77 @@
+# MinIO Operator Tenant — single-server, single-pool object storage for v1.
+#
+# Operator API: minio.min.io/v2 (MinIO Operator v5+). Older v4.x operators
+# auto-generated the root credentials Secret; v5+ requires the operator to
+# supply it via spec.configuration.name (a Secret with a config.env key
+# containing `export MINIO_ROOT_USER=...` and `export MINIO_ROOT_PASSWORD=...`).
+# That Secret (minerals-minio-config) is provided by the GitOps overlay; see
+# kustomization.yaml header.
+#
+# requestAutoCert: false — TLS is terminated upstream at the Ingress (managed
+# by the GitOps overlay). In-cluster traffic from the app to MinIO stays
+# inside the cluster and does not need TLS in v1. To enable TLS pod-to-pod,
+# the overlay can patch this field.
+#
+# Bucket creation: the v2 Tenant CRD's `buckets` field creates the named
+# bucket on first reconcile. No separate Bucket CRD needed.
+#
+# Resource sizing (educated guess; revisit with telemetry):
+#   - memory requests 256Mi: MinIO is largely I/O-bound; idle footprint is
+#     small for a single server with a single drive.
+#   - memory limits 512Mi: headroom for object listing and erasure-coding
+#     buffers under modest concurrent uploads.
+#   - cpu requests 100m / limits 500m: parity with Postgres; bursts on
+#     multipart uploads are short.
+apiVersion: minio.min.io/v2
+kind: Tenant
+metadata:
+  name: minerals
+  annotations:
+    # Disable the operator's prometheus auto-scrape annotation injection;
+    # observability is the GitOps overlay's call.
+    prometheus.io/path: /minio/v2/metrics/cluster
+    prometheus.io/port: "9000"
+    prometheus.io/scrape: "false"
+spec:
+  # Operator-supplied credentials Secret (see kustomization.yaml header).
+  configuration:
+    name: minerals-minio-config
+
+  # Single pool, single server, single drive — no HA in v1.
+  pools:
+    - name: pool-0
+      servers: 1
+      volumesPerServer: 1
+      # Default StorageClass — don't pin so the operator's per-cluster
+      # default applies.
+      volumeClaimTemplate:
+        metadata:
+          name: data
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 20Gi
+      resources:
+        requests:
+          memory: 256Mi
+          cpu: 100m
+        limits:
+          memory: 512Mi
+          cpu: 500m
+
+  # In-cluster traffic only; Ingress + TLS handled by the GitOps overlay.
+  requestAutoCert: false
+
+  # Both ClusterIP services exist regardless; exposeServices controls whether
+  # they become LoadBalancer/NodePort. We want internal-only — Ingress is the
+  # GitOps overlay's call.
+  exposeServices:
+    minio: false
+    console: false
+
+  # Bucket auto-create on first reconcile. Matches S3_BUCKET in configmap.yaml.
+  buckets:
+    - name: minerals
+      region: us-east-1

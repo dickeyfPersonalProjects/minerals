@@ -1,0 +1,15 @@
+# ClusterIP service for the app. Named `minerals` so the GitOps overlay's
+# Ingress can target it by stable name.
+apiVersion: v1
+kind: Service
+metadata:
+  name: minerals
+spec:
+  type: ClusterIP
+  selector:
+    app: minerals
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

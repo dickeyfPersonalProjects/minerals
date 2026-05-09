@@ -1,0 +1,66 @@
+# CloudNativePG Cluster — single-instance Postgres for v1.
+#
+# Future Keycloak: add another role to managed.roles + a Database CRD
+# reference. Not in v1.
+#
+# Resource sizing rationale (educated guess; revisit when we have data):
+#   - memory requests 256Mi: CNPG suggests 256–512Mi for small clusters; this
+#     covers shared_buffers (default ~128Mi for small instances) + connections.
+#   - memory limits 512Mi: 2x request gives headroom for query workspaces and
+#     occasional analytics-style queries without OOM.
+#   - cpu requests 100m: idle Postgres barely uses CPU; reservation is a
+#     scheduling hint, not a need.
+#   - cpu limits 500m: lets a single heavy query burst without throttling but
+#     keeps a single tenant from monopolising a node.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: minerals-pg
+spec:
+  instances: 1
+
+  # No storage.storageClass — defaults to the cluster's default StorageClass.
+  storage:
+    size: 10Gi
+
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+  bootstrap:
+    initdb:
+      database: minerals
+      owner: minerals_app
+
+      # Lock the minerals_app role to its own database. PUBLIC has CONNECT on
+      # every database by default; revoke from PUBLIC and from the role for
+      # defence in depth. Runs on the postgres database as superuser at
+      # cluster bootstrap time, before the app ever connects.
+      postInitSQL:
+        - REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;
+        - REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;
+        - REVOKE CONNECT ON DATABASE postgres FROM minerals_app;
+        - REVOKE CONNECT ON DATABASE template1 FROM minerals_app;
+
+  # Declarative role management. The role is created by initdb above; this
+  # block reconciles its attributes continuously and documents intent.
+  # No passwordSecret — we keep the password CNPG auto-generated at initdb
+  # (exposed via the minerals-pg-app Secret) rather than rotating it from a
+  # user-managed Secret.
+  managed:
+    roles:
+      - name: minerals_app
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        replication: false
+        bypassrls: false
+        inherit: true
+        connectionLimit: 50
+        comment: "Application role for the minerals service. Locked to the minerals database."
