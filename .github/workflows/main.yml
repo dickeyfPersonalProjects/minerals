@@ -253,4 +253,5 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:staging
             ${{ env.IMAGE_NAME }}:sha-${{ steps.sha.outputs.short }}
