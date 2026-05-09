@@ -20,15 +20,19 @@ vi.mock('svelte-spa-router', async () => {
 });
 
 import SpecimenNew from './SpecimenNew.svelte';
+import { clearAllToasts, toasts } from '../lib/stores/toasts';
+import { get } from 'svelte/store';
 
 beforeEach(() => {
   mockPost.mockReset();
   mockPush.mockReset();
+  clearAllToasts();
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  clearAllToasts();
 });
 
 describe('SpecimenNew route', () => {
@@ -84,7 +88,7 @@ describe('SpecimenNew route', () => {
     expect(mockPush).not.toHaveBeenCalled();
   });
 
-  it('shows a banner error on a non-field 4xx', async () => {
+  it('toasts on a non-field 4xx instead of rendering a banner', async () => {
     mockPost.mockResolvedValue({
       data: undefined,
       error: { error: { code: 'invalid', message: 'something is off' } },
@@ -96,8 +100,30 @@ describe('SpecimenNew route', () => {
     await fireEvent.input(screen.getByLabelText(/^name/i), { target: { value: 'Galena' } });
     await fireEvent.submit(screen.getByTestId('specimen-form'));
 
-    await waitFor(() => expect(screen.getByTestId('form-error')).toBeInTheDocument());
-    expect(screen.getByTestId('form-error')).toHaveTextContent(/something is off/);
+    await waitFor(() => expect(get(toasts)).toHaveLength(1));
+    const t = get(toasts)[0]!;
+    expect(t.type).toBe('error');
+    expect(t.message).toMatch(/something is off/);
+    expect(screen.queryByTestId('form-error')).not.toBeInTheDocument();
     expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('toasts a success message after creating', async () => {
+    mockPost.mockResolvedValue({
+      data: { id: 'abc-123', name: 'Galena', type: 'mineral' },
+      error: undefined,
+      response: new Response(),
+    });
+
+    render(SpecimenNew);
+
+    await fireEvent.input(screen.getByLabelText(/^name/i), { target: { value: 'Galena' } });
+    await fireEvent.submit(screen.getByTestId('specimen-form'));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalled());
+    const list = get(toasts);
+    expect(list).toHaveLength(1);
+    expect(list[0]!.type).toBe('success');
+    expect(list[0]!.message).toMatch(/created/i);
   });
 });

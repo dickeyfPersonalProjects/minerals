@@ -59,7 +59,7 @@ describe('JournalEntryForm', () => {
     expect(passed).toEqual({ body_md: 'Cleaned with brush.' });
   });
 
-  it('renders the banner error when onSubmit returns kind: error', async () => {
+  it('does not render an inline banner when onSubmit returns kind: error (route toasts)', async () => {
     const onSubmit = vi.fn(
       async (): Promise<JournalEntryFormSubmitResult> => ({
         kind: 'error',
@@ -72,8 +72,10 @@ describe('JournalEntryForm', () => {
     await fireEvent.input(textarea, { target: { value: 'Hello' } });
     await fireEvent.submit(screen.getByTestId('journal-entry-form'));
 
-    await waitFor(() => expect(screen.getByTestId('journal-form-error')).toBeInTheDocument());
-    expect(screen.getByTestId('journal-form-error')).toHaveTextContent('Network down');
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    // The inline journal-form-error banner was removed in E-4 in
+    // favor of a global toast surfaced by the route.
+    expect(screen.queryByTestId('journal-form-error')).not.toBeInTheDocument();
   });
 
   it('calls onCancel when the cancel button is clicked', async () => {

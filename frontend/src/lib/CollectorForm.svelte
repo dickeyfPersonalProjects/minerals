@@ -34,7 +34,6 @@
     notes: z.string().max(10_000, 'Notes are too long'),
   });
 
-  let bannerError: string | null = $state(null);
   let nameTakenError: string | null = $state(null);
 
   const { form, errors, isSubmitting, data } = createForm<CollectorFormValues>({
@@ -44,7 +43,6 @@
     },
     extend: validator({ schema }),
     onSubmit: async (values) => {
-      bannerError = null;
       nameTakenError = null;
       const trimmed: CollectorFormValues = {
         name: values.name.trim(),
@@ -55,10 +53,8 @@
         nameTakenError = `A collector named "${trimmed.name}" already exists.`;
         return;
       }
-      if (result.kind === 'error') {
-        bannerError = result.message;
-        return;
-      }
+      // Submit-level errors are surfaced as toasts by the caller
+      // (E-4); no inline banner here.
     },
   });
 
@@ -73,16 +69,6 @@
 </script>
 
 <form use:form data-testid="collector-form" class="space-y-4" novalidate>
-  {#if bannerError}
-    <div
-      role="alert"
-      data-testid="form-error"
-      class="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300"
-    >
-      {bannerError}
-    </div>
-  {/if}
-
   <div>
     <label for="collector-name" class="mb-1 block text-sm font-medium text-[var(--color-text)]">
       Name <span class="text-red-500" aria-hidden="true">*</span>

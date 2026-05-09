@@ -45,7 +45,6 @@
     ...(initial ?? {}),
   }));
 
-  let bannerError: string | null = $state(null);
   let catalogNumberError: string | null = $state(null);
   let fieldErrors: Record<string, string> = $state({});
 
@@ -53,7 +52,6 @@
     initialValues,
     extend: validator({ schema: specimenFormSchema }),
     onSubmit: async (values) => {
-      bannerError = null;
       catalogNumberError = null;
       fieldErrors = {};
       const result = await onSubmit(values);
@@ -63,13 +61,11 @@
       }
       if (result.kind === 'field_error') {
         fieldErrors = { [result.field]: result.message };
-        bannerError = result.message;
         return;
       }
-      if (result.kind === 'error') {
-        bannerError = result.message;
-        return;
-      }
+      // Submit-level errors are surfaced as toasts by the route
+      // handler (E-4); the form no longer renders an inline
+      // banner for them.
     },
   });
 
@@ -112,16 +108,6 @@
 </script>
 
 <form use:form data-testid="specimen-form" class="space-y-6" novalidate>
-  {#if bannerError}
-    <div
-      role="alert"
-      data-testid="form-error"
-      class="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300"
-    >
-      {bannerError}
-    </div>
-  {/if}
-
   <fieldset class="space-y-2" data-testid="type-fieldset" disabled={mode === 'edit'}>
     <legend class="block text-sm font-medium text-[var(--color-text)]">
       Type <span class="text-red-500" aria-hidden="true">*</span>

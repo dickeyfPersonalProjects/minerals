@@ -1,6 +1,7 @@
 <script lang="ts">
   import { link, push } from 'svelte-spa-router';
   import { client } from '../lib/api';
+  import { envelopeMessage, toastApiError } from '../lib/api/wrapper';
   import type { components } from '../lib/api/schema';
   import SpecimenForm from '../lib/SpecimenForm.svelte';
   import type { SpecimenFormSubmitResult } from '../lib/SpecimenForm.svelte';
@@ -9,6 +10,7 @@
     specimenToFormValues,
     type SpecimenFormValues,
   } from '../lib/schemas/specimen';
+  import { toastSuccess } from '../lib/stores/toasts';
 
   type Specimen = components['schemas']['SpecimenView'];
 
@@ -25,13 +27,6 @@
 
   let specimen: Specimen | null = $state(null);
   let loadState: LoadState = $state({ kind: 'idle' });
-
-  function envelopeMessage(
-    error: { error?: { code?: string; message?: string } } | undefined,
-    status: number,
-  ): string {
-    return error?.error?.message || error?.error?.code || `HTTP ${status}`;
-  }
 
   async function load(id: string): Promise<void> {
     loadState = { kind: 'loading' };
@@ -89,8 +84,10 @@
           message: envelopeMessage(error, response.status),
         };
       }
+      toastApiError(error, response.status);
       return { kind: 'error', message: envelopeMessage(error, response.status) };
     }
+    toastSuccess('Specimen updated.');
     push(`/specimens/${specimen.id}`);
     return { kind: 'ok' };
   }

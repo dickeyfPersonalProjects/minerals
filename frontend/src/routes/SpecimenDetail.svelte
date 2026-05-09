@@ -1,6 +1,7 @@
 <script lang="ts">
   import { link } from 'svelte-spa-router';
   import { client } from '../lib/api';
+  import { envelopeMessage, toastApiError } from '../lib/api/wrapper';
   import type { components } from '../lib/api/schema';
   import JournalAttachments from '../lib/JournalAttachments.svelte';
   import JournalEntryForm, {
@@ -9,6 +10,7 @@
   import type { JournalEntryFormValues } from '../lib/schemas/journal';
   import Lightbox from '../lib/Lightbox.svelte';
   import PhotoUploader from '../lib/PhotoUploader.svelte';
+  import { toastSuccess } from '../lib/stores/toasts';
   import { formatLocal } from '../lib/time';
 
   type Specimen = components['schemas']['SpecimenView'];
@@ -38,13 +40,6 @@
   let lightboxIndex: number | null = $state(null);
   let journalCreating = $state(false);
   let editingEntryId: string | null = $state(null);
-
-  function errorMessage(
-    error: { error?: { code?: string; message?: string } } | undefined,
-    status: number,
-  ): string {
-    return error?.error?.message || error?.error?.code || `HTTP ${status}`;
-  }
 
   async function refetchPhotos(id: string): Promise<void> {
     try {
@@ -78,10 +73,12 @@
       body: { body_md: values.body_md },
     });
     if (error) {
-      return { kind: 'error', message: errorMessage(error, response.status) };
+      toastApiError(error, response.status);
+      return { kind: 'error', message: envelopeMessage(error, response.status) };
     }
     journalCreating = false;
     await refetchJournal(specimen.id);
+    toastSuccess('Journal entry added.');
     return { kind: 'ok' };
   }
 
@@ -93,10 +90,12 @@
         body: { body_md: values.body_md },
       });
       if (error) {
-        return { kind: 'error', message: errorMessage(error, response.status) };
+        toastApiError(error, response.status);
+        return { kind: 'error', message: envelopeMessage(error, response.status) };
       }
       editingEntryId = null;
       await refetchJournal(specimen.id);
+      toastSuccess('Journal entry saved.');
       return { kind: 'ok' };
     };
   }
@@ -124,7 +123,7 @@
     try {
       const [s, p, j, c] = await Promise.all([specimenP, photosP, journalP, collectorsP]);
       if (s.error) {
-        loadState = { kind: 'error', message: errorMessage(s.error, s.response.status) };
+        loadState = { kind: 'error', message: envelopeMessage(s.error, s.response.status) };
         return;
       }
       specimen = s.data ?? null;

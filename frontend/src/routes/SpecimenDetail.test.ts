@@ -16,6 +16,8 @@ vi.mock('../lib/api', () => ({
 }));
 
 import SpecimenDetail from './SpecimenDetail.svelte';
+import { clearAllToasts, toasts } from '../lib/stores/toasts';
+import { get } from 'svelte/store';
 
 const SPECIMEN_ID = '11111111-1111-1111-1111-111111111111';
 
@@ -408,13 +410,14 @@ describe('SpecimenDetail route', () => {
     expect(screen.getByTestId('journal-entry')).toHaveTextContent('fresh entry');
   });
 
-  it('surfaces the API envelope error when create fails', async () => {
+  it('toasts the API envelope error when create fails', async () => {
     setupFetch({ journal: [] });
     mockPost.mockResolvedValue({
       data: undefined,
       error: { error: { code: 'rate_limited', message: 'too many entries' } },
       response: new Response(null, { status: 429 }),
     });
+    clearAllToasts();
 
     render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
     await waitFor(() => expect(screen.getByTestId('journal-empty')).toBeInTheDocument());
@@ -424,10 +427,15 @@ describe('SpecimenDetail route', () => {
     await fireEvent.input(textarea, { target: { value: 'oops' } });
     await fireEvent.submit(screen.getByTestId('journal-entry-form'));
 
-    await waitFor(() => expect(screen.getByTestId('journal-form-error')).toBeInTheDocument());
-    expect(screen.getByTestId('journal-form-error')).toHaveTextContent('too many entries');
+    await waitFor(() => expect(get(toasts)).toHaveLength(1));
+    const t = get(toasts)[0]!;
+    expect(t.type).toBe('error');
+    expect(t.message).toMatch(/too many entries/);
+    // No inline banner anymore.
+    expect(screen.queryByTestId('journal-form-error')).not.toBeInTheDocument();
     // Panel stayed open so the user can correct.
     expect(screen.getByTestId('journal-create-panel')).toBeInTheDocument();
+    clearAllToasts();
   });
 
   it('edits an entry: clicking Edit pre-populates the form, PATCH + refetch returns to read mode', async () => {

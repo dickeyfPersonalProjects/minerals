@@ -161,7 +161,7 @@ describe('SpecimenForm', () => {
       expect(screen.getByTestId('catalog-number-error')).toHaveTextContent(/already exists/i);
     });
 
-    it('shows the banner error on generic API failure', async () => {
+    it('does not render an inline banner on generic API failure (route toasts instead)', async () => {
       const onSubmit = vi.fn(
         async (): Promise<SpecimenFormSubmitResult> => ({
           kind: 'error',
@@ -177,8 +177,10 @@ describe('SpecimenForm', () => {
 
       await fireEvent.submit(screen.getByTestId('specimen-form'));
 
-      await waitFor(() => expect(screen.getByTestId('form-error')).toBeInTheDocument());
-      expect(screen.getByTestId('form-error')).toHaveTextContent(/Boom/);
+      await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+      // Submit-level errors now surface via the global toast
+      // store (E-4); the form no longer renders a banner.
+      expect(screen.queryByTestId('form-error')).not.toBeInTheDocument();
     });
 
     it('shows a field-scoped error when API returns details.field=name', async () => {

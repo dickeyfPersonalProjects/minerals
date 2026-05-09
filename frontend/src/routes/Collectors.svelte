@@ -1,9 +1,11 @@
 <script lang="ts">
   import { link } from 'svelte-spa-router';
   import { client } from '../lib/api';
+  import { envelopeMessage, toastApiError } from '../lib/api/wrapper';
   import type { components } from '../lib/api/schema';
   import CollectorForm from '../lib/CollectorForm.svelte';
   import type { CollectorFormSubmitResult } from '../lib/CollectorForm.svelte';
+  import { toastSuccess } from '../lib/stores/toasts';
   import { formatLocal } from '../lib/time';
 
   type Collector = components['schemas']['CollectorView'];
@@ -25,13 +27,6 @@
 
   let showCreateForm = $state(false);
   let deleteError: { collectorId: string; message: string; inUse: boolean } | null = $state(null);
-
-  function envelopeMessage(
-    error: { error?: { code?: string; message?: string } } | undefined,
-    status: number,
-  ): string {
-    return error?.error?.message || error?.error?.code || `HTTP ${status}`;
-  }
 
   async function fetchPage(cursor?: string): Promise<void> {
     const isFirst = cursor === undefined;
@@ -99,8 +94,10 @@
     });
     if (error) {
       if (response.status === 409) return { kind: 'duplicate' };
+      toastApiError(error, response.status);
       return { kind: 'error', message: envelopeMessage(error, response.status) };
     }
+    toastSuccess('Collector added.');
     showCreateForm = false;
     refetch();
     return { kind: 'ok' };
@@ -115,20 +112,19 @@
     });
     if (error) {
       if (response.status === 409) {
+        // 409 here means "in use" — keep the inline explanation
+        // since it points the user at the linked-specimens view.
         deleteError = {
           collectorId: collector.id,
           inUse: true,
           message: `"${collector.name}" is referenced by one or more specimens. Remove it from those specimens first.`,
         };
       } else {
-        deleteError = {
-          collectorId: collector.id,
-          inUse: false,
-          message: envelopeMessage(error, response.status),
-        };
+        toastApiError(error, response.status);
       }
       return;
     }
+    toastSuccess(`Deleted "${collector.name}".`);
     refetch();
   }
 

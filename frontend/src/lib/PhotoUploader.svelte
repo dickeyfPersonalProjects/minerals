@@ -64,6 +64,7 @@
 
 <script lang="ts">
   import { client } from './api';
+  import { toastError, toastSuccess } from './stores/toasts';
 
   interface Props {
     specimenId: string;
@@ -141,6 +142,19 @@
       // need to appear in the gallery (per the bead's acceptance
       // criteria: "On all uploads finished").
       await onUploaded();
+      // Single summary toast per drop (E-4): success when all
+      // uploaded, error toast naming the count when any failed.
+      // Per-file detail stays in the inline list above.
+      const finished = toUpload.map((t) => items.find((it) => it.id === t.id));
+      const succeeded = finished.filter((it) => it?.status === 'success').length;
+      const failed = finished.filter((it) => it?.status === 'error').length;
+      if (succeeded > 0 && failed === 0) {
+        toastSuccess(succeeded === 1 ? 'Photo uploaded.' : `${succeeded} photos uploaded.`);
+      } else if (failed > 0 && succeeded > 0) {
+        toastError(`${succeeded} uploaded, ${failed} failed. See details above.`);
+      } else if (failed > 0) {
+        toastError(failed === 1 ? 'Photo upload failed.' : `${failed} photos failed to upload.`);
+      }
     } finally {
       busy = false;
     }
@@ -153,6 +167,7 @@
 
     const queue: { id: number; file: File }[] = [];
     const newItems: UploadItem[] = [];
+    let preRejected = 0;
     for (const file of list) {
       const id = ++nextId;
       const validation = validateFile(file);
@@ -164,6 +179,7 @@
           status: 'error',
           message: validation.message,
         });
+        preRejected += 1;
         continue;
       }
       newItems.push({
@@ -175,6 +191,15 @@
       queue.push({ id, file });
     }
     items = [...items, ...newItems];
+    if (preRejected > 0 && queue.length === 0) {
+      // No uploads will run, so processAll won't surface a toast.
+      // Summarize the client-side rejections here.
+      toastError(
+        preRejected === 1
+          ? 'File rejected. See details above.'
+          : `${preRejected} files rejected. See details above.`,
+      );
+    }
     if (queue.length > 0) {
       void processAll(queue);
     }

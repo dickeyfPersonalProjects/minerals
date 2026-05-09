@@ -1,9 +1,11 @@
 <script lang="ts">
   import { link, push } from 'svelte-spa-router';
   import { client } from '../lib/api';
+  import { envelopeMessage, toastApiError } from '../lib/api/wrapper';
   import type { components } from '../lib/api/schema';
   import CollectorForm from '../lib/CollectorForm.svelte';
   import type { CollectorFormSubmitResult } from '../lib/CollectorForm.svelte';
+  import { toastSuccess } from '../lib/stores/toasts';
 
   type Collector = components['schemas']['CollectorView'];
 
@@ -20,13 +22,6 @@
 
   let collector: Collector | null = $state(null);
   let loadState: LoadState = $state({ kind: 'idle' });
-
-  function envelopeMessage(
-    error: { error?: { code?: string; message?: string } } | undefined,
-    status: number,
-  ): string {
-    return error?.error?.message || error?.error?.code || `HTTP ${status}`;
-  }
 
   async function load(id: string): Promise<void> {
     loadState = { kind: 'loading' };
@@ -76,8 +71,10 @@
     });
     if (error) {
       if (response.status === 409) return { kind: 'duplicate' };
+      toastApiError(error, response.status);
       return { kind: 'error', message: envelopeMessage(error, response.status) };
     }
+    toastSuccess('Collector updated.');
     push('/collectors');
     return { kind: 'ok' };
   }

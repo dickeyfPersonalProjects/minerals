@@ -38,22 +38,19 @@
     ...(initial ?? {}),
   }));
 
-  let bannerError: string | null = $state(null);
   let textarea: HTMLTextAreaElement | undefined = $state();
 
   const { form, errors, isSubmitting } = createForm<JournalEntryFormValues>({
     initialValues,
     extend: validator({ schema: journalEntryFormSchema }),
     onSubmit: async (values) => {
-      bannerError = null;
       // The zod schema's `.transform(trim)` runs during validation
       // but felte forwards the raw form values to onSubmit, so we
       // trim here before handing off — callers can rely on a
       // normalized body_md.
-      const result = await onSubmit({ body_md: values.body_md.trim() });
-      if (result.kind === 'error') {
-        bannerError = result.message;
-      }
+      await onSubmit({ body_md: values.body_md.trim() });
+      // Submit-level errors are surfaced as toasts by the caller
+      // (E-4); no inline banner here.
     },
   });
 
@@ -69,16 +66,6 @@
 </script>
 
 <form use:form data-testid="journal-entry-form" class="space-y-3" novalidate>
-  {#if bannerError}
-    <div
-      role="alert"
-      data-testid="journal-form-error"
-      class="rounded-md border border-red-500/40 bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-300"
-    >
-      {bannerError}
-    </div>
-  {/if}
-
   <div>
     <label for="journal-body-md" class="sr-only">Entry body (markdown)</label>
     <textarea

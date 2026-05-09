@@ -1,16 +1,11 @@
 <script lang="ts">
   import { link, push } from 'svelte-spa-router';
   import { client } from '../lib/api';
+  import { envelopeMessage, toastApiError } from '../lib/api/wrapper';
   import SpecimenForm from '../lib/SpecimenForm.svelte';
   import type { SpecimenFormSubmitResult } from '../lib/SpecimenForm.svelte';
   import { formToCreateBody, type SpecimenFormValues } from '../lib/schemas/specimen';
-
-  function envelopeMessage(
-    error: { error?: { code?: string; message?: string } } | undefined,
-    status: number,
-  ): string {
-    return error?.error?.message || error?.error?.code || `HTTP ${status}`;
-  }
+  import { toastSuccess } from '../lib/stores/toasts';
 
   async function createSpecimen(values: SpecimenFormValues): Promise<SpecimenFormSubmitResult> {
     const body = formToCreateBody(values);
@@ -33,8 +28,10 @@
           message: envelopeMessage(error, response.status),
         };
       }
+      toastApiError(error, response.status);
       return { kind: 'error', message: envelopeMessage(error, response.status) };
     }
+    toastSuccess('Specimen created.');
     if (data?.id) {
       push(`/specimens/${data.id}`);
     } else {
