@@ -2,6 +2,11 @@
   import { link } from 'svelte-spa-router';
   import { client } from '../lib/api';
   import type { components } from '../lib/api/schema';
+  import JournalAttachments from '../lib/JournalAttachments.svelte';
+  import JournalEntryForm, {
+    type JournalEntryFormSubmitResult,
+  } from '../lib/JournalEntryForm.svelte';
+  import type { JournalEntryFormValues } from '../lib/schemas/journal';
   import Lightbox from '../lib/Lightbox.svelte';
   import PhotoUploader from '../lib/PhotoUploader.svelte';
   import { formatLocal } from '../lib/time';
@@ -31,6 +36,8 @@
   let collectors: CollectorLink[] = $state([]);
   let loadState: LoadState = $state({ kind: 'idle' });
   let lightboxIndex: number | null = $state(null);
+  let journalCreating = $state(false);
+  let editingEntryId: string | null = $state(null);
 
   function errorMessage(
     error: { error?: { code?: string; message?: string } } | undefined,
@@ -49,6 +56,49 @@
       // Auxiliary fetch — leave the existing list in place rather
       // than blanking the gallery on a transient network error.
     }
+  }
+
+  async function refetchJournal(id: string): Promise<void> {
+    try {
+      const j = await client.GET('/api/v1/specimens/{id}/journal', {
+        params: { path: { id }, query: { limit: 100 } },
+      });
+      journal = j.data?.items ?? [];
+    } catch {
+      // Same auxiliary-fetch policy as photos.
+    }
+  }
+
+  async function handleCreateEntry(
+    values: JournalEntryFormValues,
+  ): Promise<JournalEntryFormSubmitResult> {
+    if (!specimen) return { kind: 'error', message: 'No specimen loaded' };
+    const { error, response } = await client.POST('/api/v1/specimens/{id}/journal', {
+      params: { path: { id: specimen.id } },
+      body: { body_md: values.body_md },
+    });
+    if (error) {
+      return { kind: 'error', message: errorMessage(error, response.status) };
+    }
+    journalCreating = false;
+    await refetchJournal(specimen.id);
+    return { kind: 'ok' };
+  }
+
+  function makeEditHandler(entryId: string) {
+    return async (values: JournalEntryFormValues): Promise<JournalEntryFormSubmitResult> => {
+      if (!specimen) return { kind: 'error', message: 'No specimen loaded' };
+      const { error, response } = await client.PATCH('/api/v1/journal/{id}', {
+        params: { path: { id: entryId } },
+        body: { body_md: values.body_md },
+      });
+      if (error) {
+        return { kind: 'error', message: errorMessage(error, response.status) };
+      }
+      editingEntryId = null;
+      await refetchJournal(specimen.id);
+      return { kind: 'ok' };
+    };
   }
 
   async function load(id: string): Promise<void> {
@@ -387,9 +437,36 @@
         {/if}
 
         <section data-testid="journal-section">
-          <h2 class="mb-3 font-serif text-lg font-semibold text-[var(--color-text)]">
-            Observation journal
-          </h2>
+          <div class="mb-3 flex items-center justify-between gap-2">
+            <h2 class="font-serif text-lg font-semibold text-[var(--color-text)]">
+              Observation journal
+            </h2>
+            {#if !journalCreating}
+              <button
+                type="button"
+                onclick={() => (journalCreating = true)}
+                data-testid="journal-add-button"
+                class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+              >
+                Add entry
+              </button>
+            {/if}
+          </div>
+
+          {#if journalCreating}
+            <div
+              class="mb-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
+              data-testid="journal-create-panel"
+            >
+              <JournalEntryForm
+                submitLabel="Add entry"
+                autofocus
+                onSubmit={handleCreateEntry}
+                onCancel={() => (journalCreating = false)}
+              />
+            </div>
+          {/if}
+
           {#if journal.length === 0}
             <p class="text-sm text-[var(--color-text-muted)]" data-testid="journal-empty">
               No entries yet.
@@ -398,27 +475,54 @@
             <ol class="space-y-4" data-testid="journal-list">
               {#each journal as entry (entry.id)}
                 <li
-                  class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
+                  class="group rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
                   data-testid="journal-entry"
+                  data-entry-id={entry.id}
                 >
                   <div class="mb-2 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
                     <time datetime={entry.created_at}>{fmtDateTime(entry.created_at)}</time>
                     {#if isEdited(entry)}
                       <span data-testid="edited-indicator" class="italic">· edited</span>
                     {/if}
+                    <span class="ml-auto">
+                      {#if editingEntryId !== entry.id}
+                        <button
+                          type="button"
+                          onclick={() => (editingEntryId = entry.id)}
+                          data-testid="journal-edit-button"
+                          class="rounded-md px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] opacity-0 transition-opacity hover:text-[var(--color-accent)] focus-visible:opacity-100 group-hover:opacity-100"
+                          aria-label="Edit entry"
+                        >
+                          Edit
+                        </button>
+                      {/if}
+                    </span>
                   </div>
-                  <div
-                    class="prose-sm max-w-none text-sm leading-relaxed text-[var(--color-text)] [&>*+*]:mt-3 [&_a]:text-[var(--color-accent)] [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-[var(--color-border)] [&_blockquote]:pl-3 [&_blockquote]:text-[var(--color-text-muted)] [&_code]:rounded [&_code]:bg-[var(--color-surface-2)] [&_code]:px-1 [&_code]:font-mono [&_code]:text-xs [&_h1]:font-serif [&_h1]:text-base [&_h1]:font-semibold [&_h2]:font-serif [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:font-serif [&_h3]:text-sm [&_h3]:font-semibold [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-[var(--color-surface-2)] [&_pre]:p-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
-                  >
-                    <!--
-                      body_html is server-sanitized via the
-                      CONTRACT.md §17 markdown pipeline (goldmark
-                      → bluemonday allowlist). Direct {@html} is
-                      the contract's prescribed sink for this
-                      pipeline output.
-                    -->
-                    <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                    {@html entry.body_html}
+                  {#if editingEntryId === entry.id}
+                    <JournalEntryForm
+                      initial={{ body_md: entry.body_md }}
+                      submitLabel="Save"
+                      autofocus
+                      onSubmit={makeEditHandler(entry.id)}
+                      onCancel={() => (editingEntryId = null)}
+                    />
+                  {:else}
+                    <div
+                      class="prose-sm max-w-none text-sm leading-relaxed text-[var(--color-text)] [&>*+*]:mt-3 [&_a]:text-[var(--color-accent)] [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-[var(--color-border)] [&_blockquote]:pl-3 [&_blockquote]:text-[var(--color-text-muted)] [&_code]:rounded [&_code]:bg-[var(--color-surface-2)] [&_code]:px-1 [&_code]:font-mono [&_code]:text-xs [&_h1]:font-serif [&_h1]:text-base [&_h1]:font-semibold [&_h2]:font-serif [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:font-serif [&_h3]:text-sm [&_h3]:font-semibold [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-[var(--color-surface-2)] [&_pre]:p-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+                    >
+                      <!--
+                        body_html is server-sanitized via the
+                        CONTRACT.md §17 markdown pipeline (goldmark
+                        → bluemonday allowlist). Direct {@html} is
+                        the contract's prescribed sink for this
+                        pipeline output.
+                      -->
+                      <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                      {@html entry.body_html}
+                    </div>
+                  {/if}
+                  <div class="mt-3">
+                    <JournalAttachments entryId={entry.id} />
                   </div>
                 </li>
               {/each}

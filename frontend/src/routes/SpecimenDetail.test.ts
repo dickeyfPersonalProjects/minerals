@@ -2,11 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, cleanup } from '@testing-library/svelte';
 
 // Hoisted mock — the API client is replaced for every test in this
-// file. Each test sets `mockGet` to the fixture it wants.
-const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
+// file. Each test sets `mockGet` (and POST/PATCH/DELETE when
+// exercising mutations) to the fixture it wants.
+const { mockGet, mockPost, mockPatch, mockDelete } = vi.hoisted(() => ({
+  mockGet: vi.fn(),
+  mockPost: vi.fn(),
+  mockPatch: vi.fn(),
+  mockDelete: vi.fn(),
+}));
 
 vi.mock('../lib/api', () => ({
-  client: { GET: mockGet },
+  client: { GET: mockGet, POST: mockPost, PATCH: mockPatch, DELETE: mockDelete },
 }));
 
 import SpecimenDetail from './SpecimenDetail.svelte';
@@ -152,12 +158,19 @@ function setupFetch(fx: Fixture) {
         response: new Response(),
       };
     }
+    // Per-entry attachment lists fired by JournalAttachments.
+    if (path === '/api/v1/journal/{id}/files') {
+      return { data: { items: [] }, error: undefined, response: new Response() };
+    }
     return { data: { items: [], next_cursor: null }, error: undefined, response: new Response() };
   });
 }
 
 beforeEach(() => {
   mockGet.mockReset();
+  mockPost.mockReset();
+  mockPatch.mockReset();
+  mockDelete.mockReset();
   setupFetch({});
 });
 
@@ -354,5 +367,131 @@ describe('SpecimenDetail route', () => {
 
     await waitFor(() => expect(screen.getByTestId('error')).toBeInTheDocument());
     expect(screen.getByText(/network down/)).toBeInTheDocument();
+  });
+
+  it('creates a journal entry: POST + refetch + panel closes', async () => {
+    setupFetch({ journal: [] });
+    const newEntry = journalEntry({
+      id: 'aaaaaaaa-0000-0000-0000-000000000099',
+      body_html: '<p>fresh entry</p>',
+      body_md: 'fresh entry',
+    });
+    mockPost.mockResolvedValue({
+      data: newEntry,
+      error: undefined,
+      response: new Response(null, { status: 201 }),
+    });
+
+    render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+
+    await waitFor(() => expect(screen.getByTestId('journal-empty')).toBeInTheDocument());
+    await fireEvent.click(screen.getByTestId('journal-add-button'));
+
+    const panel = await screen.findByTestId('journal-create-panel');
+    expect(panel).toBeInTheDocument();
+
+    const textarea = screen.getByLabelText(/entry body/i);
+    await fireEvent.input(textarea, { target: { value: 'fresh entry' } });
+
+    // Once the form is submitted: refetch returns the new entry.
+    setupFetch({ journal: [newEntry] });
+    await fireEvent.submit(screen.getByTestId('journal-entry-form'));
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+    expect(mockPost.mock.calls[0]?.[0]).toBe('/api/v1/specimens/{id}/journal');
+    expect(mockPost.mock.calls[0]?.[1].body).toEqual({ body_md: 'fresh entry' });
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('journal-create-panel')).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(screen.getAllByTestId('journal-entry')).toHaveLength(1));
+    expect(screen.getByTestId('journal-entry')).toHaveTextContent('fresh entry');
+  });
+
+  it('surfaces the API envelope error when create fails', async () => {
+    setupFetch({ journal: [] });
+    mockPost.mockResolvedValue({
+      data: undefined,
+      error: { error: { code: 'rate_limited', message: 'too many entries' } },
+      response: new Response(null, { status: 429 }),
+    });
+
+    render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+    await waitFor(() => expect(screen.getByTestId('journal-empty')).toBeInTheDocument());
+    await fireEvent.click(screen.getByTestId('journal-add-button'));
+
+    const textarea = screen.getByLabelText(/entry body/i);
+    await fireEvent.input(textarea, { target: { value: 'oops' } });
+    await fireEvent.submit(screen.getByTestId('journal-entry-form'));
+
+    await waitFor(() => expect(screen.getByTestId('journal-form-error')).toBeInTheDocument());
+    expect(screen.getByTestId('journal-form-error')).toHaveTextContent('too many entries');
+    // Panel stayed open so the user can correct.
+    expect(screen.getByTestId('journal-create-panel')).toBeInTheDocument();
+  });
+
+  it('edits an entry: clicking Edit pre-populates the form, PATCH + refetch returns to read mode', async () => {
+    const original = journalEntry({
+      id: 'aaaaaaaa-0000-0000-0000-000000000001',
+      body_html: '<p>old text</p>',
+      body_md: 'old text',
+      created_at: '2026-05-01T10:00:00Z',
+      updated_at: '2026-05-01T10:00:00Z',
+    });
+    setupFetch({ journal: [original] });
+    const updated = journalEntry({
+      id: original.id,
+      body_html: '<p>new text</p>',
+      body_md: 'new text',
+      created_at: '2026-05-01T10:00:00Z',
+      updated_at: '2026-05-02T10:00:00Z',
+    });
+    mockPatch.mockResolvedValue({
+      data: updated,
+      error: undefined,
+      response: new Response(null, { status: 200 }),
+    });
+
+    render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+
+    const editBtn = await screen.findByTestId('journal-edit-button');
+    await fireEvent.click(editBtn);
+
+    // Pre-population from body_md.
+    const textarea = (await screen.findByLabelText(/entry body/i)) as HTMLTextAreaElement;
+    expect(textarea.value).toBe('old text');
+
+    await fireEvent.input(textarea, { target: { value: 'new text' } });
+
+    setupFetch({ journal: [updated] });
+    await fireEvent.submit(screen.getByTestId('journal-entry-form'));
+
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
+    expect(mockPatch.mock.calls[0]?.[0]).toBe('/api/v1/journal/{id}');
+    expect(mockPatch.mock.calls[0]?.[1].params.path.id).toBe(original.id);
+    expect(mockPatch.mock.calls[0]?.[1].body).toEqual({ body_md: 'new text' });
+
+    // Form gone; read mode renders the new server-rendered HTML.
+    await waitFor(() => expect(screen.queryByTestId('journal-entry-form')).not.toBeInTheDocument());
+    expect(screen.getByTestId('journal-entry')).toHaveTextContent('new text');
+    // Edited indicator now visible.
+    expect(screen.getByTestId('edited-indicator')).toBeInTheDocument();
+  });
+
+  it('cancelling the edit form returns to read mode without calling PATCH', async () => {
+    const original = journalEntry({
+      id: 'aaaaaaaa-0000-0000-0000-000000000001',
+      body_html: '<p>still here</p>',
+      body_md: 'still here',
+    });
+    setupFetch({ journal: [original] });
+
+    render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+    await fireEvent.click(await screen.findByTestId('journal-edit-button'));
+    await fireEvent.click(screen.getByTestId('journal-cancel-button'));
+
+    await waitFor(() => expect(screen.queryByTestId('journal-entry-form')).not.toBeInTheDocument());
+    expect(mockPatch).not.toHaveBeenCalled();
+    expect(screen.getByTestId('journal-entry')).toHaveTextContent('still here');
   });
 });
