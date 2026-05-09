@@ -499,4 +499,153 @@ describe('SpecimenDetail route', () => {
     expect(mockPatch).not.toHaveBeenCalled();
     expect(screen.getByTestId('journal-entry')).toHaveTextContent('still here');
   });
+
+  describe('photo delete flow', () => {
+    it('opens the confirm modal on hero × click and DELETEs the photo on confirm', async () => {
+      const p1 = photo({ id: 'cafebabe-0000-0000-0000-000000000001' });
+      setupFetch({ photos: [p1] });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+
+      const del = await screen.findByTestId('hero-photo-delete');
+      await fireEvent.click(del);
+
+      expect(screen.getByTestId('confirm-modal')).toBeInTheDocument();
+
+      mockDelete.mockResolvedValueOnce({
+        data: undefined,
+        error: undefined,
+        response: new Response(null, { status: 204 }),
+      });
+
+      await fireEvent.click(screen.getByTestId('confirm-modal-confirm'));
+
+      await waitFor(() => expect(mockDelete).toHaveBeenCalledTimes(1));
+      expect(mockDelete.mock.calls[0]?.[0]).toBe('/api/v1/photos/{id}');
+      expect(mockDelete.mock.calls[0]?.[1].params.path.id).toBe(p1.id);
+
+      // Modal dismissed and refetch fired.
+      await waitFor(() => expect(screen.queryByTestId('confirm-modal')).not.toBeInTheDocument());
+    });
+
+    it('thumbnail × opens the modal and targets the right photo id', async () => {
+      const p1 = photo({ id: 'cafebabe-0000-0000-0000-000000000001' });
+      const p2 = photo({ id: 'cafebabe-0000-0000-0000-000000000002', position: 2 });
+      setupFetch({ photos: [p1, p2] });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+
+      const thumbDels = await screen.findAllByTestId('gallery-thumb-delete');
+      // Only p2 (the second photo) appears as a thumb; p1 is the hero.
+      expect(thumbDels).toHaveLength(1);
+      await fireEvent.click(thumbDels[0]!);
+
+      expect(screen.getByTestId('confirm-modal')).toBeInTheDocument();
+
+      mockDelete.mockResolvedValueOnce({
+        data: undefined,
+        error: undefined,
+        response: new Response(null, { status: 204 }),
+      });
+
+      await fireEvent.click(screen.getByTestId('confirm-modal-confirm'));
+      await waitFor(() => expect(mockDelete).toHaveBeenCalledTimes(1));
+      expect(mockDelete.mock.calls[0]?.[1].params.path.id).toBe(p2.id);
+    });
+
+    it('cancelling the modal does not call DELETE', async () => {
+      const p1 = photo({ id: 'cafebabe-0000-0000-0000-000000000001' });
+      setupFetch({ photos: [p1] });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('hero-photo-delete'));
+      await fireEvent.click(screen.getByTestId('confirm-modal-cancel'));
+
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('confirm-modal')).not.toBeInTheDocument();
+    });
+
+    it('keeps the modal closed when the DELETE fails (toast surfaces the error)', async () => {
+      const p1 = photo({ id: 'cafebabe-0000-0000-0000-000000000001' });
+      setupFetch({ photos: [p1] });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('hero-photo-delete'));
+
+      mockDelete.mockResolvedValueOnce({
+        data: undefined,
+        error: { error: { code: 'internal', message: 'boom' } },
+        response: new Response(null, { status: 500 }),
+      });
+
+      await fireEvent.click(screen.getByTestId('confirm-modal-confirm'));
+
+      await waitFor(() => expect(mockDelete).toHaveBeenCalledTimes(1));
+      // On error the modal stays open so the user can retry / cancel.
+      expect(screen.getByTestId('confirm-modal')).toBeInTheDocument();
+    });
+  });
+
+  describe('journal delete flow', () => {
+    function entryFixture(): ReturnType<typeof journalEntry> {
+      return journalEntry({
+        id: 'aaaaaaaa-0000-0000-0000-000000000001',
+        body_html: '<p>cleaning notes</p>',
+        body_md: 'cleaning notes',
+      });
+    }
+
+    it('renders a delete button on each entry', async () => {
+      setupFetch({ journal: [entryFixture()] });
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      expect(await screen.findByTestId('journal-delete-button')).toBeInTheDocument();
+    });
+
+    it('opens the modal with the attachment-warning copy and DELETEs on confirm', async () => {
+      const e = entryFixture();
+      setupFetch({ journal: [e] });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('journal-delete-button'));
+
+      const msg = screen.getByTestId('confirm-modal-message').textContent ?? '';
+      expect(msg).toMatch(/attachments will also be deleted/i);
+
+      mockDelete.mockResolvedValueOnce({
+        data: undefined,
+        error: undefined,
+        response: new Response(null, { status: 204 }),
+      });
+
+      await fireEvent.click(screen.getByTestId('confirm-modal-confirm'));
+
+      await waitFor(() => expect(mockDelete).toHaveBeenCalledTimes(1));
+      expect(mockDelete.mock.calls[0]?.[0]).toBe('/api/v1/journal/{id}');
+      expect(mockDelete.mock.calls[0]?.[1].params.path.id).toBe(e.id);
+
+      await waitFor(() => expect(screen.queryByTestId('confirm-modal')).not.toBeInTheDocument());
+    });
+
+    it('keeps the modal open on a 409 attachments-exist response', async () => {
+      const e = entryFixture();
+      setupFetch({ journal: [e] });
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('journal-delete-button'));
+
+      mockDelete.mockResolvedValueOnce({
+        data: undefined,
+        error: {
+          error: {
+            code: 'journal_referenced',
+            message: 'entry still has attachments',
+          },
+        },
+        response: new Response(null, { status: 409 }),
+      });
+
+      await fireEvent.click(screen.getByTestId('confirm-modal-confirm'));
+      await waitFor(() => expect(mockDelete).toHaveBeenCalledTimes(1));
+      expect(screen.getByTestId('confirm-modal')).toBeInTheDocument();
+    });
+  });
 });

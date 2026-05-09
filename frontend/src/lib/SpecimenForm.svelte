@@ -27,6 +27,8 @@
     onSubmit: (values: SpecimenFormValues) => Promise<SpecimenFormSubmitResult>;
     onCancel?: () => void;
     cancelLabel?: string;
+    onDelete?: () => void;
+    deleteLabel?: string;
   }
 
   const {
@@ -36,6 +38,8 @@
     onSubmit,
     onCancel,
     cancelLabel = 'Cancel',
+    onDelete,
+    deleteLabel = 'Delete',
   }: Props = $props();
 
   // Capture initial values once at mount so the form owns its
@@ -816,6 +820,17 @@
         class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-60"
       >
         {cancelLabel}
+      </button>
+    {/if}
+    {#if onDelete}
+      <button
+        type="button"
+        onclick={onDelete}
+        disabled={$isSubmitting}
+        data-testid="delete-button"
+        class="ml-auto rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {deleteLabel}
       </button>
     {/if}
   </div>

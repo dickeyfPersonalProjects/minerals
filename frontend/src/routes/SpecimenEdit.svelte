@@ -1,7 +1,9 @@
 <script lang="ts">
   import { link, push } from 'svelte-spa-router';
   import { client } from '../lib/api';
+  import { SUPPRESS_TOAST_HEADERS } from '../lib/api/wrapper';
   import type { components } from '../lib/api/schema';
+  import ConfirmModal from '../lib/ConfirmModal.svelte';
   import SpecimenForm from '../lib/SpecimenForm.svelte';
   import type { SpecimenFormSubmitResult } from '../lib/SpecimenForm.svelte';
   import {
@@ -9,7 +11,7 @@
     specimenToFormValues,
     type SpecimenFormValues,
   } from '../lib/schemas/specimen';
-  import { toastSuccess } from '../lib/toasts';
+  import { toastError, toastSuccess } from '../lib/toasts';
 
   type Specimen = components['schemas']['SpecimenView'];
 
@@ -26,6 +28,8 @@
 
   let specimen: Specimen | null = $state(null);
   let loadState: LoadState = $state({ kind: 'idle' });
+  let confirmingDelete = $state(false);
+  let deleting = $state(false);
 
   function envelopeMessage(
     error: { error?: { code?: string; message?: string } } | undefined,
@@ -103,6 +107,62 @@
     if (specimen) push(`/specimens/${specimen.id}`);
     else push('/specimens');
   }
+
+  function requestDelete() {
+    if (!specimen) return;
+    confirmingDelete = true;
+  }
+
+  function cancelDelete() {
+    confirmingDelete = false;
+  }
+
+  // Compose a friendly conflict message. Backend returns
+  // `specimen_referenced` with a generic message; if some future
+  // version surfaces `photos`/`journal_entries` counts in `details`,
+  // upgrade the toast text inline (no schema break).
+  function conflictMessage(
+    error: { error?: { code?: string; message?: string; details?: unknown } } | undefined,
+  ): string {
+    const details = (error?.error?.details ?? {}) as Record<string, unknown>;
+    const photos = typeof details.photos === 'number' ? details.photos : null;
+    const journal =
+      typeof details.journal_entries === 'number'
+        ? details.journal_entries
+        : typeof details.journal === 'number'
+          ? details.journal
+          : null;
+    if (photos !== null && journal !== null) {
+      return `This specimen has ${photos} photo${photos === 1 ? '' : 's'} and ${journal} journal entr${journal === 1 ? 'y' : 'ies'}. Delete those first.`;
+    }
+    return (
+      error?.error?.message || 'This specimen has photos or journal entries. Delete those first.'
+    );
+  }
+
+  async function confirmDelete() {
+    if (!specimen || deleting) return;
+    deleting = true;
+    try {
+      const { error, response } = await client.DELETE('/api/v1/specimens/{id}', {
+        params: { path: { id: specimen.id } },
+        headers: SUPPRESS_TOAST_HEADERS,
+      });
+      if (error) {
+        if (response.status === 409) {
+          toastError(conflictMessage(error));
+        } else {
+          toastError(envelopeMessage(error, response.status));
+        }
+        return;
+      }
+      toastSuccess('Specimen deleted');
+      confirmingDelete = false;
+      push('/specimens');
+    } finally {
+      deleting = false;
+    }
+  }
 </script>
 
 <section>
@@ -151,7 +211,19 @@
         submitLabel="Save"
         onSubmit={saveSpecimen}
         onCancel={cancel}
+        onDelete={requestDelete}
       />
     </div>
+
+    {#if confirmingDelete}
+      <ConfirmModal
+        title="Delete specimen?"
+        message={`Delete ${specimen.name}? This cannot be undone.`}
+        confirmLabel="Delete"
+        busy={deleting}
+        onConfirm={confirmDelete}
+        onCancel={cancelDelete}
+      />
+    {/if}
   {/if}
 </section>
