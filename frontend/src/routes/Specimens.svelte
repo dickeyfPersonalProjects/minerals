@@ -1,9 +1,20 @@
 <script lang="ts">
+  import { link, router } from 'svelte-spa-router';
   import { client } from '../lib/api';
   import type { components } from '../lib/api/schema';
   import SpecimenCard from '../lib/SpecimenCard.svelte';
 
   type Specimen = components['schemas']['SpecimenView'];
+
+  // Picks up `collector_id` from the route querystring so the
+  // collector-management page (D-4) can deep-link a "specimens
+  // referencing this collector" view. Backend filter lives at
+  // `GET /api/v1/specimens?collector_id=` (mi-zv3).
+  const collectorId = $derived.by(() => {
+    const qs = router.querystring;
+    if (!qs) return null;
+    return new URLSearchParams(qs).get('collector_id');
+  });
 
   type LoadState =
     | { kind: 'idle' }
@@ -20,8 +31,11 @@
     loadState = isFirst ? { kind: 'loading' } : { kind: 'loading-more' };
 
     try {
+      const query: { cursor?: string; collector_id?: string } = {};
+      if (cursor) query.cursor = cursor;
+      if (collectorId) query.collector_id = collectorId;
       const { data, error, response } = await client.GET('/api/v1/specimens', {
-        params: { query: cursor ? { cursor } : {} },
+        params: { query },
       });
       if (error) {
         const body = error.error;
@@ -41,6 +55,9 @@
   }
 
   $effect(() => {
+    // Re-runs whenever the collector_id filter changes (and on mount).
+    void collectorId;
+    items = [];
     void fetchPage();
   });
 
@@ -59,6 +76,23 @@
   <header class="mb-4 flex items-end justify-between">
     <h1 class="text-2xl font-semibold tracking-tight text-[var(--color-text)]">Specimens</h1>
   </header>
+
+  {#if collectorId}
+    <div
+      data-testid="collector-filter-banner"
+      class="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-text-muted)]"
+    >
+      <span>Filtered by collector.</span>
+      <a
+        href="/specimens"
+        use:link
+        class="underline hover:text-[var(--color-accent)]"
+        data-testid="clear-collector-filter"
+      >
+        Clear filter
+      </a>
+    </div>
+  {/if}
 
   {#if loadState.kind === 'loading'}
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="loading">

@@ -21,7 +21,24 @@
         ></span>
         Minerals
       </a>
-      <ThemeToggle />
+      <nav class="flex items-center gap-3 text-sm">
+        <a
+          href="/specimens"
+          use:link
+          class="text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+        >
+          Specimens
+        </a>
+        <a
+          href="/collectors"
+          use:link
+          data-testid="nav-collectors"
+          class="text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+        >
+          Collectors
+        </a>
+        <ThemeToggle />
+      </nav>
     </div>
   </header>
 
