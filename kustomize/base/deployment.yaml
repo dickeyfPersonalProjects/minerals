@@ -61,6 +61,14 @@ spec:
           envFrom:
             - configMapRef:
                 name: minerals-config
+            # S3 creds: the `migrate` subcommand doesn't actually use S3,
+            # but the prod-strictness config validator (per CONTRACT.md
+            # §15) requires all "required in prod" vars to be present
+            # at startup regardless of subcommand. Mounting these here
+            # satisfies the validator. Follow-up: make config validation
+            # subcommand-aware so migrate doesn't need S3 creds.
+            - secretRef:
+                name: minerals-s3-creds
           env:
             - name: DATABASE_URL
               valueFrom:
