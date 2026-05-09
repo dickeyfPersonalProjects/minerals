@@ -8,6 +8,7 @@
   import type { components } from './api/schema';
   import CollectorForm from './CollectorForm.svelte';
   import type { CollectorFormSubmitResult } from './CollectorForm.svelte';
+  import { toastSuccess } from './toasts';
 
   type Collector = components['schemas']['CollectorView'];
 
@@ -132,7 +133,10 @@
       if (response.status === 409) return { kind: 'duplicate' };
       return { kind: 'error', message: envelopeMessage(error, response.status) };
     }
-    if (data) appendCollector({ id: data.id, name: data.name });
+    if (data) {
+      appendCollector({ id: data.id, name: data.name });
+      toastSuccess(`Created collector "${data.name}"`);
+    }
     showNewForm = false;
     return { kind: 'ok' };
   }
@@ -149,6 +153,7 @@
       bannerError = envelopeMessage(error, response.status);
       return;
     }
+    toastSuccess('Collector chain saved');
     onSaved();
   }
 </script>

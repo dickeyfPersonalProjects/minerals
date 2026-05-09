@@ -5,6 +5,7 @@
   import CollectorForm from '../lib/CollectorForm.svelte';
   import type { CollectorFormSubmitResult } from '../lib/CollectorForm.svelte';
   import { formatLocal } from '../lib/time';
+  import { toastSuccess } from '../lib/toasts';
 
   type Collector = components['schemas']['CollectorView'];
 
@@ -101,6 +102,7 @@
       if (response.status === 409) return { kind: 'duplicate' };
       return { kind: 'error', message: envelopeMessage(error, response.status) };
     }
+    toastSuccess('Collector created');
     showCreateForm = false;
     refetch();
     return { kind: 'ok' };
@@ -129,6 +131,7 @@
       }
       return;
     }
+    toastSuccess(`Deleted "${collector.name}"`);
     refetch();
   }
 

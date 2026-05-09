@@ -9,6 +9,7 @@
     specimenToFormValues,
     type SpecimenFormValues,
   } from '../lib/schemas/specimen';
+  import { toastSuccess } from '../lib/toasts';
 
   type Specimen = components['schemas']['SpecimenView'];
 
@@ -65,7 +66,9 @@
 
     const body = formToPatchBody(specimen, values);
     if (Object.keys(body).length === 0) {
-      // Nothing changed; treat as success.
+      // Nothing changed; treat as success without a toast — there
+      // was nothing to save, so silently navigating back is the
+      // least surprising outcome.
       push(`/specimens/${specimen.id}`);
       return { kind: 'ok' };
     }
@@ -91,6 +94,7 @@
       }
       return { kind: 'error', message: envelopeMessage(error, response.status) };
     }
+    toastSuccess('Specimen saved');
     push(`/specimens/${specimen.id}`);
     return { kind: 'ok' };
   }

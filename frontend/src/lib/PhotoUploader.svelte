@@ -64,6 +64,8 @@
 
 <script lang="ts">
   import { client } from './api';
+  import { SUPPRESS_TOAST_HEADERS } from './api/wrapper';
+  import { toastError, toastSuccess } from './toasts';
 
   interface Props {
     specimenId: string;
@@ -102,6 +104,9 @@
           fd.append('file', file, file.name);
           return fd;
         },
+        // Per-file errors render inline on the upload row; a
+        // summary toast fires once at end of batch instead.
+        headers: SUPPRESS_TOAST_HEADERS,
       });
       if (result.error) {
         // The server's friendly `message` from the §10 envelope
@@ -141,6 +146,13 @@
       // need to appear in the gallery (per the bead's acceptance
       // criteria: "On all uploads finished").
       await onUploaded();
+      // Summary toasts (E-4): one success + one error per batch.
+      const ids = toUpload.map((u) => u.id);
+      const finished = items.filter((it) => ids.includes(it.id));
+      const ok = finished.filter((it) => it.status === 'success').length;
+      const failed = finished.filter((it) => it.status === 'error').length;
+      if (ok > 0) toastSuccess(`Uploaded ${ok} photo${ok === 1 ? '' : 's'}`);
+      if (failed > 0) toastError(`${failed} photo upload${failed === 1 ? '' : 's'} failed`);
     } finally {
       busy = false;
     }

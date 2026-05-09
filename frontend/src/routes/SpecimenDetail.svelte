@@ -11,6 +11,7 @@
   import Lightbox from '../lib/Lightbox.svelte';
   import PhotoUploader from '../lib/PhotoUploader.svelte';
   import { formatLocal } from '../lib/time';
+  import { toastSuccess } from '../lib/toasts';
 
   type Specimen = components['schemas']['SpecimenView'];
   type Photo = components['schemas']['PhotoView'];
@@ -93,6 +94,7 @@
     if (error) {
       return { kind: 'error', message: errorMessage(error, response.status) };
     }
+    toastSuccess('Journal entry added');
     journalCreating = false;
     await refetchJournal(specimen.id);
     return { kind: 'ok' };
@@ -108,6 +110,7 @@
       if (error) {
         return { kind: 'error', message: errorMessage(error, response.status) };
       }
+      toastSuccess('Journal entry saved');
       editingEntryId = null;
       await refetchJournal(specimen.id);
       return { kind: 'ok' };

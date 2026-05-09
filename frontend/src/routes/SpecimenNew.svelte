@@ -4,6 +4,7 @@
   import SpecimenForm from '../lib/SpecimenForm.svelte';
   import type { SpecimenFormSubmitResult } from '../lib/SpecimenForm.svelte';
   import { formToCreateBody, type SpecimenFormValues } from '../lib/schemas/specimen';
+  import { toastSuccess } from '../lib/toasts';
 
   function envelopeMessage(
     error: { error?: { code?: string; message?: string } } | undefined,
@@ -35,6 +36,7 @@
       }
       return { kind: 'error', message: envelopeMessage(error, response.status) };
     }
+    toastSuccess('Specimen created');
     if (data?.id) {
       push(`/specimens/${data.id}`);
     } else {
