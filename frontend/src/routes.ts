@@ -6,14 +6,18 @@
 // component implementations live in `routes/`.
 import type { RouteDefinition } from 'svelte-spa-router';
 import Specimens from './routes/Specimens.svelte';
+import SpecimenNew from './routes/SpecimenNew.svelte';
 import SpecimenDetail from './routes/SpecimenDetail.svelte';
+import SpecimenEdit from './routes/SpecimenEdit.svelte';
 import Collectors from './routes/Collectors.svelte';
 import CollectorEdit from './routes/CollectorEdit.svelte';
 
 export const routes: RouteDefinition = {
   '/': Specimens,
   '/specimens': Specimens,
+  '/specimens/new': SpecimenNew,
   '/specimens/:id': SpecimenDetail,
+  '/specimens/:id/edit': SpecimenEdit,
   '/collectors': Collectors,
   '/collectors/:id': CollectorEdit,
   '*': Specimens,

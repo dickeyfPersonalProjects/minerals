@@ -266,13 +266,23 @@
       >
         ← Specimens
       </a>
-      <div class="flex flex-wrap items-start gap-3">
+      <div class="flex flex-wrap items-start justify-between gap-3">
         <h1
           class="font-serif text-3xl font-semibold tracking-tight text-[var(--color-text)] sm:text-4xl"
           data-testid="specimen-name"
         >
           {specimen.name}
         </h1>
+        <a
+          href={`/specimens/${specimen.id}/edit`}
+          use:link
+          data-testid="edit-specimen"
+          class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+        >
+          Edit
+        </a>
+      </div>
+      <div class="flex flex-wrap items-start gap-3">
         <div class="flex flex-wrap items-center gap-2 pt-2">
           <span
             class="rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide {typeColorClass[

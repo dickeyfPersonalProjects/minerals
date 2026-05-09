@@ -1,0 +1,822 @@
+<script lang="ts" module>
+  // Result of submitting the form. The route page handles the
+  // actual API call and reports back via these variants.
+  export type SpecimenFormSubmitResult =
+    | { kind: 'ok' }
+    | { kind: 'duplicate_catalog_number' }
+    | { kind: 'field_error'; field: string; message: string }
+    | { kind: 'error'; message: string };
+</script>
+
+<script lang="ts">
+  import { createForm } from 'felte';
+  import { validator } from '@felte/validator-zod';
+  import { untrack } from 'svelte';
+  import {
+    emptyFormValues,
+    resetTypeDataDefaults,
+    specimenFormSchema,
+    type SpecimenFormValues,
+    type SpecimenType,
+  } from './schemas/specimen';
+
+  interface Props {
+    initial?: Partial<SpecimenFormValues>;
+    mode: 'create' | 'edit';
+    submitLabel: string;
+    onSubmit: (values: SpecimenFormValues) => Promise<SpecimenFormSubmitResult>;
+    onCancel?: () => void;
+    cancelLabel?: string;
+  }
+
+  const {
+    initial,
+    mode,
+    submitLabel,
+    onSubmit,
+    onCancel,
+    cancelLabel = 'Cancel',
+  }: Props = $props();
+
+  // Capture initial values once at mount so the form owns its
+  // state thereafter.
+  const initialValues: SpecimenFormValues = untrack(() => ({
+    ...emptyFormValues(initial?.type ?? 'mineral'),
+    ...(initial ?? {}),
+  }));
+
+  let bannerError: string | null = $state(null);
+  let catalogNumberError: string | null = $state(null);
+  let fieldErrors: Record<string, string> = $state({});
+
+  const { form, errors, isSubmitting, data, setData } = createForm<SpecimenFormValues>({
+    initialValues,
+    extend: validator({ schema: specimenFormSchema }),
+    onSubmit: async (values) => {
+      bannerError = null;
+      catalogNumberError = null;
+      fieldErrors = {};
+      const result = await onSubmit(values);
+      if (result.kind === 'duplicate_catalog_number') {
+        catalogNumberError = 'A specimen with this catalog number already exists.';
+        return;
+      }
+      if (result.kind === 'field_error') {
+        fieldErrors = { [result.field]: result.message };
+        bannerError = result.message;
+        return;
+      }
+      if (result.kind === 'error') {
+        bannerError = result.message;
+        return;
+      }
+    },
+  });
+
+  // Type radio: when the user toggles type in create mode, swap
+  // the type_data fields back to defaults for the new type. Edit
+  // mode disables the type radio so this never fires there.
+  let lastType = $state(initialValues.type);
+  $effect(() => {
+    const t = $data.type;
+    if (t !== lastType) {
+      const next = resetTypeDataDefaults($data, t as SpecimenType);
+      setData(next);
+      lastType = t;
+    }
+  });
+
+  // Clear catalog-number duplicate error when the user edits the
+  // catalog_number field.
+  let lastCatalog = $state(initialValues.catalog_number);
+  $effect(() => {
+    if ($data.catalog_number !== lastCatalog) {
+      lastCatalog = $data.catalog_number;
+      if (catalogNumberError) catalogNumberError = null;
+      if (fieldErrors.catalog_number) {
+        const next = { ...fieldErrors };
+        delete next.catalog_number;
+        fieldErrors = next;
+      }
+    }
+  });
+
+  function showError(name: keyof SpecimenFormValues): string | null {
+    // felte runs the zod validator on every input/blur/submit, so
+    // errors only surface after the user has interacted with a
+    // field (matching the "only after touched" UX in the bead).
+    const e = $errors[name];
+    if (Array.isArray(e) && e.length > 0) return e[0]!;
+    return null;
+  }
+</script>
+
+<form use:form data-testid="specimen-form" class="space-y-6" novalidate>
+  {#if bannerError}
+    <div
+      role="alert"
+      data-testid="form-error"
+      class="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300"
+    >
+      {bannerError}
+    </div>
+  {/if}
+
+  <fieldset class="space-y-2" data-testid="type-fieldset" disabled={mode === 'edit'}>
+    <legend class="block text-sm font-medium text-[var(--color-text)]">
+      Type <span class="text-red-500" aria-hidden="true">*</span>
+    </legend>
+    <div class="flex flex-wrap gap-3">
+      {#each ['mineral', 'rock', 'meteorite'] as t (t)}
+        <label class="flex items-center gap-2 text-sm text-[var(--color-text)]">
+          <input
+            type="radio"
+            name="type"
+            value={t}
+            checked={$data.type === t}
+            disabled={mode === 'edit'}
+            class="text-[var(--color-accent)]"
+          />
+          <span class="capitalize">{t}</span>
+        </label>
+      {/each}
+    </div>
+    {#if mode === 'edit'}
+      <p class="text-xs text-[var(--color-text-muted)]" data-testid="type-immutable-hint">
+        Type is immutable after creation.
+      </p>
+    {/if}
+  </fieldset>
+
+  <div class="grid gap-4 sm:grid-cols-2">
+    <div>
+      <label for="specimen-name" class="mb-1 block text-sm font-medium text-[var(--color-text)]">
+        Name <span class="text-red-500" aria-hidden="true">*</span>
+      </label>
+      <input
+        id="specimen-name"
+        name="name"
+        type="text"
+        autocomplete="off"
+        class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+        aria-invalid={Boolean(showError('name')) || Boolean(fieldErrors.name)}
+        aria-describedby="specimen-name-error"
+      />
+      {#if showError('name')}
+        <p id="specimen-name-error" data-testid="name-error" class="mt-1 text-xs text-red-500">
+          {showError('name')}
+        </p>
+      {:else if fieldErrors.name}
+        <p
+          id="specimen-name-error"
+          data-testid="name-error"
+          class="mt-1 text-xs text-red-500"
+          role="alert"
+        >
+          {fieldErrors.name}
+        </p>
+      {/if}
+    </div>
+
+    <div>
+      <label
+        for="specimen-catalog-number"
+        class="mb-1 block text-sm font-medium text-[var(--color-text)]"
+      >
+        Catalog number
+      </label>
+      <input
+        id="specimen-catalog-number"
+        name="catalog_number"
+        type="text"
+        autocomplete="off"
+        class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+        aria-invalid={Boolean(showError('catalog_number')) || Boolean(catalogNumberError)}
+        aria-describedby="specimen-catalog-number-error"
+      />
+      {#if showError('catalog_number')}
+        <p
+          id="specimen-catalog-number-error"
+          data-testid="catalog-number-error"
+          class="mt-1 text-xs text-red-500"
+        >
+          {showError('catalog_number')}
+        </p>
+      {:else if catalogNumberError}
+        <p
+          id="specimen-catalog-number-error"
+          data-testid="catalog-number-error"
+          class="mt-1 text-xs text-red-500"
+          role="alert"
+        >
+          {catalogNumberError}
+        </p>
+      {/if}
+    </div>
+  </div>
+
+  <div>
+    <label
+      for="specimen-description"
+      class="mb-1 block text-sm font-medium text-[var(--color-text)]"
+    >
+      Description
+    </label>
+    <textarea
+      id="specimen-description"
+      name="description"
+      rows="5"
+      class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+      aria-invalid={Boolean(showError('description'))}
+    ></textarea>
+    <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+      Markdown is rendered server-side (basic formatting, links, lists).
+    </p>
+    {#if showError('description')}
+      <p data-testid="description-error" class="mt-1 text-xs text-red-500">
+        {showError('description')}
+      </p>
+    {/if}
+  </div>
+
+  <div class="grid gap-4 sm:grid-cols-3">
+    <div>
+      <label
+        for="specimen-visibility"
+        class="mb-1 block text-sm font-medium text-[var(--color-text)]"
+      >
+        Visibility
+      </label>
+      <select
+        id="specimen-visibility"
+        name="visibility"
+        class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+      >
+        <option value="private">Private</option>
+        <option value="unlisted">Unlisted</option>
+        <option value="public">Public</option>
+      </select>
+    </div>
+
+    <div>
+      <label
+        for="specimen-acquired-at"
+        class="mb-1 block text-sm font-medium text-[var(--color-text)]"
+      >
+        Acquired (date)
+      </label>
+      <input
+        id="specimen-acquired-at"
+        name="acquired_at"
+        type="date"
+        class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+        aria-invalid={Boolean(showError('acquired_at'))}
+      />
+      {#if showError('acquired_at')}
+        <p class="mt-1 text-xs text-red-500">{showError('acquired_at')}</p>
+      {/if}
+    </div>
+
+    <div>
+      <label
+        for="specimen-acquired-from"
+        class="mb-1 block text-sm font-medium text-[var(--color-text)]"
+      >
+        Acquired from
+      </label>
+      <input
+        id="specimen-acquired-from"
+        name="acquired_from"
+        type="text"
+        class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+      />
+    </div>
+  </div>
+
+  <div class="grid gap-4 sm:grid-cols-2">
+    <div>
+      <label
+        for="specimen-price-dollars"
+        class="mb-1 block text-sm font-medium text-[var(--color-text)]"
+      >
+        Price (USD)
+      </label>
+      <input
+        id="specimen-price-dollars"
+        name="price_dollars"
+        type="number"
+        inputmode="decimal"
+        step="0.01"
+        min="0"
+        class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+        aria-invalid={Boolean(showError('price_dollars'))}
+      />
+      {#if showError('price_dollars')}
+        <p class="mt-1 text-xs text-red-500">{showError('price_dollars')}</p>
+      {/if}
+    </div>
+
+    <div>
+      <label
+        for="specimen-source-notes"
+        class="mb-1 block text-sm font-medium text-[var(--color-text)]"
+      >
+        Source notes
+      </label>
+      <input
+        id="specimen-source-notes"
+        name="source_notes"
+        type="text"
+        class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+      />
+    </div>
+  </div>
+
+  <fieldset class="space-y-3">
+    <legend class="text-sm font-medium text-[var(--color-text)]">Locality</legend>
+    <div>
+      <label for="specimen-locality-text" class="mb-1 block text-xs text-[var(--color-text-muted)]">
+        Free-form locality
+      </label>
+      <input
+        id="specimen-locality-text"
+        name="locality_text"
+        type="text"
+        placeholder="e.g. Tsumeb, Namibia"
+        class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+      />
+    </div>
+
+    <details class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)]/40">
+      <summary class="cursor-pointer px-3 py-2 text-xs text-[var(--color-text-muted)]">
+        Structured locality (optional)
+      </summary>
+      <div class="grid gap-3 p-3 sm:grid-cols-2">
+        <div>
+          <label
+            for="specimen-locality-country"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Country
+          </label>
+          <input
+            id="specimen-locality-country"
+            name="locality_country"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-locality-region"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Region
+          </label>
+          <input
+            id="specimen-locality-region"
+            name="locality_region"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-locality-site"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Site
+          </label>
+          <input
+            id="specimen-locality-site"
+            name="locality_site"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-locality-mindat"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            mindat ID
+          </label>
+          <input
+            id="specimen-locality-mindat"
+            name="locality_mindat_id"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-locality-lat"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Latitude
+          </label>
+          <input
+            id="specimen-locality-lat"
+            name="locality_lat"
+            type="number"
+            step="any"
+            min="-90"
+            max="90"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+            aria-invalid={Boolean(showError('locality_lat'))}
+          />
+          {#if showError('locality_lat')}
+            <p class="mt-1 text-xs text-red-500">{showError('locality_lat')}</p>
+          {/if}
+        </div>
+        <div>
+          <label
+            for="specimen-locality-lon"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Longitude
+          </label>
+          <input
+            id="specimen-locality-lon"
+            name="locality_lon"
+            type="number"
+            step="any"
+            min="-180"
+            max="180"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+            aria-invalid={Boolean(showError('locality_lon'))}
+          />
+          {#if showError('locality_lon')}
+            <p class="mt-1 text-xs text-red-500">{showError('locality_lon')}</p>
+          {/if}
+        </div>
+      </div>
+    </details>
+  </fieldset>
+
+  <fieldset class="space-y-3">
+    <legend class="text-sm font-medium text-[var(--color-text)]">Physical</legend>
+    <div class="grid gap-3 sm:grid-cols-4">
+      <div>
+        <label for="specimen-mass-g" class="mb-1 block text-xs text-[var(--color-text-muted)]">
+          Mass (g)
+        </label>
+        <input
+          id="specimen-mass-g"
+          name="mass_g"
+          type="number"
+          step="any"
+          min="0"
+          class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          aria-invalid={Boolean(showError('mass_g'))}
+        />
+        {#if showError('mass_g')}<p class="mt-1 text-xs text-red-500">{showError('mass_g')}</p>{/if}
+      </div>
+      <div>
+        <label for="specimen-length-mm" class="mb-1 block text-xs text-[var(--color-text-muted)]">
+          Length (mm)
+        </label>
+        <input
+          id="specimen-length-mm"
+          name="length_mm"
+          type="number"
+          step="any"
+          min="0"
+          class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+        />
+      </div>
+      <div>
+        <label for="specimen-width-mm" class="mb-1 block text-xs text-[var(--color-text-muted)]">
+          Width (mm)
+        </label>
+        <input
+          id="specimen-width-mm"
+          name="width_mm"
+          type="number"
+          step="any"
+          min="0"
+          class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+        />
+      </div>
+      <div>
+        <label for="specimen-height-mm" class="mb-1 block text-xs text-[var(--color-text-muted)]">
+          Height (mm)
+        </label>
+        <input
+          id="specimen-height-mm"
+          name="height_mm"
+          type="number"
+          step="any"
+          min="0"
+          class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+        />
+      </div>
+    </div>
+  </fieldset>
+
+  {#if $data.type === 'mineral'}
+    <fieldset class="space-y-3" data-testid="mineral-fields">
+      <legend class="text-sm font-medium text-[var(--color-text)]">Mineralogy</legend>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label
+            for="specimen-m-chemical-formula"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Chemical formula
+          </label>
+          <input
+            id="specimen-m-chemical-formula"
+            name="m_chemical_formula"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-m-mineral-species"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Mineral species (comma-separated)
+          </label>
+          <input
+            id="specimen-m-mineral-species"
+            name="m_mineral_species"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-m-crystal-system"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Crystal system
+          </label>
+          <input
+            id="specimen-m-crystal-system"
+            name="m_crystal_system"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-m-mohs-hardness"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Hardness (Mohs, 0–10)
+          </label>
+          <input
+            id="specimen-m-mohs-hardness"
+            name="m_mohs_hardness"
+            type="number"
+            step="any"
+            min="0"
+            max="10"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+            aria-invalid={Boolean(showError('m_mohs_hardness'))}
+          />
+          {#if showError('m_mohs_hardness')}
+            <p class="mt-1 text-xs text-red-500">{showError('m_mohs_hardness')}</p>
+          {/if}
+        </div>
+        <div>
+          <label for="specimen-m-color" class="mb-1 block text-xs text-[var(--color-text-muted)]">
+            Color
+          </label>
+          <input
+            id="specimen-m-color"
+            name="m_color"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label for="specimen-m-luster" class="mb-1 block text-xs text-[var(--color-text-muted)]">
+            Luster
+          </label>
+          <input
+            id="specimen-m-luster"
+            name="m_luster"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-m-fluorescence"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Fluorescence
+          </label>
+          <input
+            id="specimen-m-fluorescence"
+            name="m_fluorescence"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-m-mindat-id"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            mindat ID
+          </label>
+          <input
+            id="specimen-m-mindat-id"
+            name="m_mindat_id"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+      </div>
+      <label class="flex items-center gap-2 text-sm text-[var(--color-text)]">
+        <input
+          type="checkbox"
+          name="m_radioactive"
+          checked={$data.m_radioactive}
+          class="text-[var(--color-accent)]"
+        />
+        Radioactive
+      </label>
+    </fieldset>
+  {:else if $data.type === 'rock'}
+    <fieldset class="space-y-3" data-testid="rock-fields">
+      <legend class="text-sm font-medium text-[var(--color-text)]">Petrology</legend>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label
+            for="specimen-r-rock-type"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Rock type
+          </label>
+          <select
+            id="specimen-r-rock-type"
+            name="r_rock_type"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          >
+            <option value="">—</option>
+            <option value="igneous">Igneous</option>
+            <option value="sedimentary">Sedimentary</option>
+            <option value="metamorphic">Metamorphic</option>
+          </select>
+        </div>
+        <div>
+          <label
+            for="specimen-r-composition"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Composition
+          </label>
+          <input
+            id="specimen-r-composition"
+            name="r_composition"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div class="sm:col-span-2">
+          <label
+            for="specimen-r-formation-context"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Formation context
+          </label>
+          <input
+            id="specimen-r-formation-context"
+            name="r_formation_context"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+      </div>
+    </fieldset>
+  {:else}
+    <fieldset class="space-y-3" data-testid="meteorite-fields">
+      <legend class="text-sm font-medium text-[var(--color-text)]">Classification</legend>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label
+            for="specimen-me-classification"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Classification (e.g. L6, CV3)
+          </label>
+          <input
+            id="specimen-me-classification"
+            name="me_classification"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-me-fall-or-find"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Fall or find
+          </label>
+          <select
+            id="specimen-me-fall-or-find"
+            name="me_fall_or_find"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          >
+            <option value="">—</option>
+            <option value="fall">Fall</option>
+            <option value="find">Find</option>
+          </select>
+        </div>
+        <div>
+          <label
+            for="specimen-me-fall-or-find-date"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Fall/find date
+          </label>
+          <input
+            id="specimen-me-fall-or-find-date"
+            name="me_fall_or_find_date"
+            type="date"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+            aria-invalid={Boolean(showError('me_fall_or_find_date'))}
+          />
+          {#if showError('me_fall_or_find_date')}
+            <p class="mt-1 text-xs text-red-500">{showError('me_fall_or_find_date')}</p>
+          {/if}
+        </div>
+        <div>
+          <label
+            for="specimen-me-official-name"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Official name
+          </label>
+          <input
+            id="specimen-me-official-name"
+            name="me_official_name"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-me-total-known-weight-g"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Total known weight (g)
+          </label>
+          <input
+            id="specimen-me-total-known-weight-g"
+            name="me_total_known_weight_g"
+            type="number"
+            step="any"
+            min="0"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+            aria-invalid={Boolean(showError('me_total_known_weight_g'))}
+          />
+          {#if showError('me_total_known_weight_g')}
+            <p class="mt-1 text-xs text-red-500">{showError('me_total_known_weight_g')}</p>
+          {/if}
+        </div>
+        <div>
+          <label
+            for="specimen-me-metbull-ref"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Met. Bulletin ref
+          </label>
+          <input
+            id="specimen-me-metbull-ref"
+            name="me_metbull_ref"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+      </div>
+    </fieldset>
+  {/if}
+
+  <div class="flex items-center gap-2 pt-2">
+    <button
+      type="submit"
+      disabled={$isSubmitting}
+      data-testid="submit-button"
+      class="rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-accent-fg)] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {$isSubmitting ? 'Saving…' : submitLabel}
+    </button>
+    {#if onCancel}
+      <button
+        type="button"
+        onclick={onCancel}
+        disabled={$isSubmitting}
+        class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-60"
+      >
+        {cancelLabel}
+      </button>
+    {/if}
+  </div>
+</form>
