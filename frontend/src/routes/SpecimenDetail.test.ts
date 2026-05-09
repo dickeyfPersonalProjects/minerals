@@ -280,8 +280,12 @@ describe('SpecimenDetail route', () => {
     await waitFor(() => expect(screen.getByTestId('journal-empty')).toBeInTheDocument());
     expect(screen.queryByTestId('hero-photo')).toBeNull();
     expect(screen.queryByTestId('photo-gallery')).toBeNull();
-    // The provenance section is hidden when the chain is empty.
-    expect(screen.queryByTestId('provenance-section')).toBeNull();
+    // The provenance section always renders (D-5) so the user can
+    // open the chain editor even from an empty state. The chain
+    // itself shows an empty placeholder, not a list.
+    expect(screen.getByTestId('provenance-section')).toBeInTheDocument();
+    expect(screen.getByTestId('provenance-empty')).toBeInTheDocument();
+    expect(screen.queryByTestId('provenance-list')).toBeNull();
   });
 
   it('renders the provenance chain in position order when collectors are present', async () => {
@@ -315,7 +319,8 @@ describe('SpecimenDetail route', () => {
     render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
 
     await waitFor(() => expect(screen.getByTestId('specimen-detail')).toBeInTheDocument());
-    expect(screen.queryByTestId('provenance-section')).toBeNull();
+    expect(screen.queryByTestId('provenance-list')).toBeNull();
+    expect(screen.getByTestId('provenance-empty')).toBeInTheDocument();
   });
 
   it('treats a journal fetch error as an empty journal — the page still renders', async () => {
