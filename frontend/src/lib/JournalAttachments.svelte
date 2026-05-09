@@ -73,7 +73,9 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { client } from './api';
+  import { SUPPRESS_TOAST_HEADERS } from './api/wrapper';
   import type { components } from './api/schema';
+  import { toastError, toastSuccess } from './toasts';
 
   type Attachment = components['schemas']['JournalFileView'];
 
@@ -142,6 +144,9 @@
           fd.append('file', file, file.name);
           return fd;
         },
+        // Per-file errors render inline on the upload row; the
+        // batch summary toast covers global feedback.
+        headers: SUPPRESS_TOAST_HEADERS,
       });
       if (result.error) {
         patch(id, {
@@ -178,6 +183,13 @@
       // Refetch even if some failed — successful uploads still
       // need to appear in the list.
       await refetch();
+      // Summary toasts (E-4): one success + one error per batch.
+      const ids = toUpload.map((u) => u.id);
+      const finished = uploads.filter((u) => ids.includes(u.id));
+      const ok = finished.filter((u) => u.status === 'success').length;
+      const failed = finished.filter((u) => u.status === 'error').length;
+      if (ok > 0) toastSuccess(`Uploaded ${ok} attachment${ok === 1 ? '' : 's'}`);
+      if (failed > 0) toastError(`${failed} attachment upload${failed === 1 ? '' : 's'} failed`);
     } finally {
       busy = false;
     }
@@ -261,6 +273,7 @@
           `HTTP ${result.response.status}`;
         return;
       }
+      toastSuccess('Attachment deleted');
       await refetch();
     } catch (err: unknown) {
       listError = err instanceof Error ? err.message : String(err);

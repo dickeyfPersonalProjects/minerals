@@ -4,6 +4,7 @@
   import type { components } from '../lib/api/schema';
   import CollectorForm from '../lib/CollectorForm.svelte';
   import type { CollectorFormSubmitResult } from '../lib/CollectorForm.svelte';
+  import { toastSuccess } from '../lib/toasts';
 
   type Collector = components['schemas']['CollectorView'];
 
@@ -78,6 +79,7 @@
       if (response.status === 409) return { kind: 'duplicate' };
       return { kind: 'error', message: envelopeMessage(error, response.status) };
     }
+    toastSuccess('Collector saved');
     push('/collectors');
     return { kind: 'ok' };
   }
