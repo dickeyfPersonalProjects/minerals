@@ -3227,6 +3227,8 @@ Frontend pre-approvals:
 | OpenAPI client codegen | `openapi-typescript` (devDep) + `openapi-fetch` (runtime) — type-only, no runtime tax (locked in by mi-cy4) |
 | CSS framework | `tailwindcss` (with `@tailwindcss/postcss` or the standard PostCSS pipeline) |
 | Client-side router | `svelte-spa-router` (hash-based) |
+| Form state | `felte` + `@felte/validator-zod` (form management, errors/touched/dirty, async submit) |
+| Validation schemas | `zod` (shared client/server schema definitions where useful) |
 
 A polecat introducing a competitor to anything in these tables
 (e.g. swapping `pgx` for `database/sql` + `lib/pq`, or Svelte
