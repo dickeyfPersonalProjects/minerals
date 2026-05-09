@@ -3,6 +3,7 @@
   import { client } from '../lib/api';
   import type { components } from '../lib/api/schema';
   import Lightbox from '../lib/Lightbox.svelte';
+  import PhotoUploader from '../lib/PhotoUploader.svelte';
   import { formatLocal } from '../lib/time';
 
   type Specimen = components['schemas']['SpecimenView'];
@@ -36,6 +37,18 @@
     status: number,
   ): string {
     return error?.error?.message || error?.error?.code || `HTTP ${status}`;
+  }
+
+  async function refetchPhotos(id: string): Promise<void> {
+    try {
+      const p = await client.GET('/api/v1/specimens/{id}/photos', {
+        params: { path: { id }, query: { limit: 100 } },
+      });
+      photos = p.data?.items ?? [];
+    } catch {
+      // Auxiliary fetch — leave the existing list in place rather
+      // than blanking the gallery on a transient network error.
+    }
   }
 
   async function load(id: string): Promise<void> {
@@ -256,6 +269,7 @@
   {@const phys = physicalEntries(specimen)}
   {@const heroPhoto = photos[0]}
   {@const restPhotos = photos.slice(1)}
+  {@const specimenId = specimen.id}
 
   <article class="space-y-8" data-testid="specimen-detail">
     <header class="space-y-3">
@@ -353,6 +367,8 @@
         </ul>
       {/if}
     {/if}
+
+    <PhotoUploader {specimenId} onUploaded={() => refetchPhotos(specimenId)} />
 
     <div class="grid gap-8 lg:grid-cols-[2fr_1fr]">
       <div class="space-y-8">
