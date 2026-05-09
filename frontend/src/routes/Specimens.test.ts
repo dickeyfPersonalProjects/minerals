@@ -1,13 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 
-// Hoisted mock — the client is replaced for every test in this
-// file. Each test sets `mockGet` to the fixture it wants.
-const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
+// Hoisted mocks — the client and router are replaced for every
+// test. Each test sets `mockGet` to the fixture it wants and can
+// inspect `mockReplace` to verify URL sync.
+const { mockGet, mockReplace } = vi.hoisted(() => ({
+  mockGet: vi.fn(),
+  mockReplace: vi.fn(),
+}));
 
 vi.mock('../lib/api', () => ({
   client: { GET: mockGet },
 }));
+
+vi.mock('svelte-spa-router', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('svelte-spa-router');
+  return {
+    ...actual,
+    replace: mockReplace,
+    link: () => ({ destroy() {} }),
+  };
+});
 
 import Specimens from './Specimens.svelte';
 
@@ -44,6 +57,9 @@ function specimen(seed: SpecimenSeed) {
 
 beforeEach(() => {
   mockGet.mockReset();
+  mockReplace.mockReset();
+  // Reset hash so each test starts at /specimens with no filters.
+  window.location.hash = '#/specimens';
   // Default: photo lookups return an empty list so cards fall
   // back to the placeholder. Individual tests can override.
   mockGet.mockImplementation(async (path: string) => {
@@ -56,6 +72,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  window.location.hash = '';
 });
 
 describe('Specimens route', () => {
@@ -145,5 +162,77 @@ describe('Specimens route', () => {
 
     await waitFor(() => expect(screen.getByTestId('error')).toBeInTheDocument());
     expect(screen.getByText(/network down/)).toBeInTheDocument();
+  });
+
+  it('parses filters from the URL hash and forwards them to the API', async () => {
+    window.location.hash =
+      '#/specimens?q=quartz&type=mineral&visibility=public&has_catalog_number=true&acquired_after=2026-01-01&acquired_before=2026-12-31&collector_id=cccccccc-0000-0000-0000-000000000001';
+    // jsdom: ensure svelte-spa-router's listener picks up the new
+    // hash before the component mounts.
+    window.dispatchEvent(new Event('hashchange'));
+
+    const calls: Array<{ path: string; opts: { params?: { query?: Record<string, string> } } }> =
+      [];
+    mockGet.mockImplementation(async (path: string, opts: unknown) => {
+      const o = opts as { params?: { query?: Record<string, string> } };
+      calls.push({ path, opts: o });
+      return {
+        data: { items: [], next_cursor: null },
+        error: undefined,
+        response: new Response(),
+      };
+    });
+
+    render(Specimens);
+
+    await waitFor(() => {
+      expect(calls.find((c) => c.path === '/api/v1/specimens')).toBeDefined();
+    });
+    const call = calls.find((c) => c.path === '/api/v1/specimens')!;
+    expect(call.opts.params?.query).toEqual({
+      q: 'quartz',
+      type: 'mineral',
+      visibility: 'public',
+      has_catalog_number: 'true',
+      acquired_after: '2026-01-01',
+      acquired_before: '2026-12-31',
+      collector_id: 'cccccccc-0000-0000-0000-000000000001',
+    });
+    // Relevance hint shows when q is set.
+    expect(screen.getByTestId('relevance-hint')).toBeInTheDocument();
+  });
+
+  it('calls replace() with serialised filter state when a chip is clicked', async () => {
+    mockGet.mockImplementation(async () => ({
+      data: { items: [], next_cursor: null },
+      error: undefined,
+      response: new Response(),
+    }));
+
+    render(Specimens);
+
+    await waitFor(() => expect(screen.getByTestId('empty')).toBeInTheDocument());
+    await fireEvent.click(screen.getByTestId('filter-toggle'));
+    await fireEvent.click(screen.getByTestId('filter-type-mineral'));
+
+    expect(mockReplace).toHaveBeenCalledWith('/specimens?type=mineral');
+  });
+
+  it('shows the filtered empty state when results are empty under filters', async () => {
+    window.location.hash = '#/specimens?type=meteorite';
+    window.dispatchEvent(new Event('hashchange'));
+    mockGet.mockImplementation(async () => ({
+      data: { items: [], next_cursor: null },
+      error: undefined,
+      response: new Response(),
+    }));
+
+    render(Specimens);
+
+    await waitFor(() => expect(screen.getByTestId('empty-filtered')).toBeInTheDocument());
+    expect(screen.queryByTestId('empty')).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByTestId('empty-clear-filters'));
+    expect(mockReplace).toHaveBeenCalledWith('/specimens');
   });
 });

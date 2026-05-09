@@ -1,20 +1,62 @@
 <script lang="ts">
-  import { link, router } from 'svelte-spa-router';
+  import { link, replace, router } from 'svelte-spa-router';
   import { client } from '../lib/api';
   import type { components } from '../lib/api/schema';
   import SpecimenCard from '../lib/SpecimenCard.svelte';
+  import SpecimenFilters, {
+    activeFilterCount,
+    type SpecimenFiltersValue,
+  } from '../lib/SpecimenFilters.svelte';
 
   type Specimen = components['schemas']['SpecimenView'];
 
-  // Picks up `collector_id` from the route querystring so the
-  // collector-management page (D-4) can deep-link a "specimens
-  // referencing this collector" view. Backend filter lives at
-  // `GET /api/v1/specimens?collector_id=` (mi-zv3).
-  const collectorId = $derived.by(() => {
-    const qs = router.querystring;
-    if (!qs) return null;
-    return new URLSearchParams(qs).get('collector_id');
-  });
+  // URL ↔ filter state. The URL hash querystring is the single
+  // source of truth — `replace()` updates the URL, the derived
+  // value re-parses, and the fetch effect re-runs. Reload + back
+  // button "just work" because state lives in the URL.
+  const filters: SpecimenFiltersValue = $derived.by(() => parseFilters(router.querystring));
+
+  function parseFilters(qs: string | undefined): SpecimenFiltersValue {
+    if (!qs) return {};
+    const params = new URLSearchParams(qs);
+    const out: SpecimenFiltersValue = {};
+    const q = params.get('q');
+    if (q) out.q = q;
+    const type = params.get('type');
+    if (type === 'mineral' || type === 'rock' || type === 'meteorite') out.type = type;
+    const visibility = params.get('visibility');
+    if (visibility === 'private' || visibility === 'unlisted' || visibility === 'public') {
+      out.visibility = visibility;
+    }
+    const hasCat = params.get('has_catalog_number');
+    if (hasCat === 'true' || hasCat === 'false') out.has_catalog_number = hasCat;
+    const after = params.get('acquired_after');
+    if (after) out.acquired_after = after;
+    const before = params.get('acquired_before');
+    if (before) out.acquired_before = before;
+    const collectorId = params.get('collector_id');
+    if (collectorId) out.collector_id = collectorId;
+    return out;
+  }
+
+  function serializeFilters(value: SpecimenFiltersValue): string {
+    const params = new URLSearchParams();
+    // Iterate in a stable order so the resulting URL is
+    // deterministic — keeps tests and bookmarks predictable.
+    if (value.q) params.set('q', value.q);
+    if (value.type) params.set('type', value.type);
+    if (value.visibility) params.set('visibility', value.visibility);
+    if (value.has_catalog_number) params.set('has_catalog_number', value.has_catalog_number);
+    if (value.acquired_after) params.set('acquired_after', value.acquired_after);
+    if (value.acquired_before) params.set('acquired_before', value.acquired_before);
+    if (value.collector_id) params.set('collector_id', value.collector_id);
+    const qs = params.toString();
+    return qs ? `/specimens?${qs}` : '/specimens';
+  }
+
+  function applyFilters(next: SpecimenFiltersValue) {
+    void replace(serializeFilters(next));
+  }
 
   type LoadState =
     | { kind: 'idle' }
@@ -26,16 +68,37 @@
   let items: Specimen[] = $state([]);
   let loadState: LoadState = $state({ kind: 'idle' });
 
-  async function fetchPage(cursor?: string): Promise<void> {
+  type ListQuery = {
+    cursor?: string;
+    q?: string;
+    type?: 'mineral' | 'rock' | 'meteorite';
+    visibility?: 'private' | 'unlisted' | 'public';
+    has_catalog_number?: 'true' | 'false';
+    acquired_after?: string;
+    acquired_before?: string;
+    collector_id?: string;
+  };
+
+  function buildQuery(active: SpecimenFiltersValue, cursor?: string): ListQuery {
+    const q: ListQuery = {};
+    if (cursor) q.cursor = cursor;
+    if (active.q) q.q = active.q;
+    if (active.type) q.type = active.type;
+    if (active.visibility) q.visibility = active.visibility;
+    if (active.has_catalog_number) q.has_catalog_number = active.has_catalog_number;
+    if (active.acquired_after) q.acquired_after = active.acquired_after;
+    if (active.acquired_before) q.acquired_before = active.acquired_before;
+    if (active.collector_id) q.collector_id = active.collector_id;
+    return q;
+  }
+
+  async function fetchPage(active: SpecimenFiltersValue, cursor?: string): Promise<void> {
     const isFirst = cursor === undefined;
     loadState = isFirst ? { kind: 'loading' } : { kind: 'loading-more' };
 
     try {
-      const query: { cursor?: string; collector_id?: string } = {};
-      if (cursor) query.cursor = cursor;
-      if (collectorId) query.collector_id = collectorId;
       const { data, error, response } = await client.GET('/api/v1/specimens', {
-        params: { query },
+        params: { query: buildQuery(active, cursor) },
       });
       if (error) {
         const body = error.error;
@@ -54,22 +117,27 @@
     }
   }
 
+  // Refetch whenever filters change. Cursor pagination resets on
+  // every filter change — the previous cursor is invalid under
+  // new filters (CONTRACT.md §10.3, and the API explicitly rejects
+  // cursors when q transitions in/out of relevance ordering).
   $effect(() => {
-    // Re-runs whenever the collector_id filter changes (and on mount).
-    void collectorId;
+    const active = filters;
     items = [];
-    void fetchPage();
+    void fetchPage(active);
   });
 
   function loadMore() {
     if (loadState.kind !== 'loaded' || !loadState.nextCursor) return;
-    void fetchPage(loadState.nextCursor);
+    void fetchPage(filters, loadState.nextCursor);
   }
 
   function retry() {
     items = [];
-    void fetchPage();
+    void fetchPage(filters);
   }
+
+  const hasFilters = $derived(activeFilterCount(filters) > 0);
 </script>
 
 <section>
@@ -85,21 +153,12 @@
     </a>
   </header>
 
-  {#if collectorId}
-    <div
-      data-testid="collector-filter-banner"
-      class="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-text-muted)]"
-    >
-      <span>Filtered by collector.</span>
-      <a
-        href="/specimens"
-        use:link
-        class="underline hover:text-[var(--color-accent)]"
-        data-testid="clear-collector-filter"
-      >
-        Clear filter
-      </a>
-    </div>
+  <SpecimenFilters value={filters} onChange={applyFilters} />
+
+  {#if filters.q}
+    <p class="mb-3 text-xs text-[var(--color-text-muted)]" data-testid="relevance-hint">
+      Sorted by relevance
+    </p>
   {/if}
 
   {#if loadState.kind === 'loading'}
@@ -127,15 +186,32 @@
       </button>
     </div>
   {:else if items.length === 0}
-    <div
-      class="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-10 text-center"
-      data-testid="empty"
-    >
-      <p class="text-sm text-[var(--color-text)]">No specimens yet.</p>
-      <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-        Add your first specimen to get started.
-      </p>
-    </div>
+    {#if hasFilters}
+      <div
+        class="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-10 text-center"
+        data-testid="empty-filtered"
+      >
+        <p class="text-sm text-[var(--color-text)]">No specimens match these filters.</p>
+        <button
+          type="button"
+          onclick={() => applyFilters({})}
+          data-testid="empty-clear-filters"
+          class="mt-3 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm text-[var(--color-accent-fg)] hover:opacity-90"
+        >
+          Clear filters
+        </button>
+      </div>
+    {:else}
+      <div
+        class="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-10 text-center"
+        data-testid="empty"
+      >
+        <p class="text-sm text-[var(--color-text)]">No specimens yet.</p>
+        <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+          Add your first specimen to get started.
+        </p>
+      </div>
+    {/if}
   {:else}
     <ul class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="specimen-grid">
       {#each items as s (s.id)}
