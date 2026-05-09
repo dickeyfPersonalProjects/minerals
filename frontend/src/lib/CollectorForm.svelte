@@ -2,12 +2,7 @@
   import { createForm } from 'felte';
   import { validator } from '@felte/validator-zod';
   import { untrack } from 'svelte';
-  import { z } from 'zod';
-
-  export type CollectorFormValues = {
-    name: string;
-    notes: string;
-  };
+  import { collectorFormSchema, type CollectorFormValues } from './schemas/collector';
 
   export type CollectorFormSubmitResult =
     | { kind: 'ok' }
@@ -29,11 +24,6 @@
   const initialName = untrack(() => initial?.name ?? '');
   const initialNotes = untrack(() => initial?.notes ?? '');
 
-  const schema = z.object({
-    name: z.string().trim().min(1, 'Name is required').max(200, 'Name is too long'),
-    notes: z.string().max(10_000, 'Notes are too long'),
-  });
-
   let bannerError: string | null = $state(null);
   let nameTakenError: string | null = $state(null);
 
@@ -42,7 +32,7 @@
       name: initialName,
       notes: initialNotes,
     },
-    extend: validator({ schema }),
+    extend: validator({ schema: collectorFormSchema }),
     onSubmit: async (values) => {
       bannerError = null;
       nameTakenError = null;

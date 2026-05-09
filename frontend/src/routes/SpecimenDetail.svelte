@@ -2,6 +2,7 @@
   import { link } from 'svelte-spa-router';
   import { client } from '../lib/api';
   import type { components } from '../lib/api/schema';
+  import CollectorChainEditor from '../lib/CollectorChainEditor.svelte';
   import JournalAttachments from '../lib/JournalAttachments.svelte';
   import JournalEntryForm, {
     type JournalEntryFormSubmitResult,
@@ -38,6 +39,7 @@
   let lightboxIndex: number | null = $state(null);
   let journalCreating = $state(false);
   let editingEntryId: string | null = $state(null);
+  let editingChain = $state(false);
 
   function errorMessage(
     error: { error?: { code?: string; message?: string } } | undefined,
@@ -55,6 +57,17 @@
     } catch {
       // Auxiliary fetch — leave the existing list in place rather
       // than blanking the gallery on a transient network error.
+    }
+  }
+
+  async function refetchCollectors(id: string): Promise<void> {
+    try {
+      const c = await client.GET('/api/v1/specimens/{id}/collectors', {
+        params: { path: { id } },
+      });
+      collectors = c.data?.items ?? [];
+    } catch {
+      // Auxiliary fetch — keep existing list on transient failure.
     }
   }
 
@@ -591,11 +604,34 @@
           </section>
         {/if}
 
-        {#if collectors.length > 0}
-          <section data-testid="provenance-section">
-            <h2 class="mb-2 font-serif text-base font-semibold text-[var(--color-text)]">
+        <section data-testid="provenance-section">
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <h2 class="font-serif text-base font-semibold text-[var(--color-text)]">
               Provenance chain
             </h2>
+            {#if !editingChain}
+              <button
+                type="button"
+                onclick={() => (editingChain = true)}
+                data-testid="edit-chain-button"
+                class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+              >
+                Edit chain
+              </button>
+            {/if}
+          </div>
+
+          {#if editingChain}
+            <CollectorChainEditor
+              {specimenId}
+              initial={collectors.map((l) => ({ id: l.collector.id, name: l.collector.name }))}
+              onSaved={async () => {
+                await refetchCollectors(specimenId);
+                editingChain = false;
+              }}
+              onCancel={() => (editingChain = false)}
+            />
+          {:else if collectors.length > 0}
             <ol class="space-y-1 text-sm" data-testid="provenance-list">
               {#each collectors as link (link.collector.id)}
                 <li class="flex items-baseline gap-2" data-testid="provenance-entry">
@@ -606,8 +642,12 @@
                 </li>
               {/each}
             </ol>
-          </section>
-        {/if}
+          {:else}
+            <p class="text-sm text-[var(--color-text-muted)]" data-testid="provenance-empty">
+              No collectors recorded.
+            </p>
+          {/if}
+        </section>
 
         {#if specimen.source_notes}
           <section data-testid="provenance-notes-section">
