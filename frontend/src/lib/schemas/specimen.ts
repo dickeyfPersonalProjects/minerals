@@ -1,0 +1,532 @@
+// Zod schemas for the specimen create/edit form (CONTRACT.md §7b
+// pre-approved libraries; mi-qvg / D-1).
+//
+// Form values are stored flat as strings/booleans because HTML
+// inputs work in strings. Numeric/date fields are validated as
+// strings that *would* parse cleanly; conversion to the API body
+// happens in `formToCreateBody` / `formToPatchBody`.
+//
+// One base schema (shared common fields) + three type-specific
+// extensions for `type_data`. The form runs the base schema for
+// validation; the type-specific schemas live alongside so the
+// type-data fields and their constraints are co-located with the
+// form.
+
+import { z } from 'zod';
+import type { components } from '../api/schema';
+
+// --- helpers -------------------------------------------------------
+
+const trimmed = z.string().transform((s) => s.trim());
+
+// Optional numeric: accepts the form's "stringly typed" empty
+// state ('' / null) plus any string or number that parses as a
+// finite number (predicate gates the accepted range). felte's DOM
+// adapter coerces `<input type="number">` to a `number` (or `null`
+// when empty), so the schema must accept both shapes.
+function optionalNumber(message: string, predicate?: (n: number) => boolean) {
+  return z.union([z.string(), z.number(), z.null()]).refine(
+    (raw) => {
+      if (raw === null) return true;
+      if (typeof raw === 'number') {
+        if (!Number.isFinite(raw)) return false;
+        return predicate ? predicate(raw) : true;
+      }
+      if (raw === '' || raw.trim() === '') return true;
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return false;
+      return predicate ? predicate(n) : true;
+    },
+    { message },
+  );
+}
+
+// Optional date: accepts empty and null (felte coerces empty
+// `<input type="date">` to '' — but be defensive); non-empty
+// strings must parse as a valid date.
+const optionalDate = z.union([z.string(), z.null()]).refine(
+  (s) => {
+    if (s === null || s === '') return true;
+    const t = Date.parse(s);
+    return Number.isFinite(t);
+  },
+  { message: 'Enter a valid date (YYYY-MM-DD)' },
+);
+
+// --- type-specific schemas ----------------------------------------
+
+export const mineralDataSchema = z.object({
+  m_chemical_formula: z.string().max(200, 'Too long'),
+  m_mineral_species: z.string().max(500, 'Too long'),
+  m_crystal_system: z.string().max(50, 'Too long'),
+  m_mohs_hardness: optionalNumber('Mohs hardness must be 0–10', (n) => n >= 0 && n <= 10),
+  m_color: z.string().max(100, 'Too long'),
+  m_luster: z.string().max(100, 'Too long'),
+  m_fluorescence: z.string().max(200, 'Too long'),
+  m_radioactive: z.boolean(),
+  m_mindat_id: z.string().max(50, 'Too long'),
+});
+
+export const rockDataSchema = z.object({
+  r_rock_type: z.enum(['', 'igneous', 'sedimentary', 'metamorphic']),
+  r_composition: z.string().max(500, 'Too long'),
+  r_formation_context: z.string().max(500, 'Too long'),
+});
+
+export const meteoriteDataSchema = z.object({
+  me_classification: z.string().max(50, 'Too long'),
+  me_fall_or_find: z.enum(['', 'fall', 'find']),
+  me_fall_or_find_date: optionalDate,
+  me_official_name: z.string().max(200, 'Too long'),
+  me_total_known_weight_g: optionalNumber('Must be a positive number', (n) => n >= 0),
+  me_metbull_ref: z.string().max(50, 'Too long'),
+});
+
+// --- base schema --------------------------------------------------
+
+export const specimenBaseSchema = z.object({
+  type: z.enum(['mineral', 'rock', 'meteorite']),
+  name: trimmed.pipe(z.string().min(1, 'Name is required').max(200, 'Name is too long')),
+  catalog_number: z.string().max(100, 'Catalog number is too long'),
+  description: z.string().max(50_000, 'Description is too long'),
+  visibility: z.enum(['private', 'unlisted', 'public']),
+  acquired_at: optionalDate,
+  acquired_from: z.string().max(200, 'Too long'),
+  price_dollars: optionalNumber('Must be a positive number', (n) => n >= 0),
+  source_notes: z.string().max(2000, 'Too long'),
+  locality_text: z.string().max(500, 'Too long'),
+
+  locality_country: z.string().max(100, 'Too long'),
+  locality_region: z.string().max(200, 'Too long'),
+  locality_site: z.string().max(200, 'Too long'),
+  locality_lat: optionalNumber('Latitude must be -90..90', (n) => n >= -90 && n <= 90),
+  locality_lon: optionalNumber('Longitude must be -180..180', (n) => n >= -180 && n <= 180),
+  locality_mindat_id: z.string().max(50, 'Too long'),
+
+  mass_g: optionalNumber('Must be a positive number', (n) => n >= 0),
+  length_mm: optionalNumber('Must be a positive number', (n) => n >= 0),
+  width_mm: optionalNumber('Must be a positive number', (n) => n >= 0),
+  height_mm: optionalNumber('Must be a positive number', (n) => n >= 0),
+});
+
+// Full schema = base + all per-type fields. We always validate the
+// full set; fields for the wrong type are simply ignored when we
+// build the API body.
+export const specimenFormSchema = specimenBaseSchema
+  .merge(mineralDataSchema)
+  .merge(rockDataSchema)
+  .merge(meteoriteDataSchema);
+
+export type SpecimenFormValues = z.infer<typeof specimenFormSchema>;
+
+export type SpecimenType = SpecimenFormValues['type'];
+
+// --- defaults / serialization ------------------------------------
+
+type SpecimenView = components['schemas']['SpecimenView'];
+type CreateBody = components['schemas']['CreateSpecimenBody'];
+type PatchBody = components['schemas']['PatchSpecimenBody'];
+type MineralData = components['schemas']['MineralData'];
+type RockData = components['schemas']['RockData'];
+type MeteoriteData = components['schemas']['MeteoriteData'];
+
+export function emptyFormValues(type: SpecimenType = 'mineral'): SpecimenFormValues {
+  return {
+    type,
+    name: '',
+    catalog_number: '',
+    description: '',
+    visibility: 'private',
+    acquired_at: '',
+    acquired_from: '',
+    price_dollars: '',
+    source_notes: '',
+    locality_text: '',
+    locality_country: '',
+    locality_region: '',
+    locality_site: '',
+    locality_lat: '',
+    locality_lon: '',
+    locality_mindat_id: '',
+    mass_g: '',
+    length_mm: '',
+    width_mm: '',
+    height_mm: '',
+    m_chemical_formula: '',
+    m_mineral_species: '',
+    m_crystal_system: '',
+    m_mohs_hardness: '',
+    m_color: '',
+    m_luster: '',
+    m_fluorescence: '',
+    m_radioactive: false,
+    m_mindat_id: '',
+    r_rock_type: '',
+    r_composition: '',
+    r_formation_context: '',
+    me_classification: '',
+    me_fall_or_find: '',
+    me_fall_or_find_date: '',
+    me_official_name: '',
+    me_total_known_weight_g: '',
+    me_metbull_ref: '',
+  };
+}
+
+// Reset only the type_data subset of the form to the empty defaults
+// for the new type (called when the user toggles `type` in create
+// mode — edit mode disables `type` so this never fires there).
+export function resetTypeDataDefaults(
+  values: SpecimenFormValues,
+  newType: SpecimenType,
+): SpecimenFormValues {
+  const empty = emptyFormValues(newType);
+  return {
+    ...values,
+    type: newType,
+    m_chemical_formula: empty.m_chemical_formula,
+    m_mineral_species: empty.m_mineral_species,
+    m_crystal_system: empty.m_crystal_system,
+    m_mohs_hardness: empty.m_mohs_hardness,
+    m_color: empty.m_color,
+    m_luster: empty.m_luster,
+    m_fluorescence: empty.m_fluorescence,
+    m_radioactive: empty.m_radioactive,
+    m_mindat_id: empty.m_mindat_id,
+    r_rock_type: empty.r_rock_type,
+    r_composition: empty.r_composition,
+    r_formation_context: empty.r_formation_context,
+    me_classification: empty.me_classification,
+    me_fall_or_find: empty.me_fall_or_find,
+    me_fall_or_find_date: empty.me_fall_or_find_date,
+    me_official_name: empty.me_official_name,
+    me_total_known_weight_g: empty.me_total_known_weight_g,
+    me_metbull_ref: empty.me_metbull_ref,
+  };
+}
+
+export function specimenToFormValues(s: SpecimenView): SpecimenFormValues {
+  const v = emptyFormValues(s.type);
+  v.name = s.name;
+  v.catalog_number = s.catalog_number ?? '';
+  v.description = s.description;
+  v.visibility = s.visibility;
+  v.acquired_at = s.acquired_at ? toDateInputValue(s.acquired_at) : '';
+  v.acquired_from = s.acquired_from ?? '';
+  v.price_dollars = s.price_cents == null ? '' : (s.price_cents / 100).toString();
+  v.source_notes = s.source_notes ?? '';
+  v.locality_text = s.locality_text ?? '';
+
+  const loc = s.locality ?? {};
+  v.locality_country = loc.country ?? '';
+  v.locality_region = loc.region ?? '';
+  v.locality_site = loc.site ?? '';
+  v.locality_lat = loc.lat == null ? '' : String(loc.lat);
+  v.locality_lon = loc.lon == null ? '' : String(loc.lon);
+  v.locality_mindat_id = loc.mindat_id ?? '';
+
+  v.mass_g = s.mass_g == null ? '' : String(s.mass_g);
+  const dims = s.dimensions ?? {};
+  v.length_mm = dims.length_mm == null ? '' : String(dims.length_mm);
+  v.width_mm = dims.width_mm == null ? '' : String(dims.width_mm);
+  v.height_mm = dims.height_mm == null ? '' : String(dims.height_mm);
+
+  if (s.type === 'mineral') {
+    const td = (s.type_data ?? {}) as MineralData;
+    v.m_chemical_formula = td.chemical_formula ?? '';
+    v.m_mineral_species = (td.mineral_species ?? []).join(', ');
+    v.m_crystal_system = td.crystal_system ?? '';
+    v.m_mohs_hardness = td.mohs_hardness == null ? '' : String(td.mohs_hardness);
+    v.m_color = td.color ?? '';
+    v.m_luster = td.luster ?? '';
+    v.m_fluorescence = td.fluorescence ?? '';
+    v.m_radioactive = Boolean(td.radioactive);
+    v.m_mindat_id = td.mindat_id ?? '';
+  } else if (s.type === 'rock') {
+    const td = (s.type_data ?? {}) as RockData;
+    const rt = td.rock_type ?? '';
+    if (rt === 'igneous' || rt === 'sedimentary' || rt === 'metamorphic') {
+      v.r_rock_type = rt;
+    }
+    v.r_composition = td.composition ?? '';
+    v.r_formation_context = td.formation_context ?? '';
+  } else {
+    const td = (s.type_data ?? {}) as MeteoriteData;
+    v.me_classification = td.classification ?? '';
+    const ff = td.fall_or_find ?? '';
+    if (ff === 'fall' || ff === 'find') v.me_fall_or_find = ff;
+    v.me_fall_or_find_date = td.fall_or_find_date ? toDateInputValue(td.fall_or_find_date) : '';
+    v.me_official_name = td.official_name ?? '';
+    v.me_total_known_weight_g =
+      td.total_known_weight_g == null ? '' : String(td.total_known_weight_g);
+    v.me_metbull_ref = td.metbull_ref ?? '';
+  }
+  return v;
+}
+
+// Build a CreateSpecimenBody from validated form values. Empty
+// optional fields are omitted so the server uses defaults.
+export function formToCreateBody(values: SpecimenFormValues): CreateBody {
+  const body: CreateBody = { type: values.type, name: values.name.trim() };
+  if (values.catalog_number) body.catalog_number = values.catalog_number;
+  if (values.description) body.description = values.description;
+  body.visibility = values.visibility;
+  const acquiredAt = toRfc3339(values.acquired_at);
+  if (acquiredAt) body.acquired_at = acquiredAt;
+  if (values.acquired_from) body.acquired_from = values.acquired_from;
+  if (values.source_notes) body.source_notes = values.source_notes;
+  if (values.locality_text) body.locality_text = values.locality_text;
+
+  const cents = priceDollarsToCents(values.price_dollars);
+  if (cents !== null) body.price_cents = cents;
+  const massG = parseOptionalFloat(values.mass_g);
+  if (massG !== null) body.mass_g = massG;
+
+  const dims = buildDimensions(values);
+  if (dims) body.dimensions = dims;
+
+  const loc = buildLocality(values);
+  if (loc) body.locality = loc;
+
+  const td = buildTypeData(values);
+  if (td) body.type_data = td;
+
+  return body;
+}
+
+// Build a PatchSpecimenBody containing only fields whose value
+// changed from `initial`. type_data is sent as a partial overlay
+// per the §10 contract: present keys overwrite, omitted keys are
+// preserved server-side.
+export function formToPatchBody(initial: SpecimenView, values: SpecimenFormValues): PatchBody {
+  const body: PatchBody = {};
+
+  if (values.name.trim() !== initial.name) body.name = values.name.trim();
+
+  if (values.catalog_number !== (initial.catalog_number ?? '')) {
+    body.catalog_number = values.catalog_number || (null as unknown as string);
+  }
+  if (values.description !== initial.description) body.description = values.description;
+  if (values.visibility !== initial.visibility) body.visibility = values.visibility;
+
+  const newAcquiredAt = toRfc3339(values.acquired_at);
+  const initAcquiredAt = initial.acquired_at
+    ? toRfc3339(toDateInputValue(initial.acquired_at))
+    : '';
+  if (newAcquiredAt !== initAcquiredAt) {
+    if (newAcquiredAt) body.acquired_at = newAcquiredAt;
+  }
+  if (values.acquired_from !== (initial.acquired_from ?? '')) {
+    body.acquired_from = values.acquired_from;
+  }
+  if (values.source_notes !== (initial.source_notes ?? '')) {
+    body.source_notes = values.source_notes;
+  }
+  if (values.locality_text !== (initial.locality_text ?? '')) {
+    body.locality_text = values.locality_text;
+  }
+
+  const newCents = priceDollarsToCents(values.price_dollars);
+  const initCents = initial.price_cents ?? null;
+  if (newCents !== initCents && newCents !== null) {
+    body.price_cents = newCents;
+  }
+
+  const newMass = parseOptionalFloat(values.mass_g);
+  const initMass = initial.mass_g ?? null;
+  if (newMass !== initMass && newMass !== null) {
+    body.mass_g = newMass;
+  }
+
+  const dims = buildDimensions(values);
+  const initDims = initial.dimensions ?? {};
+  if (dims && !dimsEqual(dims, initDims)) {
+    body.dimensions = dims;
+  }
+
+  const loc = buildLocality(values);
+  const initLoc = initial.locality ?? {};
+  if (loc && !localityEqual(loc, initLoc)) {
+    body.locality = loc;
+  }
+
+  const td = buildTypeData(values);
+  if (td && !typeDataEqual(td, initial.type_data ?? {}, initial.type)) {
+    body.type_data = td;
+  }
+
+  return body;
+}
+
+// --- private helpers ---------------------------------------------
+
+function parseOptionalFloat(raw: string | number | null | undefined): number | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (raw === '' || raw.trim() === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function priceDollarsToCents(s: string | number | null | undefined): number | null {
+  const dollars = parseOptionalFloat(s);
+  if (dollars === null) return null;
+  return Math.round(dollars * 100);
+}
+
+function toRfc3339(dateInput: string | null | undefined): string {
+  // dateInput is the value of <input type="date"> ("YYYY-MM-DD"),
+  // empty, or null (felte coerces an empty date input to null).
+  if (!dateInput) return '';
+  // Append a midday-UTC time so timezone wobble doesn't flip the calendar day.
+  return `${dateInput}T12:00:00Z`;
+}
+
+function toDateInputValue(rfc3339: string): string {
+  // Pull just YYYY-MM-DD off an RFC 3339 string for prefilling
+  // <input type="date">.
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(rfc3339);
+  return m ? m[1]! : '';
+}
+
+function buildDimensions(values: SpecimenFormValues): components['schemas']['Dimensions'] | null {
+  const length_mm = parseOptionalFloat(values.length_mm);
+  const width_mm = parseOptionalFloat(values.width_mm);
+  const height_mm = parseOptionalFloat(values.height_mm);
+  if (length_mm === null && width_mm === null && height_mm === null) return null;
+  const out: components['schemas']['Dimensions'] = {};
+  if (length_mm !== null) out.length_mm = length_mm;
+  if (width_mm !== null) out.width_mm = width_mm;
+  if (height_mm !== null) out.height_mm = height_mm;
+  return out;
+}
+
+function buildLocality(values: SpecimenFormValues): components['schemas']['Locality'] | null {
+  const lat = parseOptionalFloat(values.locality_lat);
+  const lon = parseOptionalFloat(values.locality_lon);
+  const country = values.locality_country.trim();
+  const region = values.locality_region.trim();
+  const site = values.locality_site.trim();
+  const mindat_id = values.locality_mindat_id.trim();
+  if (!country && !region && !site && !mindat_id && lat === null && lon === null) return null;
+  const out: components['schemas']['Locality'] = {};
+  if (country) out.country = country;
+  if (region) out.region = region;
+  if (site) out.site = site;
+  if (lat !== null) out.lat = lat;
+  if (lon !== null) out.lon = lon;
+  if (mindat_id) out.mindat_id = mindat_id;
+  return out;
+}
+
+function buildTypeData(v: SpecimenFormValues): MineralData | RockData | MeteoriteData | null {
+  if (v.type === 'mineral') {
+    const out: MineralData = {};
+    if (v.m_chemical_formula.trim()) out.chemical_formula = v.m_chemical_formula.trim();
+    const species = v.m_mineral_species
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (species.length > 0) out.mineral_species = species;
+    if (v.m_crystal_system.trim()) out.crystal_system = v.m_crystal_system.trim();
+    const hardness = parseOptionalFloat(v.m_mohs_hardness);
+    if (hardness !== null) out.mohs_hardness = hardness;
+    if (v.m_color.trim()) out.color = v.m_color.trim();
+    if (v.m_luster.trim()) out.luster = v.m_luster.trim();
+    if (v.m_fluorescence.trim()) out.fluorescence = v.m_fluorescence.trim();
+    if (v.m_radioactive) out.radioactive = true;
+    if (v.m_mindat_id.trim()) out.mindat_id = v.m_mindat_id.trim();
+    return Object.keys(out).length === 0 ? null : out;
+  }
+  if (v.type === 'rock') {
+    const out: RockData = {};
+    if (v.r_rock_type) out.rock_type = v.r_rock_type;
+    if (v.r_composition.trim()) out.composition = v.r_composition.trim();
+    if (v.r_formation_context.trim()) out.formation_context = v.r_formation_context.trim();
+    return Object.keys(out).length === 0 ? null : out;
+  }
+  const out: MeteoriteData = {};
+  if (v.me_classification.trim()) out.classification = v.me_classification.trim();
+  if (v.me_fall_or_find) out.fall_or_find = v.me_fall_or_find;
+  const fdate = toRfc3339(v.me_fall_or_find_date);
+  if (fdate) out.fall_or_find_date = fdate;
+  if (v.me_official_name.trim()) out.official_name = v.me_official_name.trim();
+  const tkw = parseOptionalFloat(v.me_total_known_weight_g);
+  if (tkw !== null) out.total_known_weight_g = tkw;
+  if (v.me_metbull_ref.trim()) out.metbull_ref = v.me_metbull_ref.trim();
+  return Object.keys(out).length === 0 ? null : out;
+}
+
+function dimsEqual(
+  a: components['schemas']['Dimensions'],
+  b: components['schemas']['Dimensions'],
+): boolean {
+  return (
+    (a.length_mm ?? null) === (b.length_mm ?? null) &&
+    (a.width_mm ?? null) === (b.width_mm ?? null) &&
+    (a.height_mm ?? null) === (b.height_mm ?? null)
+  );
+}
+
+function localityEqual(
+  a: components['schemas']['Locality'],
+  b: components['schemas']['Locality'],
+): boolean {
+  return (
+    (a.country ?? '') === (b.country ?? '') &&
+    (a.region ?? '') === (b.region ?? '') &&
+    (a.site ?? '') === (b.site ?? '') &&
+    (a.lat ?? null) === (b.lat ?? null) &&
+    (a.lon ?? null) === (b.lon ?? null) &&
+    (a.mindat_id ?? '') === (b.mindat_id ?? '')
+  );
+}
+
+function typeDataEqual(
+  a: MineralData | RockData | MeteoriteData,
+  b: MineralData | RockData | MeteoriteData,
+  type: SpecimenView['type'],
+): boolean {
+  if (type === 'mineral') {
+    const aa = a as MineralData;
+    const bb = b as MineralData;
+    return (
+      (aa.chemical_formula ?? '') === (bb.chemical_formula ?? '') &&
+      arraysEqual(aa.mineral_species ?? [], bb.mineral_species ?? []) &&
+      (aa.crystal_system ?? '') === (bb.crystal_system ?? '') &&
+      (aa.mohs_hardness ?? null) === (bb.mohs_hardness ?? null) &&
+      (aa.color ?? '') === (bb.color ?? '') &&
+      (aa.luster ?? '') === (bb.luster ?? '') &&
+      (aa.fluorescence ?? '') === (bb.fluorescence ?? '') &&
+      Boolean(aa.radioactive) === Boolean(bb.radioactive) &&
+      (aa.mindat_id ?? '') === (bb.mindat_id ?? '')
+    );
+  }
+  if (type === 'rock') {
+    const aa = a as RockData;
+    const bb = b as RockData;
+    return (
+      (aa.rock_type ?? '') === (bb.rock_type ?? '') &&
+      (aa.composition ?? '') === (bb.composition ?? '') &&
+      (aa.formation_context ?? '') === (bb.formation_context ?? '')
+    );
+  }
+  const aa = a as MeteoriteData;
+  const bb = b as MeteoriteData;
+  return (
+    (aa.classification ?? '') === (bb.classification ?? '') &&
+    (aa.fall_or_find ?? '') === (bb.fall_or_find ?? '') &&
+    (aa.fall_or_find_date ?? '') === (bb.fall_or_find_date ?? '') &&
+    (aa.official_name ?? '') === (bb.official_name ?? '') &&
+    (aa.total_known_weight_g ?? null) === (bb.total_known_weight_g ?? null) &&
+    (aa.metbull_ref ?? '') === (bb.metbull_ref ?? '')
+  );
+}
+
+function arraysEqual<T>(a: readonly T[] | null, b: readonly T[] | null): boolean {
+  const aa = a ?? [];
+  const bb = b ?? [];
+  if (aa.length !== bb.length) return false;
+  for (let i = 0; i < aa.length; i++) if (aa[i] !== bb[i]) return false;
+  return true;
+}
