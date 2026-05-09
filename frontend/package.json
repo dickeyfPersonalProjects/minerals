@@ -36,7 +36,10 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "@felte/validator-zod": "^1.0.18",
+    "felte": "^1.3.0",
     "openapi-fetch": "^0.17.0",
-    "svelte-spa-router": "^5.1.0"
+    "svelte-spa-router": "^5.1.0",
+    "zod": "^3.25.76"
   }
 }
