@@ -1,8 +1,10 @@
 <script lang="ts">
   import { link } from 'svelte-spa-router';
   import { client } from '../lib/api';
+  import { SUPPRESS_TOAST_HEADERS } from '../lib/api/wrapper';
   import type { components } from '../lib/api/schema';
   import CollectorChainEditor from '../lib/CollectorChainEditor.svelte';
+  import ConfirmModal from '../lib/ConfirmModal.svelte';
   import JournalAttachments from '../lib/JournalAttachments.svelte';
   import JournalEntryForm, {
     type JournalEntryFormSubmitResult,
@@ -11,7 +13,7 @@
   import Lightbox from '../lib/Lightbox.svelte';
   import PhotoUploader from '../lib/PhotoUploader.svelte';
   import { formatLocal } from '../lib/time';
-  import { toastSuccess } from '../lib/toasts';
+  import { toastError, toastSuccess } from '../lib/toasts';
 
   type Specimen = components['schemas']['SpecimenView'];
   type Photo = components['schemas']['PhotoView'];
@@ -41,6 +43,13 @@
   let journalCreating = $state(false);
   let editingEntryId: string | null = $state(null);
   let editingChain = $state(false);
+
+  // Confirm-delete state — at most one entity is in the
+  // confirm-delete flow at a time, so a discriminated union keeps
+  // the call sites simple.
+  type DeleteTarget = { kind: 'photo'; id: string } | { kind: 'journal'; id: string };
+  let deleteTarget = $state<DeleteTarget | null>(null);
+  let deleting = $state(false);
 
   function errorMessage(
     error: { error?: { code?: string; message?: string } } | undefined,
@@ -171,6 +180,78 @@
   function closeLightbox() {
     lightboxIndex = null;
   }
+
+  function requestDeletePhoto(id: string) {
+    deleteTarget = { kind: 'photo', id };
+  }
+
+  function requestDeleteJournal(id: string) {
+    deleteTarget = { kind: 'journal', id };
+  }
+
+  function cancelDelete() {
+    if (!deleting) deleteTarget = null;
+  }
+
+  async function confirmDelete() {
+    const target = deleteTarget;
+    if (!target || !specimen || deleting) return;
+    deleting = true;
+    try {
+      if (target.kind === 'photo') {
+        const { error, response } = await client.DELETE('/api/v1/photos/{id}', {
+          params: { path: { id: target.id } },
+          headers: SUPPRESS_TOAST_HEADERS,
+        });
+        if (error) {
+          toastError(errorMessage(error, response.status));
+          return;
+        }
+        toastSuccess('Photo deleted');
+        deleteTarget = null;
+        // Close the lightbox so it doesn't try to render the deleted
+        // photo on the next refetch — the bound index would shift.
+        lightboxIndex = null;
+        await refetchPhotos(specimen.id);
+        return;
+      }
+      if (target.kind === 'journal') {
+        const { error, response } = await client.DELETE('/api/v1/journal/{id}', {
+          params: { path: { id: target.id } },
+          headers: SUPPRESS_TOAST_HEADERS,
+        });
+        if (error) {
+          if (response.status === 409) {
+            toastError(error.error?.message || 'This entry has attachments. Delete those first.');
+          } else {
+            toastError(errorMessage(error, response.status));
+          }
+          return;
+        }
+        toastSuccess('Journal entry deleted');
+        deleteTarget = null;
+        if (editingEntryId === target.id) editingEntryId = null;
+        await refetchJournal(specimen.id);
+        return;
+      }
+    } finally {
+      deleting = false;
+    }
+  }
+
+  const deleteDialogProps = $derived(
+    deleteTarget?.kind === 'photo'
+      ? {
+          title: 'Delete photo?',
+          message: 'Delete this photo? This cannot be undone.',
+        }
+      : deleteTarget?.kind === 'journal'
+        ? {
+            title: 'Delete journal entry?',
+            message: 'Delete this journal entry? Attachments will also be deleted.',
+          }
+        : null,
+  );
 
   function isEdited(j: Journal): boolean {
     const created = new Date(j.created_at).getTime();
@@ -395,39 +476,61 @@
     </header>
 
     {#if heroPhoto}
-      <button
-        type="button"
-        class="group block w-full overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
-        onclick={() => openLightbox(0)}
-        aria-label="Open photo viewer"
-        data-testid="hero-photo"
-      >
-        <img
-          src={`/api/v1/photos/${heroPhoto.id}/display`}
-          alt={`Photo of ${specimen.name}`}
-          class="aspect-[16/9] w-full object-cover transition group-hover:opacity-95"
-          loading="eager"
-        />
-      </button>
+      <div class="group relative">
+        <button
+          type="button"
+          class="block w-full overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+          onclick={() => openLightbox(0)}
+          aria-label="Open photo viewer"
+          data-testid="hero-photo"
+        >
+          <img
+            src={`/api/v1/photos/${heroPhoto.id}/display`}
+            alt={`Photo of ${specimen.name}`}
+            class="aspect-[16/9] w-full object-cover transition group-hover:opacity-95"
+            loading="eager"
+          />
+        </button>
+        <button
+          type="button"
+          onclick={() => requestDeletePhoto(heroPhoto.id)}
+          aria-label="Delete photo"
+          data-testid="hero-photo-delete"
+          class="absolute right-2 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-red-600 focus-visible:opacity-100 group-hover:opacity-100"
+        >
+          ✕
+        </button>
+      </div>
 
       {#if restPhotos.length > 0}
         <ul class="flex flex-wrap gap-3" data-testid="photo-gallery">
           {#each restPhotos as photo, i (photo.id)}
             <li class="contents">
-              <button
-                type="button"
-                class="h-20 w-20 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] transition hover:border-[var(--color-accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
-                onclick={() => openLightbox(i + 1)}
-                aria-label={`View photo ${i + 2}`}
-                data-testid="gallery-thumb"
-              >
-                <img
-                  src={`/api/v1/photos/${photo.id}/thumb`}
-                  alt=""
-                  class="h-full w-full object-cover"
-                  loading="lazy"
-                />
-              </button>
+              <div class="group relative">
+                <button
+                  type="button"
+                  class="block h-20 w-20 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] transition hover:border-[var(--color-accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                  onclick={() => openLightbox(i + 1)}
+                  aria-label={`View photo ${i + 2}`}
+                  data-testid="gallery-thumb"
+                >
+                  <img
+                    src={`/api/v1/photos/${photo.id}/thumb`}
+                    alt=""
+                    class="h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                </button>
+                <button
+                  type="button"
+                  onclick={() => requestDeletePhoto(photo.id)}
+                  aria-label="Delete photo"
+                  data-testid="gallery-thumb-delete"
+                  class="absolute right-1 top-1 rounded-full bg-black/65 px-1.5 text-[11px] leading-5 text-white opacity-0 transition-opacity hover:bg-red-600 focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  ✕
+                </button>
+              </div>
             </li>
           {/each}
         </ul>
@@ -500,7 +603,7 @@
                     {#if isEdited(entry)}
                       <span data-testid="edited-indicator" class="italic">· edited</span>
                     {/if}
-                    <span class="ml-auto">
+                    <span class="ml-auto flex items-center gap-1">
                       {#if editingEntryId !== entry.id}
                         <button
                           type="button"
@@ -510,6 +613,15 @@
                           aria-label="Edit entry"
                         >
                           Edit
+                        </button>
+                        <button
+                          type="button"
+                          onclick={() => requestDeleteJournal(entry.id)}
+                          data-testid="journal-delete-button"
+                          class="rounded-md px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] opacity-0 transition-opacity hover:text-red-500 focus-visible:opacity-100 group-hover:opacity-100"
+                          aria-label="Delete entry"
+                        >
+                          ✕
                         </button>
                       {/if}
                     </span>
@@ -667,6 +779,22 @@
   </article>
 
   {#if lightboxIndex !== null && photos.length > 0}
-    <Lightbox photos={lightboxPhotos} startIndex={lightboxIndex} onClose={closeLightbox} />
+    <Lightbox
+      photos={lightboxPhotos}
+      startIndex={lightboxIndex}
+      onClose={closeLightbox}
+      onDelete={requestDeletePhoto}
+    />
+  {/if}
+
+  {#if deleteTarget && deleteDialogProps}
+    <ConfirmModal
+      title={deleteDialogProps.title}
+      message={deleteDialogProps.message}
+      confirmLabel="Delete"
+      busy={deleting}
+      onConfirm={confirmDelete}
+      onCancel={cancelDelete}
+    />
   {/if}
 {/if}
