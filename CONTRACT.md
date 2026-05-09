@@ -708,7 +708,7 @@ enter only through env vars at runtime.
 
 ## Tag conventions
 
-Three kinds of tags coexist on the same image stream:
+Five kinds of tags coexist on the same image stream:
 
 - **`vX.Y.Z`** — immutable release tags. Once pushed, they MUST NOT
   be overwritten. If a release is broken, ship `vX.Y.Z+1`, never
@@ -717,11 +717,26 @@ Three kinds of tags coexist on the same image stream:
   tagged with its short git SHA. Immutable. Useful for "deploy
   exactly this commit."
 - **`latest`** — moves with `main`. Always points at the most
-  recent build of the `main` branch's HEAD. Mutable; do NOT pin
-  production to `latest`.
+  recent build of the `main` branch's HEAD. Mutable; operator
+  pinning discouraged.
+- **`staging`** — moves with `main`. Auto-tracked: every push to
+  `main` retags `staging` alongside `latest` and `sha-{short}`,
+  all sharing the same buildx manifest. The gitops staging
+  environment pulls this tag.
+- **`prod`** — manual promotion only. Moved by the
+  `Promote to :prod` workflow (`.github/workflows/promote-prod.yml`,
+  `workflow_dispatch`-only), which retags from a source tag
+  (default `staging`) to `:prod` via
+  `docker buildx imagetools create` — a manifest-only operation
+  that preserves the original image (no rebuild, no digest churn,
+  attestations intact). The gitops production environment pulls
+  this tag.
 
 A single image build typically receives multiple tags simultaneously
-(e.g. a release commit gets `v0.3.0`, `sha-abc1234`, and `latest`).
+(e.g. a `main` build gets `latest`, `staging`, and `sha-abc1234`;
+a release commit gets `v0.3.0`, `sha-abc1234`, and `latest`).
+Promotion to `:prod` does NOT rebuild — it republishes the same
+manifest under a new name.
 
 ## Versioning scheme
 
@@ -831,11 +846,13 @@ you what to do; that section tells you why.
 # §5 — Continuous integration (GitHub Actions)
 
 The repo's CI runs on **GitHub Actions**, gating PRs and automating
-container image publication. Three workflows make up v1's contract.
-A polecat MAY assume CI is in place; treating "but it works on my
-machine" as a defense is not acceptable for a merge-ready PR.
+container image publication. Four workflows make up v1's contract:
+three automated build/test workflows plus one manual promotion
+workflow. A polecat MAY assume CI is in place; treating "but it
+works on my machine" as a defense is not acceptable for a
+merge-ready PR.
 
-## The three workflows
+## The workflows
 
 ### 5.1 — PR validation (`.github/workflows/pr.yml`)
 
@@ -870,9 +887,11 @@ Steps:
 - Run the full test suite (same as 5.1)
 - If tests pass: build the Docker image via the multi-stage
   `Dockerfile`
-- Tag as `latest` AND `sha-{short}` (where `{short}` is the 7-char
-  prefix of the merge commit SHA)
-- Push both tags to `ghcr.io/dickeyfpersonalprojects/minerals`
+- Tag as `latest` AND `staging` AND `sha-{short}` (where `{short}`
+  is the 7-char prefix of the merge commit SHA), all three tags
+  sharing the same buildx manifest (single build, multiple tag
+  entries — never three separate pushes)
+- Push all tags to `ghcr.io/dickeyfpersonalprojects/minerals`
 
 If tests fail, no image is pushed. The branch protection on `main`
 makes test failure on `main` rare (PRs can't merge with red checks),
@@ -896,6 +915,33 @@ release is broken, ship `vX.Y.Z+1` rather than retagging.
 This workflow is the default path for releases. The
 `make image-release` Makefile target stays, but only as a fallback
 when CI is broken or unavailable.
+
+### 5.4 — Production promotion (`.github/workflows/promote-prod.yml`)
+
+Triggered: **`workflow_dispatch` only.** Never on push, PR, or tag.
+
+Inputs:
+- `from_tag` — string, default `staging`. Allows promoting from any
+  source tag (a future test might promote a specific `sha-...` tag
+  if the staging tag is suspect).
+
+Steps:
+- Log in to ghcr via the runner's built-in `GITHUB_TOKEN`
+- Inspect the source manifest digest
+- `docker buildx imagetools create -t ${IMAGE}:prod
+  ${IMAGE}:${from_tag}` — manifest-only retag (no pull, no rebuild,
+  no re-push of layers; attestations and any multi-manifest
+  structure are preserved)
+- Inspect the `:prod` manifest digest after retag and write a job
+  summary with source tag, source digest, prod digest, and a
+  match check (fails the job if digests diverge)
+
+The workflow declares `permissions: { packages: write }` explicitly
+because default token permissions vary by repo settings.
+
+This workflow is intentionally manual in v1 — there is no automated
+gating from staging into prod. A future bead may add a
+staging-test gate before promotion, but that's out of scope here.
 
 ## Branch protection
 

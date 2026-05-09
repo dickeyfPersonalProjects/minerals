@@ -1,0 +1,82 @@
+name: Promote to :prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_tag:
+        description: 'Source tag to promote (default: staging)'
+        required: true
+        default: 'staging'
+        type: string
+
+permissions:
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/dickeyfpersonalprojects/minerals
+
+jobs:
+  promote:
+    name: Retag to :prod
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Inspect source manifest digest
+        id: src
+        run: |
+          digest=$(docker buildx imagetools inspect \
+            "${IMAGE_NAME}:${FROM_TAG}" \
+            --format '{{.Manifest.Digest}}')
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "Source digest: ${digest}"
+        env:
+          FROM_TAG: ${{ inputs.from_tag }}
+
+      - name: Retag to :prod (manifest-only)
+        run: |
+          docker buildx imagetools create \
+            -t "${IMAGE_NAME}:prod" \
+            "${IMAGE_NAME}:${FROM_TAG}"
+        env:
+          FROM_TAG: ${{ inputs.from_tag }}
+
+      - name: Inspect :prod manifest digest
+        id: prod
+        run: |
+          digest=$(docker buildx imagetools inspect \
+            "${IMAGE_NAME}:prod" \
+            --format '{{.Manifest.Digest}}')
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "Prod digest: ${digest}"
+
+      - name: Summarize
+        run: |
+          {
+            echo "## Promote to :prod"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Source tag | \`${FROM_TAG}\` |"
+            echo "| Source digest | \`${SRC_DIGEST}\` |"
+            echo "| Prod digest | \`${PROD_DIGEST}\` |"
+            echo ""
+            if [ "${SRC_DIGEST}" = "${PROD_DIGEST}" ]; then
+              echo ":white_check_mark: Digests match — manifest-only retag succeeded."
+            else
+              echo ":x: Digest mismatch — investigate."
+              exit 1
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          FROM_TAG: ${{ inputs.from_tag }}
+          SRC_DIGEST: ${{ steps.src.outputs.digest }}
+          PROD_DIGEST: ${{ steps.prod.outputs.digest }}
