@@ -3630,6 +3630,40 @@ changes:
   to "just see if it works." The patterns are part of the
   security surface (cross-ref §2).
 
+## Filesystem usage
+
+The production container runs with `readOnlyRootFilesystem: true`
+(per the kustomize/base/deployment.yaml securityContext). The
+**only writable path** is `/tmp`, mounted as an `emptyDir` volume.
+This is a hard constraint, not a preference.
+
+- The application MUST NOT write to any path other than `/tmp`.
+  Not `/var/...`, not `/data`, not `/cache`, not `/app/...`. If
+  some future need surfaces a real "I need a persistent volume"
+  case, that's a coordinated change (new volume + securityContext
+  + manifest), not a unilateral polecat decision.
+- `/tmp` is **scratch space, ephemeral**. Anything written there
+  is gone on pod restart. Do NOT use `/tmp` for anything that
+  needs to survive a restart — that's S3 (per §12) or Postgres
+  (per §11).
+- The application MUST clean up its own `/tmp` usage:
+  - Multipart upload tempfiles: `defer form.RemoveAll()` after
+    parsing
+  - Tempfiles created via `os.CreateTemp`: `defer os.Remove(f.Name())`
+    plus `defer f.Close()`
+  - Image-processing intermediates: cleared before the handler
+    returns
+  - Best-effort, but expected. Polecat MUST NOT rely on the
+    `emptyDir` sizeLimit + pod restart as cleanup.
+- Tempfile names SHOULD use `os.CreateTemp("", "minerals-*")` (or
+  similar prefix) so they're recognizable in logs / `df` output.
+
+A polecat introducing code that writes outside `/tmp` MUST
+escalate. There is no v1 use case for it that I can foresee, but
+saying "no" preemptively is cheaper than discovering it on a
+prod deploy (we just learned this lesson the hard way with
+multipart spilling to /tmp + readOnlyRootFilesystem).
+
 ## Rate limiting & abuse mitigation: explicit deferral
 
 > v1 operates on a local network or behind a Cloudflare-proxied

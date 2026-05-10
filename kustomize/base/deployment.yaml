@@ -82,6 +82,9 @@ spec:
             limits:
               memory: 256Mi
               cpu: 500m
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
 
       containers:
         - name: minerals
@@ -139,3 +142,20 @@ spec:
             limits:
               memory: 1Gi
               cpu: 500m
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      # Pod-level scratch volume. The container root FS is read-only
+      # (per securityContext above), so any write — including Go's
+      # multipart parser spilling large request bodies — needs a
+      # writable mount. CONTRACT.md §17 mandates that the application
+      # writes ONLY to /tmp and treats it as ephemeral scratch.
+      # sizeLimit caps tempfile growth; one in-flight upload at the
+      # 100 MiB MAX_UPLOAD_BYTES cap fits comfortably with headroom
+      # for image processing (display + thumbnail variants in memory
+      # plus the original on disk).
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
