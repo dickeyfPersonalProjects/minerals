@@ -3104,31 +3104,49 @@ The canonical inventory of all settings lives in
 
 ## Loading and validation
 
-- Env vars are loaded **once at startup** in `internal/config/`.
-  There is one `Config` struct returned from one constructor,
-  populated by exactly one read of `os.Getenv` per variable.
+Validation happens in two phases, with strictness deliberately
+deferred to the active subcommand:
+
+1. **Format validation, at load time.** `internal/config/.Load()`
+   reads env vars **once at startup**. One `Config` struct, one
+   constructor, exactly one read of `os.Getenv` per variable.
+   `Load()` rejects malformed values (bad URL, unknown enum,
+   non-integer where an integer is required) and returns an error
+   naming the offending variable.
+2. **Strictness validation, per subcommand.** "Required in prod"
+   enforcement lives in per-subcommand methods on `Config`, not in
+   `Load()`. `main()` calls the right one before dispatching:
+   - `(*Config).ValidateForServe()` — full set
+   - `(*Config).ValidateForMigrate()` — `DATABASE_URL` only
+     (the migrate path doesn't talk to S3)
+
+   This split lets the prod migrate Job / initContainer run
+   without S3 credentials being present in its env (mi-dmv).
+
 - **Polecats MUST NOT call `os.Getenv` outside
   `internal/config/`.** If a value is needed elsewhere, it's a
   field on the `Config` struct, passed via dependency injection
   (per §7 — no globals).
-- The `Config` constructor returns an error on any validation
-  failure (malformed URL, unknown enum value, etc.). `main()`
-  exits non-zero with a clear message naming the failing
-  variable.
+- `main()` exits non-zero with a clear message naming the failing
+  variable on either phase's failure.
 
 ## Production strictness
 
-- When `ENV=prod`, the `Config` constructor:
-  - Refuses to fall back to defaults for any variable marked
-    "Required in prod" above
+- When `ENV=prod`, the active subcommand's `ValidateFor*` method:
+  - Refuses to fall back to defaults for any variable in its
+    required set (a subset of "Required in prod" above, scoped
+    to what the subcommand actually uses)
   - Returns an error explicitly naming the missing variable
   - Does NOT attempt to "guess" or use `localhost`-style
     defaults that are valid in dev
-- When `ENV=dev` or `ENV` is unset, defaults apply normally.
+- When `ENV=dev` or `ENV` is unset, defaults apply normally and
+  `ValidateFor*` is a no-op (`Load()` has already filled
+  defaults).
 - A polecat MUST NOT add a variable to the inventory marked
-  "required in prod" without confirming the `Config`
-  constructor enforces it and there's a test exercising the
-  enforcement.
+  "required in prod" without:
+  - Adding it to the appropriate `ValidateFor*` method(s) — and
+    only those methods whose subcommands actually consume it.
+  - Adding a test exercising the enforcement.
 
 ## Adding a new setting
 

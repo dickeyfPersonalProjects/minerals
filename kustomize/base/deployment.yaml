@@ -59,16 +59,13 @@ spec:
             capabilities:
               drop: ["ALL"]
           envFrom:
+            # The `migrate` subcommand only talks to Postgres, so per
+            # CONTRACT.md §15 it requires DATABASE_URL only — no S3
+            # creds. Config validation is subcommand-aware (resolved
+            # in mi-dmv); previously PR #42 had to mount the S3 secret
+            # here just to satisfy a process-wide validator.
             - configMapRef:
                 name: minerals-config
-            # S3 creds: the `migrate` subcommand doesn't actually use S3,
-            # but the prod-strictness config validator (per CONTRACT.md
-            # §15) requires all "required in prod" vars to be present
-            # at startup regardless of subcommand. Mounting these here
-            # satisfies the validator. Follow-up: make config validation
-            # subcommand-aware so migrate doesn't need S3 creds.
-            - secretRef:
-                name: minerals-s3-creds
           env:
             - name: DATABASE_URL
               valueFrom:

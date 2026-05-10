@@ -91,6 +91,9 @@ func withMigrate(fn func(*migrate.Migrate) error) error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.ValidateForMigrate(); err != nil {
+		return err
+	}
 	configureLogger(cfg.LogLevel)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -43,8 +43,16 @@ const (
 	defaultEnv               = "dev"
 )
 
-// Load reads the environment and produces a validated Config. Returns
-// an error naming any missing or malformed variable.
+// Load reads the environment and produces a Config with format-level
+// validation applied. Per CONTRACT.md §15, strictness checks (which
+// "required in prod" variables must be present) are NOT performed
+// here — subcommand dispatchers call ValidateForServe or
+// ValidateForMigrate before proceeding, so a subcommand that doesn't
+// touch a given subsystem doesn't need its env vars set.
+//
+// Load still returns an error on malformed values (bad enum, bad
+// integer), and still performs exactly one os.Getenv read per
+// variable.
 func Load() (*Config, error) {
 	return loadFrom(os.Getenv)
 }
@@ -63,32 +71,27 @@ func loadFrom(get func(string) string) (*Config, error) {
 	cfg.LogLevel = orDefault(get("LOG_LEVEL"), defaultLogLevel)
 	cfg.S3Region = orDefault(get("S3_REGION"), defaultS3Region)
 
+	// Required-in-prod variables: in dev, fall back to the inventory
+	// default; in prod, leave the field empty so ValidateFor* can
+	// flag it later if the active subcommand actually needs it.
 	required := []struct {
-		name  string
 		field *string
+		name  string
 		def   string
 	}{
-		{"DATABASE_URL", &cfg.DatabaseURL, defaultDatabaseURL},
-		{"S3_ENDPOINT", &cfg.S3Endpoint, defaultS3Endpoint},
-		{"S3_ACCESS_KEY_ID", &cfg.S3AccessKeyID, defaultS3AccessKeyID},
-		{"S3_SECRET_ACCESS_KEY", &cfg.S3SecretAccessKey, defaultS3SecretAccessKey},
-		{"S3_BUCKET", &cfg.S3Bucket, defaultS3Bucket},
+		{&cfg.DatabaseURL, "DATABASE_URL", defaultDatabaseURL},
+		{&cfg.S3Endpoint, "S3_ENDPOINT", defaultS3Endpoint},
+		{&cfg.S3AccessKeyID, "S3_ACCESS_KEY_ID", defaultS3AccessKeyID},
+		{&cfg.S3SecretAccessKey, "S3_SECRET_ACCESS_KEY", defaultS3SecretAccessKey},
+		{&cfg.S3Bucket, "S3_BUCKET", defaultS3Bucket},
 	}
 	for _, r := range required {
 		v := strings.TrimSpace(get(r.name))
-		if v == "" {
-			if prod {
-				return nil, fmt.Errorf("config: %s is required when ENV=prod", r.name)
-			}
+		if v == "" && !prod {
 			v = r.def
 		}
 		*r.field = v
 	}
-
-	// ENV is required in prod (the inventory marks it required) — but
-	// we infer prod from ENV itself. Treat empty ENV as dev (consistent
-	// with the §15 rule that empty == unset == dev defaults).
-	// Nothing to validate here beyond what was captured above.
 
 	if raw := strings.TrimSpace(get("MAX_UPLOAD_BYTES")); raw != "" {
 		n, err := strconv.ParseInt(raw, 10, 64)
@@ -117,6 +120,46 @@ func orDefault(v, def string) string {
 		return s
 	}
 	return def
+}
+
+// ValidateForServe enforces the prod-strictness rule for the serve
+// subcommand: every "required in prod" variable in the §15 inventory
+// must be set. In dev, Load() has already filled defaults, so this
+// is a no-op.
+func (c *Config) ValidateForServe() error {
+	if c.Env != "prod" {
+		return nil
+	}
+	checks := []struct {
+		name string
+		val  string
+	}{
+		{"DATABASE_URL", c.DatabaseURL},
+		{"S3_ENDPOINT", c.S3Endpoint},
+		{"S3_ACCESS_KEY_ID", c.S3AccessKeyID},
+		{"S3_SECRET_ACCESS_KEY", c.S3SecretAccessKey},
+		{"S3_BUCKET", c.S3Bucket},
+	}
+	for _, r := range checks {
+		if r.val == "" {
+			return fmt.Errorf("config: %s is required when ENV=prod", r.name)
+		}
+	}
+	return nil
+}
+
+// ValidateForMigrate enforces the prod-strictness rule for the
+// migrate subcommand. The migrate path only talks to Postgres, so
+// the required set narrows to DATABASE_URL — operators can run the
+// migrate Job without injecting S3 credentials.
+func (c *Config) ValidateForMigrate() error {
+	if c.Env != "prod" {
+		return nil
+	}
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("config: DATABASE_URL is required when ENV=prod")
+	}
+	return nil
 }
 
 // IsDev reports whether the binary should apply dev-only behavior
