@@ -124,7 +124,7 @@ Specific, unambiguous misses:
    in our usage), there's no place to record "we've reviewed this,
    ignored until X" — so any future audit step would be all-or-
    nothing.
-6. **`docs/quality/` lacks an index.** `backend-test-coverage.md.md`
+6. **`docs/quality/` lacks an index.** `backend-test-coverage.md`
    sits alongside this doc with no `README.md` linking the Q-wave
    reviews. Minor, but readers landing in `docs/quality/` have no
    map.
@@ -397,5 +397,5 @@ R6, R7, R8 are nice-to-haves; sequence after the top five.
 - `.github/workflows/pr.yml`, `.github/workflows/main.yml` — current
   CI gates; integration points for R1/R3/R5.
 - Bead **mi-7u3** — Q-6 acceptance criteria.
-- Companion review: `docs/quality/backend-test-coverage.md.md`
+- Companion review: `docs/quality/backend-test-coverage.md`
   (Q-1 / `mi-fmj`) — same Q-wave; sets the docs format used here.

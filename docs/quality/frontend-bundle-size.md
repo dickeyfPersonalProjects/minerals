@@ -152,16 +152,16 @@ time only. Out of scope for bundle-size analysis.
 
 ### Companion Q-wave context
 
-- `docs/quality/frontend-vuln-scanning.md.md` (`mi-7u3`, Q-6)
+- `docs/quality/frontend-vuln-scanning.md` (`mi-7u3`, Q-6)
   characterizes the dependency surface (5 prod, 20 dev, 396
   transitive) and recommends `audit-ci`, Dependabot, and
   signature verification. Some recommendations there
   (Dependabot grouping, lockfile-lint) are independent of bundle
   size; this review does not duplicate them.
-- `docs/quality/backend-test-coverage.md.md` (`mi-fmj`) — same
+- `docs/quality/backend-test-coverage.md` (`mi-fmj`) — same
   format used here.
-- `docs/quality/backend-code-quality.md.md` (`mi-6qo`) and
-  `docs/quality/frontend-vuln-scanning.md.md` are the prior
+- `docs/quality/backend-code-quality.md` (`mi-6qo`) and
+  `docs/quality/frontend-vuln-scanning.md` are the prior
   two Q-wave reviews to read in parallel for tone/depth.
 
 ---
@@ -238,9 +238,9 @@ Specific, unambiguous misses (paired with evidence):
    *not* recommend acting on it.
 
 8. **`docs/quality/` lacks an index.** Three Q-wave docs now
-   exist in this directory (`backend-code-quality.md.md`,
-   `backend-test-coverage.md.md`, `frontend-vuln-scanning.md.md`)
-   plus this one. The companion `frontend-vuln-scanning.md.md`
+   exist in this directory (`backend-code-quality.md`,
+   `backend-test-coverage.md`, `frontend-vuln-scanning.md`)
+   plus this one. The companion `frontend-vuln-scanning.md`
    review (R8) already flagged this. Not re-recommended here to
    avoid double-counting effort across the Q-wave.
 
@@ -624,10 +624,10 @@ R8 is explicitly **not** recommended.
   `.github/workflows/main.yml` — current CI; build is missing.
 - Bead **mi-gi6** — Q-8 acceptance criteria.
 - Companion reviews:
-  - `docs/quality/frontend-vuln-scanning.md.md` (Q-6 / `mi-7u3`)
+  - `docs/quality/frontend-vuln-scanning.md` (Q-6 / `mi-7u3`)
     — dependency surface analysis.
-  - `docs/quality/backend-test-coverage.md.md` (Q-1 / `mi-fmj`).
-  - `docs/quality/backend-code-quality.md.md` (Q-3 / `mi-6qo`).
+  - `docs/quality/backend-test-coverage.md` (Q-1 / `mi-fmj`).
+  - `docs/quality/backend-code-quality.md` (Q-3 / `mi-6qo`).
 - Measurements: `vite build` invoked locally on commit
   `9765301` worktree, Node 22, npm 10. JS minified 271,157 B,
   brotli-11 64,769 B (Node `zlib.brotliCompressSync`). CSS

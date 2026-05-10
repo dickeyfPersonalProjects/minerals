@@ -13,10 +13,10 @@
 >
 > **Adjacent Q-wave docs (deliberately out-of-scope here, do not
 > duplicate):**
-> - Q-2 frontend test coverage — `frontend-test-coverage.md.md`
-> - Q-6 frontend dependency vuln scanning — `frontend-vuln-scanning.md.md`
-> - Q-7 frontend accessibility — `frontend-accessibility.md.md`
-> - Q-8 frontend bundle size — `frontend-bundle-size.md.md`
+> - Q-2 frontend test coverage — `frontend-test-coverage.md`
+> - Q-6 frontend dependency vuln scanning — `frontend-vuln-scanning.md`
+> - Q-7 frontend accessibility — `frontend-accessibility.md`
+> - Q-8 frontend bundle size — `frontend-bundle-size.md`
 
 ## TL;DR
 
@@ -537,7 +537,7 @@ known downsides.
 - **License**: MIT — **allowed** (§16).
 - **Catches**: missing `alt`, button-as-div, click-without-key
   handlers, etc. Listed for completeness; **deferred to Q-7**
-  (`frontend-accessibility.md.md`) which owns the recommendation.
+  (`frontend-accessibility.md`) which owns the recommendation.
 
 ### 3.11 Add `@typescript-eslint/consistent-type-assertions` with strict config
 
