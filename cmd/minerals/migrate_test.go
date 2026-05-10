@@ -84,6 +84,62 @@ func TestMigrateUpVersion(t *testing.T) {
 	}
 }
 
+// TestMigrateUpProdNoS3Creds confirms that `minerals migrate up`
+// succeeds in prod mode (ENV=prod) with no S3 credentials in the
+// environment. This is the headline behavior of mi-dmv: the migrate
+// subcommand must not require S3 vars, so the prod migrate Job /
+// initContainer does not need bucket creds mounted into it.
+//
+// Skipped when migrations/ is empty (same gate as TestMigrateUpVersion).
+func TestMigrateUpProdNoS3Creds(t *testing.T) {
+	files, err := migrationFiles()
+	if err != nil {
+		t.Fatalf("migrationFiles: %v", err)
+	}
+	hasUp := false
+	for _, f := range files {
+		if strings.HasSuffix(f, ".up.sql") {
+			hasUp = true
+			break
+		}
+	}
+	if !hasUp {
+		t.Skip("migrations/ has no *.up.sql files; skipping until bd #1 lands")
+	}
+
+	repoRoot := repoRootFromTest(t)
+
+	bin := filepath.Join(t.TempDir(), "minerals")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/minerals")
+	build.Dir = repoRoot
+	build.Stdout, build.Stderr = os.Stdout, os.Stderr
+	if err := build.Run(); err != nil {
+		t.Fatalf("go build: %v", err)
+	}
+
+	// Build a clean env with ENV=prod and DATABASE_URL only — no S3
+	// vars at all. The dev DATABASE_URL default is fine; we just need
+	// a reachable Postgres for the migrate to actually run.
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "postgres://minerals:minerals@localhost:5432/minerals?sslmode=disable"
+	}
+	env := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+		"ENV=prod",
+		"DATABASE_URL=" + dbURL,
+	}
+
+	up := exec.Command(bin, "migrate", "up")
+	up.Env = env
+	var out bytes.Buffer
+	up.Stdout, up.Stderr = &out, &out
+	if err := up.Run(); err != nil {
+		t.Fatalf("migrate up (prod, no S3 creds): %v\noutput:\n%s\n(is dev Postgres running on localhost:5432?)", err, out.String())
+	}
+}
+
 // repoRootFromTest finds the repo root by walking up from the test
 // file's directory until it sees a go.mod.
 func repoRootFromTest(t *testing.T) string {

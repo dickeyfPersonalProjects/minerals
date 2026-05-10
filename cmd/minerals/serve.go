@@ -33,6 +33,9 @@ func runServe(_ []string) error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.ValidateForServe(); err != nil {
+		return err
+	}
 	configureLogger(cfg.LogLevel)
 
 	slog.Info("server starting",
