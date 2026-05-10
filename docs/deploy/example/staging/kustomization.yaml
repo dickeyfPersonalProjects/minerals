@@ -1,0 +1,16 @@
+# Per-env overlay for staging.
+#
+# Order matches the lifecycle: namespace must exist before everything
+# else; cert-manager + ingress wire up the public surface; SealedSecrets
+# get unsealed by the controller into Secrets the app/MinIO consume; the
+# Flux Kustomization (`mineral.yaml`) is what actually pulls
+# kustomize/base/ from the app repo and reconciles it into this namespace.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - certificate.yaml
+  - ingress.yaml
+  - minerals-minio-config.yaml
+  - minerals-s3-creds.yaml
+  - mineral.yaml

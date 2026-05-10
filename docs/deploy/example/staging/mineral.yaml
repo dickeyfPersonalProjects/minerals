@@ -1,0 +1,53 @@
+# Flux Kustomization that reconciles the minerals app base into this env.
+#
+# Lives in the flux-system namespace (where Flux controllers run); the
+# `targetNamespace` field is what places the rendered resources into
+# `mineral-staging`.
+#
+# Key fields:
+#   - sourceRef: the GitRepository defined in flux-source/minerals-repo.yaml.
+#   - path: ./kustomize/base — the WHAT-to-run declared by the app repo.
+#     This overlay supplies the HOW (image tag, env-specific config).
+#   - prune: true — Flux deletes resources that disappear from the rendered
+#     output. Required for GitOps to act as the source of truth.
+#   - force: true — replace immutable fields by recreating the resource
+#     when an in-place patch would fail (e.g. Job spec changes). Safe
+#     here because v1 is single-replica with `Recreate` strategy.
+#   - interval: 10m — drift-correction cadence. Independent of the
+#     GitRepository's poll interval; this controls how often the rendered
+#     manifests are re-applied.
+#   - images: pin the staging image tag. Bumping `newTag` to a new SHA
+#     (or moving the `staging` rolling tag) is the deploy mechanism.
+#   - patches: override the base ConfigMap's ENV value to "staging". This
+#     ConfigMap patch is intentionally present in BOTH staging and prod
+#     overlays — see prod/mineral.yaml. Keeping the patch shape symmetric
+#     across envs avoids surprises when someone copies one overlay to
+#     create a third.
+apiVersion: kustomize.toolkit.fluxcd.io/v1beta2
+kind: Kustomization
+metadata:
+  name: mineral-staging
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  force: true
+  prune: true
+  path: ./kustomize/base
+  targetNamespace: mineral-staging
+  sourceRef:
+    kind: GitRepository
+    name: minerals-repo
+  images:
+    - name: ghcr.io/dickeyfpersonalprojects/minerals
+      newTag: staging
+  patches:
+    - target:
+        kind: ConfigMap
+        name: minerals-config
+      patch: |-
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: minerals-config
+        data:
+          ENV: staging

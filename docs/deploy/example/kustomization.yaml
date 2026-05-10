@@ -1,0 +1,16 @@
+# Top-level kustomization for the minerals deployment example.
+#
+# Aggregates the per-env overlays so a single `kubectl apply -k` (or a
+# single Flux Kustomization pointed at this directory) fans out to both
+# environments. Mirrors the fleet-infra shape: each env is a sibling
+# directory with its own self-contained kustomization.
+#
+# The flux-source/ directory is intentionally NOT listed here. The
+# GitRepository lives in the flux-system namespace and is reconciled
+# alongside the cluster's other Flux sources, not as part of the per-env
+# overlays it feeds.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - staging
+  - prod

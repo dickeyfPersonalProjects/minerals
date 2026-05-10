@@ -1,0 +1,30 @@
+# SealedSecret for the app's S3 (MinIO IAM) credentials.
+#
+# Consumed by the app Deployment in kustomize/base/deployment.yaml via
+# `envFrom: secretRef`. The decrypted Secret must contain exactly these
+# two keys, named to match the env vars the app reads — no key remapping:
+#
+#     S3_ACCESS_KEY_ID
+#     S3_SECRET_ACCESS_KEY
+#
+# Provisioning workflow:
+#   1. Operator creates a MinIO IAM user (or reuses root) scoped to the
+#      `minerals` bucket.
+#   2. Stage the plaintext Secret in `.sec/minerals-s3-creds.yaml`.
+#   3. Run `kubeseal` to produce the encrypted manifest — see ../../encrypt.md.
+#   4. Commit ONLY the encrypted output (this file).
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: minerals-s3-creds
+  namespace: mineral-staging
+spec:
+  encryptedData:
+    S3_ACCESS_KEY_ID: REPLACE_WITH_KUBESEAL_OUTPUT
+    S3_SECRET_ACCESS_KEY: REPLACE_WITH_KUBESEAL_OUTPUT
+  template:
+    metadata:
+      name: minerals-s3-creds
+      namespace: mineral-staging
+    type: Opaque

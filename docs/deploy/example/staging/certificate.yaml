@@ -1,0 +1,18 @@
+# cert-manager Certificate for the staging hostname.
+#
+# The ClusterIssuer (`dickey-cloud-issuer`) is a placeholder — replace
+# with whatever ClusterIssuer your fleet uses (e.g. a Let's Encrypt
+# DNS-01 issuer). cert-manager writes the resulting cert + key into
+# Secret `web-crt` in this namespace; the Ingress consumes it by name.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: web-crt
+  namespace: mineral-staging
+spec:
+  dnsNames:
+    - mineral-staging.dickey.cloud
+  issuerRef:
+    kind: ClusterIssuer
+    name: dickey-cloud-issuer
+  secretName: web-crt
