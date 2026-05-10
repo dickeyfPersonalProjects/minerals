@@ -143,10 +143,18 @@ jobs:
         working-directory: frontend
         run: npm run check
 
-      - name: tests
+      - name: tests (with coverage + GHA annotations)
         if: steps.detect.outputs.present == 'true'
         working-directory: frontend
-        run: npm test
+        run: npx vitest run --reporter=github-actions --reporter=default --coverage
+
+      - name: Upload frontend coverage
+        if: steps.detect.outputs.present == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+          if-no-files-found: ignore
 
   # Validates the committed docker-compose.yml end-to-end. The Backend
   # job above brings up Postgres + MinIO via GHA service containers

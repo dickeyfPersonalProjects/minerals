@@ -127,7 +127,15 @@ jobs:
           npm ci
           npx prettier --check .
           npx eslint .
-          npm test
+          npx vitest run --reporter=github-actions --reporter=default --coverage
+
+      - name: Upload frontend coverage
+        if: steps.frontend.outputs.present == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+          if-no-files-found: ignore
 
   # Validates the committed docker-compose.yml end-to-end. The `test`
   # job above brings up Postgres + MinIO via GHA service containers
