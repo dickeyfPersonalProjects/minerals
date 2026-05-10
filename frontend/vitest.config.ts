@@ -8,5 +8,17 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test-setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'json-summary'],
+      include: ['src/**/*.{ts,svelte}'],
+      exclude: [
+        'src/**/*.test.ts',
+        'src/lib/api/schema.d.ts',
+        'src/test-setup.ts',
+        'src/main.ts',
+        'src/routes.ts',
+      ],
+    },
   },
 });

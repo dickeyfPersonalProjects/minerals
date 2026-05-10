@@ -17,6 +17,7 @@ coverage.html
 # Frontend
 node_modules/
 frontend/dist/
+frontend/coverage/
 
 # Editor / OS
 .DS_Store

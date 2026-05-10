@@ -30,6 +30,6 @@ export default [
   },
   {
     // Generated API client (mi-cy4): rewritten by `make gen-api-client`.
-    ignores: ['dist/', 'node_modules/', '.svelte-kit/', 'src/lib/api/schema.d.ts'],
+    ignores: ['dist/', 'node_modules/', 'coverage/', '.svelte-kit/', 'src/lib/api/schema.d.ts'],
   },
 ];

@@ -53,6 +53,8 @@ test-integration:
 	go test -tags integration ./...
 
 # ── Frontend (mi-p5h) ─────────────────────────────────────────────
+.PHONY: test-frontend test-cover-frontend
+
 fmt-frontend:
 	cd frontend && npx prettier --write .
 
@@ -61,6 +63,12 @@ fmt-check-frontend:
 
 lint-frontend:
 	cd frontend && npx eslint .
+
+test-frontend:
+	cd frontend && npm test
+
+test-cover-frontend:
+	cd frontend && npm run test:cover
 
 # ── API client codegen (mi-cy4) ───────────────────────────────────
 # Dumps the type-derived OpenAPI spec from the in-process server and
