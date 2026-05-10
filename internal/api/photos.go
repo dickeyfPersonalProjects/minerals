@@ -217,12 +217,28 @@ type uploadPhotoOutput struct {
 }
 
 func (s *PhotoService) upload(ctx context.Context, in *uploadPhotoInput) (*uploadPhotoOutput, error) {
+	// CONTRACT.md §17: huma decodes the multipart form before this
+	// handler runs, so by the time we get here any body larger than
+	// huma's MultipartMaxMemory (8 KiB default) has already spilled to
+	// /tmp. Schedule cleanup first thing so every early return — UUID
+	// parse, content-type rejection, oversize, downstream errors —
+	// unlinks the tempfile. RemoveAll deletes the on-disk spillover;
+	// File.Close releases the *os.File handle on top of it.
+	// readOnlyRootFilesystem only permits writes to /tmp, and
+	// "best-effort, but expected" cleanup is the §17 rule there.
+	form := in.RawBody.Data()
+	defer func() {
+		if in.RawBody.Form != nil {
+			_ = in.RawBody.Form.RemoveAll()
+		}
+	}()
+	defer func() { _ = form.File.Close() }()
+
 	specimenID, err := parseUUID(in.SpecimenID, "id")
 	if err != nil {
 		return nil, err
 	}
 
-	form := in.RawBody.Data()
 	innerCT := strings.ToLower(strings.TrimSpace(form.File.ContentType))
 	if !isAllowedPhotoContentType(innerCT) {
 		return nil, newAPIError(http.StatusUnsupportedMediaType, "unsupported_media_type",
@@ -244,7 +260,6 @@ func (s *PhotoService) upload(ctx context.Context, in *uploadPhotoInput) (*uploa
 		return nil, newAPIError(http.StatusBadRequest, "bad_request",
 			"failed to read upload body", nil)
 	}
-	defer func() { _ = form.File.Close() }()
 
 	// Default taken_at: caller-supplied value wins; fall back to EXIF.
 	var takenAt *time.Time
