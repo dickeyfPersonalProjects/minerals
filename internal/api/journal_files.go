@@ -202,6 +202,23 @@ type uploadJournalFileOutput struct {
 }
 
 func (s *JournalFileService) upload(ctx context.Context, in *uploadJournalFileInput) (*uploadJournalFileOutput, error) {
+	// CONTRACT.md §17: huma decodes the multipart form before this
+	// handler runs, so by the time we get here any body larger than
+	// huma's MultipartMaxMemory (8 KiB default) has already spilled to
+	// /tmp. Schedule cleanup first thing so every early return — UUID
+	// parse, entry lookup, content-type rejection, oversize — unlinks
+	// the tempfile. RemoveAll deletes the on-disk spillover;
+	// File.Close releases the *os.File handle on top of it.
+	// readOnlyRootFilesystem only permits writes to /tmp, and
+	// "best-effort, but expected" cleanup is the §17 rule there.
+	form := in.RawBody.Data()
+	defer func() {
+		if in.RawBody.Form != nil {
+			_ = in.RawBody.Form.RemoveAll()
+		}
+	}()
+	defer func() { _ = form.File.Close() }()
+
 	entryID, err := parseUUID(in.EntryID, "id")
 	if err != nil {
 		return nil, err
@@ -221,7 +238,6 @@ func (s *JournalFileService) upload(ctx context.Context, in *uploadJournalFileIn
 			"failed to look up journal entry", nil)
 	}
 
-	form := in.RawBody.Data()
 	innerCT := strings.ToLower(strings.TrimSpace(form.File.ContentType))
 	if !isAllowedJournalContentType(innerCT) {
 		return nil, newAPIError(http.StatusUnsupportedMediaType, "unsupported_media_type",
@@ -240,7 +256,6 @@ func (s *JournalFileService) upload(ctx context.Context, in *uploadJournalFileIn
 		return nil, newAPIError(http.StatusBadRequest, "bad_request",
 			"failed to read upload body", nil)
 	}
-	defer func() { _ = form.File.Close() }()
 
 	sum := sha256.Sum256(data)
 	sha256Hex := hex.EncodeToString(sum[:])

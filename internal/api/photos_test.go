@@ -15,6 +15,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -380,6 +381,99 @@ func TestPhotoUpload_RejectsOversizedPayload(t *testing.T) {
 		// Huma may surface MaxBytesError as 400 if it occurs during
 		// multipart parse; either status satisfies the §12 cap rule.
 		t.Errorf("status = %d body=%s (want 413 or 400)", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPhotoUpload_CleansMultipartTempfiles asserts CONTRACT.md §17
+// compliance: a body large enough to trigger huma's
+// MultipartMaxMemory (8 KiB) spillover writes a tempfile to /tmp,
+// which the upload handler must unlink before returning.
+//
+// Strategy: redirect $TMPDIR to a t.TempDir() so we can inspect
+// exactly what got written, then post a JPEG larger than 8 KiB and
+// confirm the directory is empty after the handler returns.
+//
+// If this test breaks, suspect the handler's defer chain — see
+// the §17 comment block in photos.go::upload.
+func TestPhotoUpload_CleansMultipartTempfiles(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+
+	h, photos, _, _ := newPhotoServer(t)
+	specimenID := uuid.New()
+	photos.specimens[specimenID] = true
+
+	// 1200x800 with high-variation per-pixel pattern compresses to
+	// well above 8 KiB — guaranteed spillover.
+	jp := makeJPEG(t, 1200, 800)
+	if len(jp) <= 8*1024 {
+		t.Fatalf("test JPEG is %d bytes; need >8 KiB to trigger huma "+
+			"spillover, audit MultipartMaxMemory if this changed",
+			len(jp))
+	}
+
+	body, ct := makeMultipartUpload(t, jp, "image/jpeg", "")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/specimens/"+specimenID.String()+"/photos", body)
+	req.Header.Set("Content-Type", ct)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("upload: %d %s", rec.Code, rec.Body.String())
+	}
+
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatalf("read tempdir: %v", err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("tempdir not cleaned after upload: %v", names)
+	}
+}
+
+// TestPhotoUpload_CleansTempfileOnEarlyReturn asserts that the
+// cleanup defers fire even when the handler returns before
+// io.ReadAll — the bug class PR #47 surfaced. We force an early
+// return via a 415 (unsupported content-type) on a body big enough
+// to spill to disk.
+func TestPhotoUpload_CleansTempfileOnEarlyReturn(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+
+	h, photos, _, _ := newPhotoServer(t)
+	specimenID := uuid.New()
+	photos.specimens[specimenID] = true
+
+	// >8 KiB body with text/plain inner Content-Type so the handler
+	// rejects with 415 before reading the file.
+	big := bytes.Repeat([]byte("A"), 16*1024)
+	body, ct := makeMultipartUpload(t, big, "text/plain", "")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/specimens/"+specimenID.String()+"/photos", body)
+	req.Header.Set("Content-Type", ct)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d body=%s (want 415)",
+			rec.Code, rec.Body.String())
+	}
+
+	entries, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatalf("read tempdir: %v", err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("tempdir not cleaned after 415: %v", names)
 	}
 }
 
