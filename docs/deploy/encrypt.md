@@ -5,6 +5,11 @@ manifests referenced from the example overlay (`example/staging/`,
 `example/prod/`). The output of this workflow is what gets committed to
 the GitOps repo; the plaintext input never leaves your workstation.
 
+> **Pairs with** [`secrets.md`](./secrets.md) — the inventory of every
+> Secret the deployment consumes, including which ones are
+> operator-sealed (this workflow) versus operator-generated (CNPG,
+> cert-manager).
+
 ## Why SealedSecrets
 
 SealedSecrets are the default for this fleet because they let plaintext

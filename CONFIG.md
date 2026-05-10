@@ -85,6 +85,18 @@ knob — IS a contract change. The full procedure (with the rules a PR
 must satisfy) lives in CONTRACT.md §15 "Adding a new setting". The
 first and mandatory step is to add the row to the inventory above.
 
+**If the setting is a secret** (carries credentials, tokens, API keys,
+or anything else that must not appear in plaintext in git), the same
+PR must also update [`docs/deploy/secrets.md`](./docs/deploy/secrets.md)
+— either adding a row for a new Kubernetes `Secret` or adding a key
+to an existing one. `docs/deploy/secrets.md` is the operator-facing
+inventory that says how each value gets into the cluster (operator-
+sealed via kubeseal, CNPG-generated, cert-manager-generated, etc.).
+Future Kind=secret rows in the inventory above should link to the
+matching `secrets.md` row; today every row is `Kind=env` and the
+secret/non-secret distinction lives in `secrets.md` rather than this
+table.
+
 ## Secrets in dev: compose defaults, no `.env` required
 
 - Dev creds (`minerals:minerals` for Postgres, `minioadmin:minioadmin`
@@ -101,7 +113,9 @@ first and mandatory step is to add the row to the inventory above.
 
 - v1 deployments inject env vars via Kubernetes `Secret` resources,
   consumed via `envFrom` in the deployment manifest. The operator
-  manages the Secret directly.
+  manages the Secret directly. The full inventory of which Secrets
+  exist, who reads them, and how each value is provisioned lives in
+  [`docs/deploy/secrets.md`](./docs/deploy/secrets.md).
 - A future decision on a more durable secret-management strategy
   (Sealed Secrets, External Secrets Operator, Vault, SOPS) is deferred.
   The application doesn't care — secrets reach the binary as env vars
