@@ -203,7 +203,7 @@ target** — the CI `npm test` step is the only invocation path.
   GPL/AGPL family, BSL/SSPL/Elastic/Confluent, custom/unknown.
   Every recommended tool below clears this bar.
 - CONTRACT.md §17 — no test-related rules; security scanning
-  separately covered by Q-6 (`docs/quality/frontend-vuln-scanning.md.md`).
+  separately covered by Q-6 (`docs/quality/frontend-vuln-scanning.md`).
 
 ---
 
@@ -721,7 +721,7 @@ quality-of-tests gap. R9 + R10 are flagged for later.
 - `frontend/src/lib/schemas/specimen.ts` — the 532-LOC pure-
   logic file that's the focus of R3.
 - Bead **mi-ih0** — Q-2 acceptance criteria.
-- Companion review: `docs/quality/backend-test-coverage.md.md`
+- Companion review: `docs/quality/backend-test-coverage.md`
   (Q-1 / `mi-fmj`) — same Q-wave; format mirrored here.
-- Companion review: `docs/quality/frontend-vuln-scanning.md.md`
+- Companion review: `docs/quality/frontend-vuln-scanning.md`
   (Q-6 / `mi-7u3`) — same Q-wave, frontend half.

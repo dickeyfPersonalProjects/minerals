@@ -3,7 +3,7 @@
 > Scope: Go backend rooted at the repo root (`go.mod`, `cmd/`,
 > `internal/`, `migrations/`, `Dockerfile`). Excludes the
 > TypeScript/Svelte frontend (covered by Q-6,
-> `docs/quality/frontend-vuln-scanning.md.md`).
+> `docs/quality/frontend-vuln-scanning.md`).
 > Date: 2026-05-10. Bead: `mi-6xy`.
 
 ## TL;DR
@@ -639,7 +639,7 @@ None block production.
 - **`.golangci.yml`** — current lint config; integration
   point for R9 (`gosec`).
 - **Bead `mi-6xy`** — Q-5 acceptance criteria.
-- **Companion review:** `docs/quality/frontend-vuln-scanning.md.md`
+- **Companion review:** `docs/quality/frontend-vuln-scanning.md`
   (Q-6 / `mi-7u3`) — same Q-wave; same shape and tone.
   R5 (OSV-Scanner) and R8 (Scorecard) overlap with that
   doc's R5 / R6 — a single PR can clear both at once.

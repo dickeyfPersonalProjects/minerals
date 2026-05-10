@@ -419,7 +419,7 @@ integration footprint, effort, and known downsides.
     component is rendered standalone (e.g. `ConfirmModal.test.ts`,
     `SpecimenForm.test.ts`, `Toaster.test.ts`, `Lightbox` —
     Lightbox doesn't have a test today; tracked discovered work
-    in §2 of `backend-test-coverage.md.md` is backend-scoped, but
+    in §2 of `backend-test-coverage.md` is backend-scoped, but
     a sibling frontend coverage doc would surface this).
   - There is a community `vitest-axe` package (MIT) but it has
     been quiet for several releases; the 10-line wrapper has no
