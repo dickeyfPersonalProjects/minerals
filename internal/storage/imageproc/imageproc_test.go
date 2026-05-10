@@ -10,6 +10,7 @@ import (
 )
 
 func TestScaleToLongEdge(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name         string
 		srcW, srcH   int
@@ -37,6 +38,7 @@ func TestScaleToLongEdge(t *testing.T) {
 }
 
 func TestGenerate_FromPNG(t *testing.T) {
+	t.Parallel()
 	src := image.NewRGBA(image.Rect(0, 0, 2400, 1800))
 	for y := 0; y < 1800; y++ {
 		for x := 0; x < 2400; x++ {
@@ -77,6 +79,7 @@ func TestGenerate_FromPNG(t *testing.T) {
 }
 
 func TestGenerate_UnsupportedContentType(t *testing.T) {
+	t.Parallel()
 	_, err := Generate([]byte{0, 0}, "image/heic")
 	if err == nil {
 		t.Fatal("expected error for unsupported type")
@@ -84,6 +87,7 @@ func TestGenerate_UnsupportedContentType(t *testing.T) {
 }
 
 func TestGenerate_FromJPEG_PortraitOrientation(t *testing.T) {
+	t.Parallel()
 	src := image.NewRGBA(image.Rect(0, 0, 1200, 2000))
 	for y := 0; y < 2000; y += 100 {
 		for x := 0; x < 1200; x += 100 {
