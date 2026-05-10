@@ -80,6 +80,11 @@ services:
       S3_SECRET_ACCESS_KEY: minioadmin
       S3_BUCKET: minerals-dev
       ENV: dev
+      # Mindat-backed mineral-species lookup (mi-dtg / F-1). Optional:
+      # set this to enable Mindat fallthrough on cache misses; without
+      # it the app runs in DB-only mode (users enter minerals once and
+      # the app remembers them). Get a key at https://www.mindat.org/.
+      # MINDAT_API_KEY: ""
     ports:
       - "8080:8080"
     depends_on:

@@ -7,3 +7,4 @@ package db
 //	file_postgres.go          FilePostgres        (mi-jpu / B-3)
 //	photo_postgres.go         PhotoPostgres       (mi-jpu / B-3)
 //	journal_entry_postgres.go JournalEntryPostgres (mi-y6b / C-1)
+//	mineral_species_postgres.go MineralSpeciesPostgres (mi-dtg / F-1)

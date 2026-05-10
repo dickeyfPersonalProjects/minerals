@@ -114,6 +114,18 @@ spec:
                 secretKeyRef:
                   name: minerals-pg-app
                   key: uri
+            # Optional Mindat API key for the F-1 mineral-species
+            # lookup pipeline (mi-dtg). The Secret is operator-provided
+            # in the GitOps overlay; `optional: true` means the pod
+            # starts cleanly when it's absent and the app falls back
+            # to DB-only mineral lookup. To enable Mindat: create the
+            # Secret with an `api_key` data field.
+            - name: MINDAT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minerals-mindat
+                  key: api_key
+                  optional: true
           livenessProbe:
             httpGet:
               path: /healthz

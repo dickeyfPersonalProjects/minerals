@@ -148,6 +148,24 @@ func (specStubJournalAttachmentRepo) MaxPosition(context.Context, domain.Tx, uui
 	return 0, nil
 }
 
+// specStubMineralSpeciesRepo is a never-called stand-in so the
+// type-derived OpenAPI spec advertises /api/v1/mineral-species
+// during codegen (mi-dtg / F-1).
+type specStubMineralSpeciesRepo struct{}
+
+func (specStubMineralSpeciesRepo) Create(context.Context, domain.Tx, domain.MineralSpecies) error {
+	return domain.ErrMineralSpeciesNotFound
+}
+func (specStubMineralSpeciesRepo) GetByID(context.Context, uuid.UUID) (domain.MineralSpecies, error) {
+	return domain.MineralSpecies{}, domain.ErrMineralSpeciesNotFound
+}
+func (specStubMineralSpeciesRepo) FindByName(context.Context, string) ([]domain.MineralSpecies, error) {
+	return nil, nil
+}
+func (specStubMineralSpeciesRepo) FindByMindatID(context.Context, string) (domain.MineralSpecies, error) {
+	return domain.MineralSpecies{}, domain.ErrMineralSpeciesNotFound
+}
+
 // specStubSpecimenCollectorRepo is a never-called stand-in so the
 // type-derived OpenAPI spec advertises the chain routes during
 // codegen (mi-zv3 / C-3).
@@ -189,6 +207,9 @@ func runOpenAPI(args []string) error {
 			Entries: specStubJournalRepo{},
 		},
 		SpecimenCollectors: specStubSpecimenCollectorRepo{},
+		MineralSpecies: &api.MineralSpeciesServiceDeps{
+			Repo: specStubMineralSpeciesRepo{},
+		},
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        specStubJournalRepo{},
 			Attachments:    specStubJournalAttachmentRepo{},

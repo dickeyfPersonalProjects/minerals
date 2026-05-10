@@ -19,9 +19,27 @@ import (
 	"github.com/dickeyfPersonalProjects/minerals/internal/config"
 	"github.com/dickeyfPersonalProjects/minerals/internal/db"
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
+	"github.com/dickeyfPersonalProjects/minerals/internal/mindat"
 	"github.com/dickeyfPersonalProjects/minerals/internal/storage"
 	"github.com/dickeyfPersonalProjects/minerals/internal/web"
 )
+
+// newMindatClient constructs the Mindat HTTP client when an API key
+// is configured. An unset key returns nil so the api package
+// recognises it as DB-only mode (per the F-1 acceptance criteria —
+// the system MUST work without a Mindat key).
+func newMindatClient(apiKey string) api.MindatLookup {
+	if apiKey == "" {
+		slog.Info("mindat: no API key configured; mineral-species lookup is DB-only")
+		return nil
+	}
+	c, err := mindat.NewClient(mindat.Options{APIKey: apiKey})
+	if err != nil {
+		slog.Warn("mindat: client init failed; running DB-only", "err", err)
+		return nil
+	}
+	return c
+}
 
 // dbPinger adapts pgxpool.Pool's Ping to the api.Pinger interface.
 type dbPinger struct{ pool *pgxpool.Pool }
@@ -117,6 +135,10 @@ func runServe(_ []string) error {
 			Entries: db.NewJournalEntryPostgres(pool),
 		},
 		SpecimenCollectors: db.NewSpecimenCollectorPostgres(pool),
+		MineralSpecies: &api.MineralSpeciesServiceDeps{
+			Repo:   db.NewMineralSpeciesPostgres(pool),
+			Mindat: newMindatClient(cfg.MindatAPIKey),
+		},
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        db.NewJournalEntryPostgres(pool),
 			Attachments:    db.NewJournalEntryFilePostgres(pool),

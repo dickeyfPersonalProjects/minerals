@@ -75,6 +75,11 @@ type Deps struct {
 	// /api/v1/journal/{id}/files, /api/v1/journal-files/{file_id},
 	// and /api/v1/files/{file_id} routes unregistered.
 	JournalFiles *JournalFileServiceDeps
+	// MineralSpecies is wired in production (mi-dtg / F-1) to expose
+	// the /api/v1/mineral-species autocomplete + create surface.
+	// The Mindat client is optional — nil mindat falls through to
+	// DB-only mode.
+	MineralSpecies *MineralSpeciesServiceDeps
 }
 
 // New returns an http.Handler with the v1 routes wired up. Callers
@@ -114,6 +119,9 @@ func New(deps Deps) http.Handler {
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "journal-files", Description: "File attachments on journal entries (mi-720 / C-2). Reuses the §12 upload pipeline; no variant generation.",
 	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "mineral-species", Description: "Mindat-backed mineral species lookup with DB-as-canonical-store (mi-dtg / F-1).",
+	})
 
 	humaAPI := humago.New(mux, cfg)
 	registerSystemOperations(humaAPI, deps)
@@ -123,6 +131,7 @@ func New(deps Deps) http.Handler {
 	registerJournalOperations(humaAPI, deps.Journal)
 	registerSpecimenCollectorOperations(humaAPI, deps.Specimens, deps.SpecimenCollectors)
 	registerJournalFileOperations(humaAPI, mux, deps.JournalFiles)
+	registerMineralSpeciesOperations(humaAPI, deps.MineralSpecies)
 
 	// Protected /api/v1/* fallback. Real handlers land in feature
 	// beads; for now any unmatched /api/v1/ path falls through to a

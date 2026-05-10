@@ -122,6 +122,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mineral-species": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search mineral species
+         * @description Returns mineral species matching `q` (case-insensitive substring on `name`). DB is consulted first; if no match and a Mindat API key is configured, the server falls through to the Mindat API and stores any successful result before returning. Without a key, the DB-only result is returned (possibly empty).
+         */
+        get: operations["list-mineral-species"];
+        put?: never;
+        /**
+         * Create a user-entered mineral species
+         * @description Used when the user enters a mineral that didn't match any DB or Mindat record. The server stamps source='user' and author_id from auth context. Returns 409 if `name` collides with an existing row.
+         */
+        post: operations["create-mineral-species"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mineral-species/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a mineral species by id */
+        get: operations["get-mineral-species"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/openapi.json": {
         parameters: {
             query?: never;
@@ -433,6 +474,18 @@ export interface components {
             /** @description Markdown source for the entry. Server renders to HTML at write and read time. */
             body_md: string;
         };
+        CreateMineralSpeciesBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/CreateMineralSpeciesBody.json
+             */
+            readonly $schema?: string;
+            /** @description Pre-fill payload (design §2 MineralData). */
+            data: components["schemas"]["MineralData"];
+            /** @description Canonical mineral name; must be unique across all sources. */
+            name: string;
+        };
         CreateSpecimenBody: {
             /**
              * Format: uri
@@ -611,6 +664,48 @@ export interface components {
             /** Format: double */
             mohs_hardness?: number;
             radioactive?: boolean;
+        };
+        MineralSpeciesListBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/MineralSpeciesListBody.json
+             */
+            readonly $schema?: string;
+            /** @description Matched mineral species. */
+            items: components["schemas"]["MineralSpeciesView"][] | null;
+        };
+        MineralSpeciesView: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/MineralSpeciesView.json
+             */
+            readonly $schema?: string;
+            /** @description Required when source='mindat' per Mindat's CC-BY-NC-SA 4.0 terms; null otherwise. */
+            attribution: string | null;
+            /** @description UUID of the user who created the row (CONTRACT.md §13). */
+            author_id: string;
+            /**
+             * Format: date-time
+             * @description RFC 3339 creation timestamp.
+             */
+            created_at: string;
+            /** @description Pre-fill payload for the specimen form (design §2 MineralData). */
+            data: components["schemas"]["MineralData"];
+            /** @description UUIDv7 primary key. */
+            id: string;
+            /** @description Mindat geomaterial id; null for source='user'. */
+            mindat_id: string | null;
+            /** @description Canonical mineral name; unique across all rows. */
+            name: string;
+            /** @description Provenance: 'mindat' or 'user' (CONTRACT-style enum). */
+            source: string;
+            /**
+             * Format: date-time
+             * @description RFC 3339 last-update timestamp.
+             */
+            updated_at: string;
         };
         PatchCollectorBody: {
             /**
@@ -1670,6 +1765,203 @@ export interface operations {
             };
             /** @description Unsupported Media Type */
             415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "list-mineral-species": {
+        parameters: {
+            query?: {
+                /** @description Free-form name filter (case-insensitive substring match). Empty returns the most-recent rows up to the limit. */
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MineralSpeciesListBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "create-mineral-species": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMineralSpeciesBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MineralSpeciesView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "get-mineral-species": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mineral species UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MineralSpeciesView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
