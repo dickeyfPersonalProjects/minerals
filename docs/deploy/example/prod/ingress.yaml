@@ -1,0 +1,23 @@
+# Vanilla Ingress for prod. Identical shape to staging — only host and
+# namespace differ.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mineral
+  namespace: mineral-prod
+spec:
+  rules:
+    - host: mineral.dickey.cloud
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minerals
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - mineral.dickey.cloud
+      secretName: web-crt

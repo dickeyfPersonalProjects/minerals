@@ -1,0 +1,21 @@
+# SealedSecret for the MinIO root credentials in prod. Same shape and
+# consumer contract as staging — see staging/minerals-minio-config.yaml
+# for the key/value contract and the kubeseal generation flow.
+#
+# Important: SealedSecrets are scoped to namespace + name by default. The
+# ciphertext from staging cannot be reused here; you must re-encrypt for
+# the prod namespace.
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: minerals-minio-config
+  namespace: mineral-prod
+spec:
+  encryptedData:
+    config.env: REPLACE_WITH_KUBESEAL_OUTPUT
+  template:
+    metadata:
+      name: minerals-minio-config
+      namespace: mineral-prod
+    type: Opaque

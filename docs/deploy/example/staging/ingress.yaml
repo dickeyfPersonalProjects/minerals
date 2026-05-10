@@ -1,0 +1,28 @@
+# Vanilla networking.k8s.io/v1 Ingress. No ingressClassName set — the
+# cluster's default IngressClass handles routing. Set spec.ingressClassName
+# explicitly if your fleet has multiple classes.
+#
+# Backend points at the `minerals` Service from kustomize/base/service.yaml.
+# Service name is stable across envs because the base sets it; the overlay
+# only varies the hostname and TLS cert.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mineral
+  namespace: mineral-staging
+spec:
+  rules:
+    - host: mineral-staging.dickey.cloud
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minerals
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - mineral-staging.dickey.cloud
+      secretName: web-crt

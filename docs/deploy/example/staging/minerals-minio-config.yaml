@@ -1,0 +1,26 @@
+# SealedSecret for the MinIO root credentials.
+#
+# Consumed by the MinIO Tenant in kustomize/base/minio.yaml via
+# spec.configuration.name. The decrypted Secret must contain a key
+# `config.env` whose value is shell-style exports:
+#
+#     export MINIO_ROOT_USER=<user>
+#     export MINIO_ROOT_PASSWORD=<password>
+#
+# Generate with kubeseal — see ../../encrypt.md. The encryptedData ciphertext
+# below is a placeholder; running `kubeseal -o yaml -f .sec/minerals-minio-config.yaml`
+# produces the real value bound to this cluster's sealed-secrets controller key.
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: minerals-minio-config
+  namespace: mineral-staging
+spec:
+  encryptedData:
+    config.env: REPLACE_WITH_KUBESEAL_OUTPUT
+  template:
+    metadata:
+      name: minerals-minio-config
+      namespace: mineral-staging
+    type: Opaque

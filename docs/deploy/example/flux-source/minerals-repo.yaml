@@ -1,0 +1,24 @@
+# Flux GitRepository source for the minerals app repo.
+#
+# Lives in the flux-system namespace, alongside the cluster's other Flux
+# sources. Per-env Kustomization resources (see staging/mineral.yaml,
+# prod/mineral.yaml) reference this source by name via spec.sourceRef.
+#
+# Polling interval is 1m: short enough that a merge to main lands on the
+# cluster within a couple of minutes, long enough that the controller
+# isn't hammering GitHub. Tune higher if rate-limited.
+#
+# Authentication: the URL is HTTPS and the repo is public, so no
+# secretRef is needed. If the repo becomes private, add a secretRef to
+# a Secret of type kubernetes.io/basic-auth or an ssh-auth Secret.
+---
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: GitRepository
+metadata:
+  name: minerals-repo
+  namespace: flux-system
+spec:
+  interval: 1m0s
+  ref:
+    branch: main
+  url: https://github.com/dickeyfPersonalProjects/minerals

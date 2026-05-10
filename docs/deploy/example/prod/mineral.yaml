@@ -1,0 +1,41 @@
+# Flux Kustomization for prod.
+#
+# Mirrors staging/mineral.yaml. Two intentional differences:
+#   - targetNamespace + name suffix (mineral-prod)
+#   - images[0].newTag is `prod` instead of `staging`
+#
+# The ConfigMap patch setting ENV is INCLUDED here even though the base's
+# default is already `prod`. This is the consistency fix called out in the
+# example: the live fleet-infra has the patch only in staging, which means
+# the two overlays drift in shape and a future env added by copy-paste
+# could accidentally inherit `ENV: prod` from the base. Keeping the patch
+# present and explicit in every env makes the overlay's behavior obvious
+# from the file itself, with no need to cross-reference the base default.
+apiVersion: kustomize.toolkit.fluxcd.io/v1beta2
+kind: Kustomization
+metadata:
+  name: mineral-prod
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  force: true
+  prune: true
+  path: ./kustomize/base
+  targetNamespace: mineral-prod
+  sourceRef:
+    kind: GitRepository
+    name: minerals-repo
+  images:
+    - name: ghcr.io/dickeyfpersonalprojects/minerals
+      newTag: prod
+  patches:
+    - target:
+        kind: ConfigMap
+        name: minerals-config
+      patch: |-
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: minerals-config
+        data:
+          ENV: prod

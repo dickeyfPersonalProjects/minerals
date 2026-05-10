@@ -1,0 +1,11 @@
+# Per-env overlay for prod. Same resource ordering and structure as
+# staging/kustomization.yaml — symmetric on purpose.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - certificate.yaml
+  - ingress.yaml
+  - minerals-minio-config.yaml
+  - minerals-s3-creds.yaml
+  - mineral.yaml
