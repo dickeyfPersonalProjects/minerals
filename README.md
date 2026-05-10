@@ -52,7 +52,10 @@ make compose-down-v     # stop + wipe volumes (fresh DB / MinIO next run)
 ## Where to go next
 
 - **`CONTRACT.md`** — operational rulebook: layout, dev workflow, CI,
-  migrations, code review rules, env vars, and the rest. §3 covers
-  both modes above in more depth.
+  migrations, code review rules, and the rest. §3 covers both modes
+  above in more depth.
+- **`CONFIG.md`** — canonical inventory of every tunable setting (env
+  vars, ConfigMap keys, feature flags). The first stop when adding or
+  changing a setting.
 - **`docs/design/01-scope.md` … `07-build-embed-observability.md`** —
   frozen design decisions and rationale for v1.

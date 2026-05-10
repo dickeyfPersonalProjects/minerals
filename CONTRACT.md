@@ -3085,26 +3085,10 @@ operators rely on.
 
 # §15 — Configuration & env vars
 
-## The canonical env var inventory
+## The canonical settings inventory
 
-The complete v1 env var list lives in
-`docs/design/06-dev-prod-config.md` §6.1. CONTRACT.md duplicates
-the inventory below as the operational reference; if the two
-ever drift, the design doc is the source of truth and CONTRACT.md
-gets fixed.
-
-| Variable | Default (dev) | Required in prod | Purpose |
-|---|---|---|---|
-| `PORT` | `8080` | no | HTTP listen port |
-| `DATABASE_URL` | `postgres://minerals:minerals@localhost:5432/minerals?sslmode=disable` | **yes** | Postgres DSN |
-| `S3_ENDPOINT` | `http://localhost:9000` | **yes** | MinIO endpoint URL |
-| `S3_ACCESS_KEY_ID` | `minioadmin` | **yes** | MinIO access key |
-| `S3_SECRET_ACCESS_KEY` | `minioadmin` | **yes** | MinIO secret key |
-| `S3_BUCKET` | `minerals-dev` | **yes** | Bucket name |
-| `S3_REGION` | `us-east-1` | no | Required by AWS SDK; arbitrary for MinIO |
-| `MAX_UPLOAD_BYTES` | `104857600` | no | 100 MiB cap |
-| `LOG_LEVEL` | `info` | no | `debug` / `info` / `warn` / `error` |
-| `ENV` | `dev` | **yes** | `dev` / `prod`; flips strictness |
+The canonical inventory of all settings lives in
+[`CONFIG.md`](./CONFIG.md). CONTRACT.md no longer duplicates it.
 
 ## Naming and value conventions
 
@@ -3146,25 +3130,33 @@ gets fixed.
   constructor enforces it and there's a test exercising the
   enforcement.
 
-## Adding a new env var
+## Adding a new setting
 
-Adding a new env var IS a contract change. The PR MUST:
+Adding a new tunable — env var, ConfigMap key, feature flag,
+runtime knob — IS a contract change. The PR MUST:
 
-1. Add the variable to the inventory table above with default,
-   prod-required flag, and purpose
+1. **Update [`CONFIG.md`](./CONFIG.md)** — add the setting to
+   the inventory with name, kind, default, prod-required flag,
+   purpose, and source location. This is the first and
+   mandatory step.
 2. Update the `Config` struct and constructor in
-   `internal/config/`
-3. Update the prod-strictness check if the new variable is
-   required
-4. Update the dev `docker-compose.yml` if the variable
+   `internal/config/` (or the equivalent loader for non-env
+   kinds)
+3. Update the prod-strictness check if the new setting is
+   required in prod
+4. Update the dev `docker-compose.yml` if the setting
    references a compose service
-5. Update the design doc
-   `docs/design/06-dev-prod-config.md` §6.1 with the same
-   entry (the design doc is the source of truth)
-6. Update the dev README if the variable changes the
+5. Update the dev README if the setting changes the
    onboarding flow
 
-A polecat introducing a new variable that doesn't fit the
+The design doc `docs/design/06-dev-prod-config.md` no longer
+holds the inventory; `CONFIG.md` is canonical. The design doc
+captures frozen rationale only.
+
+**Polecats MUST NOT introduce a new setting without updating
+`CONFIG.md` in the same PR.** CI / review will reject otherwise.
+
+A polecat introducing a new setting that doesn't fit the
 existing naming patterns (e.g. snake_case, or a non-standard
 duration unit) MUST surface the choice for review.
 
