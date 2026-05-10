@@ -59,14 +59,28 @@ spec:
             capabilities:
               drop: ["ALL"]
           envFrom:
-            # The `migrate` subcommand only talks to Postgres, so per
-            # CONTRACT.md §15 it requires DATABASE_URL only — no S3
-            # creds. Config validation is subcommand-aware (resolved
-            # in mi-dmv); previously PR #42 had to mount the S3 secret
-            # here just to satisfy a process-wide validator.
+            # The `migrate` subcommand only talks to Postgres, so the
+            # binary side requires DATABASE_URL only — config validation
+            # is subcommand-aware (resolved in mi-dmv).
             - configMapRef:
                 name: minerals-config
+            # S3 creds are mounted here DEFENSIVELY even though the
+            # migrate subcommand doesn't need them. Reason: the manifest
+            # and binary versions can drift across deploys (the :prod
+            # image tag is not auto-promoted from main, see E-1), so a
+            # newer manifest can run against an older binary that still
+            # has a process-wide validator requiring S3. Mounting the
+            # secret has near-zero cost; not mounting it couples this
+            # manifest to a specific binary version and reintroduces the
+            # crashloop fixed by PR #42 / mi-ur0. Do not remove without
+            # verifying that all in-flight deploy targets run a binary
+            # with subcommand-aware validation.
+            - secretRef:
+                name: minerals-s3-creds
           env:
+            # CNPG-generated app Secret stores the DSN under key `uri` —
+            # this is the CNPG operator's contract and is the documented
+            # exception to the "secret key = env var name" rule (§15).
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -118,13 +132,15 @@ spec:
             # lookup pipeline (mi-dtg). The Secret is operator-provided
             # in the GitOps overlay; `optional: true` means the pod
             # starts cleanly when it's absent and the app falls back
-            # to DB-only mineral lookup. To enable Mindat: create the
-            # Secret with an `api_key` data field.
+            # to DB-only mineral lookup. The Secret data key matches
+            # the env var name verbatim (per CONTRACT.md §15) — to
+            # enable Mindat, create the Secret with a `MINDAT_API_KEY`
+            # data field.
             - name: MINDAT_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: minerals-mindat
-                  key: api_key
+                  key: MINDAT_API_KEY
                   optional: true
           livenessProbe:
             httpGet:

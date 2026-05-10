@@ -3101,6 +3101,27 @@ The canonical inventory of all settings lives in
   prod).
 - **Lists are comma-separated**, no whitespace handling beyond
   `strings.TrimSpace` on each entry.
+- **Secrets that back env vars use the env-var name as the
+  key.** A Secret carrying `S3_ACCESS_KEY_ID` stores it under
+  key `S3_ACCESS_KEY_ID`, not `access_key`. The deployment
+  manifest's `secretKeyRef.key` matches the env-var name
+  verbatim. This eliminates a class of silent-empty-value bugs
+  from key/var name drift (mi-ur0: a Mindat secret that stored
+  the value under `api_key` while the manifest read `key:
+  MINDAT_API_KEY` — and vice versa — produced a permanently
+  empty env var with no error at startup).
+
+  **Polecats MUST NOT introduce a `secretKeyRef.key` that
+  differs from the consumer env-var name. Reviewers MUST
+  reject such PRs.**
+
+  **Exception — CNPG `DATABASE_URL`.** The CloudNativePG
+  operator generates an app Secret whose DSN lives under the
+  key `uri`. That key name is the operator's contract and
+  cannot be changed on our side, so the deployment maps
+  `DATABASE_URL` → `secretKeyRef.key: uri`. This is the only
+  sanctioned exception; new exceptions require contract
+  amendment.
 
 ## Loading and validation
 

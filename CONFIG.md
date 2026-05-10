@@ -101,6 +101,27 @@ matching `secrets.md` row; today every row is `Kind=env` and the
 secret/non-secret distinction lives in `secrets.md` rather than this
 table.
 
+**Secret data key MUST equal the env-var name.** When wiring a
+secret-backed env var in `kustomize/base/deployment.yaml`, the
+`secretKeyRef.key` MUST match the env-var name verbatim (per
+CONTRACT.md §15). The Secret on the operator side stores the value
+under that same key. This eliminates a class of silent-empty-value
+bugs from key/var name drift (mi-ur0).
+
+```yaml
+# Correct: key matches env var name
+- name: MINDAT_API_KEY
+  valueFrom:
+    secretKeyRef:
+      name: minerals-mindat
+      key: MINDAT_API_KEY
+```
+
+The lone sanctioned exception is `DATABASE_URL`, which reads the
+CNPG-generated key `uri` because that key name is the CNPG operator's
+contract. Do not introduce new exceptions without amending CONTRACT.md
+§15.
+
 ## Secrets in dev: compose defaults, no `.env` required
 
 - Dev creds (`minerals:minerals` for Postgres, `minioadmin:minioadmin`
