@@ -2,6 +2,10 @@
 
 Decided 2026-05-06 in design session.
 
+> **Note.** This design doc captures **frozen** decisions and rationale.
+> The live settings inventory now lives in
+> [`CONFIG.md`](../../CONFIG.md) at the repo root. Update there, not here.
+
 ## Summary
 
 The same Go binary runs in dev and prod; behavior diverges only via env
@@ -17,18 +21,10 @@ is ever needed.
 
 ### 6.1 — Env var inventory
 
-| Variable | Default (dev) | Required in prod | Purpose |
-|---|---|---|---|
-| `PORT` | `8080` | no | HTTP listen port |
-| `DATABASE_URL` | `postgres://minerals:minerals@localhost:5432/minerals?sslmode=disable` | **yes** | Postgres DSN |
-| `S3_ENDPOINT` | `http://localhost:9000` | **yes** | MinIO endpoint URL |
-| `S3_ACCESS_KEY_ID` | `minioadmin` | **yes** | MinIO access key |
-| `S3_SECRET_ACCESS_KEY` | `minioadmin` | **yes** | MinIO secret key |
-| `S3_BUCKET` | `minerals-dev` | **yes** | Bucket name (per §3.1) |
-| `S3_REGION` | `us-east-1` | no | Required by AWS SDK; arbitrary for MinIO |
-| `MAX_UPLOAD_BYTES` | `104857600` | no | 100 MiB cap (per §3.5) |
-| `LOG_LEVEL` | `info` | no | `debug` / `info` / `warn` / `error` |
-| `ENV` | `dev` | **yes** | `dev` / `prod`; informational + flips strictness |
+The canonical inventory of all settings lives in
+[`CONFIG.md`](../../CONFIG.md). This section no longer duplicates it.
+
+The original v1 design decisions about inventory shape still hold:
 
 - Single-URL form for `DATABASE_URL` (matches CNPG's Secret shape and
   `golang-migrate`'s expected input).
