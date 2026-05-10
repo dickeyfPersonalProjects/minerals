@@ -10,6 +10,7 @@ import (
 )
 
 func TestStubUserConstant(t *testing.T) {
+	t.Parallel()
 	want := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	if StubUser.ID != want {
 		t.Fatalf("StubUser.ID = %s, want %s", StubUser.ID, want)
@@ -20,6 +21,7 @@ func TestStubUserConstant(t *testing.T) {
 }
 
 func TestAuthMiddlewarePopulatesStubUser(t *testing.T) {
+	t.Parallel()
 	var got User
 	h := Auth(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		got = FromContext(r.Context())
@@ -35,6 +37,7 @@ func TestAuthMiddlewarePopulatesStubUser(t *testing.T) {
 }
 
 func TestRequireUser_AllowsPopulatedContext(t *testing.T) {
+	t.Parallel()
 	called := false
 	h := RequireUser(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		called = true
@@ -54,6 +57,7 @@ func TestRequireUser_AllowsPopulatedContext(t *testing.T) {
 }
 
 func TestRequireUser_Returns401WhenNoUser(t *testing.T) {
+	t.Parallel()
 	h := RequireUser(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Fatal("downstream handler should not have been called")
 	}))
@@ -83,6 +87,7 @@ func TestRequireUser_Returns401WhenNoUser(t *testing.T) {
 }
 
 func TestFromContext_ReturnsZeroWhenAbsent(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	u := FromContext(req.Context())
 	if u.ID != uuid.Nil || u.Email != "" {
@@ -91,6 +96,7 @@ func TestFromContext_ReturnsZeroWhenAbsent(t *testing.T) {
 }
 
 func TestRequestID_RoundTrip(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	ctx := WithRequestID(req.Context(), "01HFOO")
 	if got := RequestID(ctx); got != "01HFOO" {

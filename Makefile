@@ -1,7 +1,7 @@
 BINARY := minerals
 PKG := ./cmd/minerals
 
-.PHONY: build run test fmt vet tidy clean fmt-frontend fmt-check-frontend lint-frontend
+.PHONY: build run test test-cover fmt vet tidy clean fmt-frontend fmt-check-frontend lint-frontend
 
 build:
 	go build -o bin/$(BINARY) $(PKG)
@@ -11,6 +11,13 @@ run:
 
 test:
 	go test ./...
+
+# Coverage with race detector. Outputs coverage.txt (atomic mode for
+# safe accumulation across parallel goroutines) and an HTML report.
+# Both files are gitignored — see .gitignore.
+test-cover:
+	go test -race -coverprofile=coverage.txt -covermode=atomic ./...
+	go tool cover -html=coverage.txt -o coverage.html
 
 fmt:
 	go fmt ./...

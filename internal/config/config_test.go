@@ -10,6 +10,7 @@ func envFunc(m map[string]string) func(string) string {
 }
 
 func TestLoad_DevDefaults(t *testing.T) {
+	t.Parallel()
 	cfg, err := loadFrom(envFunc(nil))
 	if err != nil {
 		t.Fatalf("loadFrom: %v", err)
@@ -38,6 +39,7 @@ func TestLoad_DevDefaults(t *testing.T) {
 }
 
 func TestLoad_DevExplicit(t *testing.T) {
+	t.Parallel()
 	cfg, err := loadFrom(envFunc(map[string]string{"ENV": "dev"}))
 	if err != nil {
 		t.Fatalf("loadFrom: %v", err)
@@ -69,6 +71,7 @@ func fullProdEnv() map[string]string {
 // per-subcommand ValidateFor* methods. Format errors (bad enum, bad
 // integer) still fail at load time; see TestLoad_LogLevelValidation.
 func TestLoad_ProdDoesNotEnforceStrictness(t *testing.T) {
+	t.Parallel()
 	cfg, err := loadFrom(envFunc(map[string]string{"ENV": "prod"}))
 	if err != nil {
 		t.Fatalf("loadFrom should not enforce strictness, got err=%v", err)
@@ -83,6 +86,7 @@ func TestLoad_ProdDoesNotEnforceStrictness(t *testing.T) {
 }
 
 func TestValidateForServe_ProdRequiresEachVar(t *testing.T) {
+	t.Parallel()
 	full := fullProdEnv()
 	for _, name := range []string{
 		"DATABASE_URL",
@@ -113,6 +117,7 @@ func TestValidateForServe_ProdRequiresEachVar(t *testing.T) {
 }
 
 func TestValidateForServe_ProdAllPresent(t *testing.T) {
+	t.Parallel()
 	cfg, err := loadFrom(envFunc(fullProdEnv()))
 	if err != nil {
 		t.Fatalf("loadFrom: %v", err)
@@ -123,6 +128,7 @@ func TestValidateForServe_ProdAllPresent(t *testing.T) {
 }
 
 func TestValidateForServe_DevIsNoop(t *testing.T) {
+	t.Parallel()
 	// In dev, Load fills defaults so ValidateForServe always passes.
 	cfg, err := loadFrom(envFunc(nil))
 	if err != nil {
@@ -138,6 +144,7 @@ func TestValidateForServe_DevIsNoop(t *testing.T) {
 // no S3 credentials so the migrate Job can run without the operator
 // injecting bucket creds it doesn't need.
 func TestValidateForMigrate_ProdNoS3Creds(t *testing.T) {
+	t.Parallel()
 	cfg, err := loadFrom(envFunc(map[string]string{
 		"ENV":          "prod",
 		"DATABASE_URL": "postgres://prod/db",
@@ -151,6 +158,7 @@ func TestValidateForMigrate_ProdNoS3Creds(t *testing.T) {
 }
 
 func TestValidateForMigrate_ProdRequiresDatabaseURL(t *testing.T) {
+	t.Parallel()
 	cfg, err := loadFrom(envFunc(map[string]string{"ENV": "prod"}))
 	if err != nil {
 		t.Fatalf("loadFrom: %v", err)
@@ -165,6 +173,7 @@ func TestValidateForMigrate_ProdRequiresDatabaseURL(t *testing.T) {
 }
 
 func TestValidateForMigrate_DevIsNoop(t *testing.T) {
+	t.Parallel()
 	cfg, err := loadFrom(envFunc(nil))
 	if err != nil {
 		t.Fatalf("loadFrom: %v", err)
@@ -175,6 +184,7 @@ func TestValidateForMigrate_DevIsNoop(t *testing.T) {
 }
 
 func TestValidate_BothMethodsAcceptFullConfigInAnyEnv(t *testing.T) {
+	t.Parallel()
 	for _, env := range []string{"dev", "prod"} {
 		t.Run(env, func(t *testing.T) {
 			m := fullProdEnv()
@@ -194,6 +204,7 @@ func TestValidate_BothMethodsAcceptFullConfigInAnyEnv(t *testing.T) {
 }
 
 func TestLoad_LogLevelValidation(t *testing.T) {
+	t.Parallel()
 	_, err := loadFrom(envFunc(map[string]string{"LOG_LEVEL": "verbose"}))
 	if err == nil || !strings.Contains(err.Error(), "LOG_LEVEL") {
 		t.Fatalf("expected LOG_LEVEL validation error, got %v", err)
@@ -201,6 +212,7 @@ func TestLoad_LogLevelValidation(t *testing.T) {
 }
 
 func TestLoad_MaxUploadBytesValidation(t *testing.T) {
+	t.Parallel()
 	_, err := loadFrom(envFunc(map[string]string{"MAX_UPLOAD_BYTES": "not-a-number"}))
 	if err == nil || !strings.Contains(err.Error(), "MAX_UPLOAD_BYTES") {
 		t.Fatalf("expected MAX_UPLOAD_BYTES error, got %v", err)
@@ -212,6 +224,7 @@ func TestLoad_MaxUploadBytesValidation(t *testing.T) {
 }
 
 func TestLoad_EmptyStringTreatedAsUnset(t *testing.T) {
+	t.Parallel()
 	cfg, err := loadFrom(envFunc(map[string]string{
 		"PORT":      "",
 		"LOG_LEVEL": "",

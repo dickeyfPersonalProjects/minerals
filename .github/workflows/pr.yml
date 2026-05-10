@@ -83,8 +83,22 @@ jobs:
           version: v2.12.2
           args: --timeout=5m
 
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@v1.12.1
+
       - name: Unit tests
-        run: make test
+        # Combines race detection, shuffled execution, and JUnit output
+        # in one invocation per mi-qb3. -race needs CGO_ENABLED=1 (the
+        # actions/setup-go@v5 default).
+        run: gotestsum --junitfile junit.xml -- -race -shuffle=on ./...
+
+      - name: Upload junit.xml
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-junit
+          path: junit.xml
+          if-no-files-found: ignore
 
       - name: Detect migrations
         id: migrations
