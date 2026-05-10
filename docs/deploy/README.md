@@ -12,7 +12,9 @@ the hostname/namespace, regenerate the SealedSecrets, and have a
 working deployment.
 
 > **Pairs with** [`encrypt.md`](./encrypt.md) for the kubeseal workflow
-> used by the SealedSecret manifests in the example.
+> used by the SealedSecret manifests in the example, and
+> [`secrets.md`](./secrets.md) for the inventory of every Secret the
+> deployment consumes.
 
 ---
 
@@ -41,7 +43,9 @@ This split has two practical consequences:
 ### Required external contract
 
 The base expects the overlay to provide three Secrets (full key
-contracts in [`kustomize/base/kustomization.yaml`](../../kustomize/base/kustomization.yaml)):
+contracts in [`kustomize/base/kustomization.yaml`](../../kustomize/base/kustomization.yaml);
+full inventory of every Secret the deployment consumes — including
+auto-generated ones — in [`secrets.md`](./secrets.md)):
 
 - `minerals-minio-config` — MinIO root credentials, key `config.env`.
 - `minerals-s3-creds` — S3 IAM credentials, keys
@@ -101,6 +105,7 @@ Flux re-pulling on the next reconcile (the base sets
 docs/deploy/
 ├── README.md                 ← you are here
 ├── encrypt.md                ← kubeseal workflow
+├── secrets.md                ← Secret inventory + new-secret workflow
 └── example/
     ├── kustomization.yaml    ← aggregates staging + prod
     ├── flux-source/
@@ -233,6 +238,7 @@ small:
 
 ## Cross-references
 
+- Secret inventory + new-secret workflow: [`secrets.md`](./secrets.md).
 - App contract / non-secret env vars / secret env vars: [`CONTRACT.md`](../../CONTRACT.md) §15.
 - IaC layout rule (base in app repo, overlay in GitOps repo): `CONTRACT.md` §2.
 - App scratch-filesystem rule (`/tmp` only): `CONTRACT.md` §17.
