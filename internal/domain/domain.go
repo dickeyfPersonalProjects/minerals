@@ -71,6 +71,8 @@ var (
 	ErrCollectorNotFound         = fmt.Errorf("collector not found")
 	ErrCollectorConflict         = fmt.Errorf("collector conflict")
 	ErrCollectorReferenced       = fmt.Errorf("collector referenced")
+	ErrMineralSpeciesNotFound    = fmt.Errorf("mineral species not found")
+	ErrMineralSpeciesConflict    = fmt.Errorf("mineral species conflict")
 )
 
 // Page is the cursor-pagination request shape (per §10).
@@ -347,6 +349,62 @@ type CollectorRepo interface {
 type SpecimenCollectorLink struct {
 	Collector Collector
 	Position  int
+}
+
+// MineralSpeciesSource is the provenance discriminator for a row in
+// the mineral_species table (mi-dtg / F-1). 'mindat' rows are
+// populated by the Mindat lookup pipeline; 'user' rows are entered
+// manually when no Mindat key is configured or when Mindat returns
+// nothing for the search.
+type MineralSpeciesSource string
+
+const (
+	// MineralSpeciesSourceMindat marks a row imported from the Mindat API.
+	MineralSpeciesSourceMindat MineralSpeciesSource = "mindat"
+	// MineralSpeciesSourceUser marks a row entered manually by a user.
+	MineralSpeciesSourceUser MineralSpeciesSource = "user"
+)
+
+// MineralSpecies is the canonical row backing the mineral lookup
+// surface (F-1). The Data field carries the MineralData JSON shape
+// (per design §2) — pre-populated from Mindat or hand-entered.
+//
+// Attribution is set when source='mindat' to satisfy Mindat's
+// CC-BY-NC-SA 4.0 terms; the frontend renders it next to the
+// mineral fields when present.
+type MineralSpecies struct {
+	ID          uuid.UUID
+	Name        string
+	Source      MineralSpeciesSource
+	MindatID    *string
+	Data        []byte // raw JSON; service unmarshals into MineralData
+	Attribution *string
+	AuthorID    uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// MineralSpeciesRepo is the consumer-side interface for the
+// mineral_species table (mi-dtg / F-1).
+type MineralSpeciesRepo interface {
+	// Create inserts a new mineral_species row. Returns
+	// ErrMineralSpeciesConflict on (name) or (mindat_id) unique
+	// violation.
+	Create(ctx context.Context, tx Tx, s MineralSpecies) error
+	// GetByID returns the row identified by id, or
+	// ErrMineralSpeciesNotFound.
+	GetByID(ctx context.Context, id uuid.UUID) (MineralSpecies, error)
+	// FindByName performs an ILIKE substring search on `name`. The
+	// caller-supplied query is escaped of LIKE metacharacters
+	// before wrapping with `%`. Returns rows ordered by
+	// (lower(name) ASC, id ASC) so the result is stable across
+	// callers; capped at MaxListLimit rows.
+	FindByName(ctx context.Context, q string) ([]MineralSpecies, error)
+	// FindByMindatID returns the row whose mindat_id matches, or
+	// ErrMineralSpeciesNotFound. Only meaningful for source='mindat'
+	// rows; user-entered rows have a NULL mindat_id and are
+	// unreachable through this method.
+	FindByMindatID(ctx context.Context, mindatID string) (MineralSpecies, error)
 }
 
 // SpecimenCollectorRepo is the consumer-side interface for the

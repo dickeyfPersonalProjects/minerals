@@ -19,6 +19,9 @@
     type SpecimenFormValues,
     type SpecimenType,
   } from './schemas/specimen';
+  import MineralSpeciesAutocomplete, {
+    type MineralSpeciesView,
+  } from './MineralSpeciesAutocomplete.svelte';
 
   interface Props {
     initial?: Partial<SpecimenFormValues>;
@@ -104,6 +107,29 @@
       }
     }
   });
+
+  // Attribution string from the most recently selected mineral
+  // species. Mindat's CC-BY-NC-SA 4.0 terms require this to be
+  // shown next to the data — rendered below the mineral fieldset.
+  let mineralAttribution: string | null = $state(null);
+
+  function prefillMineralFromSpecies(s: MineralSpeciesView): void {
+    const d = s.data ?? {};
+    const next: SpecimenFormValues = {
+      ...$data,
+      m_chemical_formula: d.chemical_formula ?? '',
+      m_crystal_system: d.crystal_system ?? '',
+      m_mohs_hardness: d.mohs_hardness != null ? String(d.mohs_hardness) : '',
+      m_color: d.color ?? '',
+      m_luster: d.luster ?? '',
+      m_fluorescence: d.fluorescence ?? '',
+      m_radioactive: Boolean(d.radioactive),
+      m_mindat_id: d.mindat_id ?? '',
+      m_mineral_species: (d.mineral_species ?? []).join(', '),
+    };
+    setData(next);
+    mineralAttribution = s.attribution ?? null;
+  }
 
   function showError(name: keyof SpecimenFormValues): string | null {
     // felte runs the zod validator on every input/blur/submit, so
@@ -521,6 +547,7 @@
   {#if $data.type === 'mineral'}
     <fieldset class="space-y-3" data-testid="mineral-fields">
       <legend class="text-sm font-medium text-[var(--color-text)]">Mineralogy</legend>
+      <MineralSpeciesAutocomplete initialQuery={$data.name} onSelect={prefillMineralFromSpecies} />
       <div class="grid gap-3 sm:grid-cols-2">
         <div>
           <label
@@ -645,6 +672,11 @@
         />
         Radioactive
       </label>
+      {#if mineralAttribution}
+        <p class="text-xs italic text-[var(--color-text-muted)]" data-testid="mineral-attribution">
+          {mineralAttribution}
+        </p>
+      {/if}
     </fieldset>
   {:else if $data.type === 'rock'}
     <fieldset class="space-y-3" data-testid="rock-fields">

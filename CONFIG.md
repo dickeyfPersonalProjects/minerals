@@ -22,6 +22,7 @@ setting" — updating this inventory is the first and mandatory step.
 | `MAX_UPLOAD_BYTES` | env | `104857600` | no | 100 MiB upload cap | `internal/config/config.go:93` |
 | `LOG_LEVEL` | env | `info` | no | `debug` / `info` / `warn` / `error` | `internal/config/config.go:63` |
 | `ENV` | env | `dev` | **yes** | `dev` / `prod`; flips strictness | `internal/config/config.go:54` |
+| `MINDAT_API_KEY` | env | _(unset)_ | no | Mindat REST API token for mineral-species lookup (mi-dtg / F-1). When unset, mineral lookup falls back to DB-only mode (no Mindat fallthrough). | `internal/config/config.go` |
 
 `Kind` legend: `env` = process environment variable. New kinds
 (`configmap` for non-env keys consumed directly, `flag` for runtime
@@ -38,6 +39,9 @@ into two sources:
   `S3_SECRET_ACCESS_KEY`.
 - Secret `minerals-pg-app` (CNPG-managed) supplies `DATABASE_URL` via
   the `uri` key, mapped explicitly in `kustomize/base/deployment.yaml`.
+- Optional Secret `minerals-mindat` (operator-provided in the GitOps
+  overlay) supplies `MINDAT_API_KEY`. When the Secret is absent, the
+  app starts in DB-only mineral-species mode without errors.
 
 The application reads everything as env vars regardless of upstream
 source.

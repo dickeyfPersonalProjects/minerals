@@ -25,6 +25,11 @@ type Config struct {
 	MaxUploadBytes    int64
 	LogLevel          string
 	Env               string
+	// MindatAPIKey is the credential for the Mindat REST API used by
+	// the mineral-species lookup pipeline (mi-dtg / F-1). Optional in
+	// every environment — when unset, the system falls back to
+	// DB-only mineral-species lookups.
+	MindatAPIKey string
 }
 
 // Defaults for ENV=dev or unset. Mirrors the inventory in CONTRACT.md
@@ -70,6 +75,7 @@ func loadFrom(get func(string) string) (*Config, error) {
 	cfg.Port = orDefault(get("PORT"), defaultPort)
 	cfg.LogLevel = orDefault(get("LOG_LEVEL"), defaultLogLevel)
 	cfg.S3Region = orDefault(get("S3_REGION"), defaultS3Region)
+	cfg.MindatAPIKey = strings.TrimSpace(get("MINDAT_API_KEY"))
 
 	// Required-in-prod variables: in dev, fall back to the inventory
 	// default; in prod, leave the field empty so ValidateFor* can
