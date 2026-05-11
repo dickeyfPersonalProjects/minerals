@@ -22,7 +22,7 @@ This is the source of truth for the project roadmap.
 - [x] Mindat-backed mineral species lookup/autocomplete (#56)
 - [x] Editable markdown description per specimen
 - [x] **Fossil specimen type** `(mi-6o8)`
-- [ ] **Photo-kind metadata** (visible / UV / other) `(mi-5b6)`
+- [x] **Photo-kind metadata** (visible / UV / other) `(mi-5b6)`
 
 ### Photos
 - [x] Multiple photos per specimen with position ordering

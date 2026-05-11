@@ -115,6 +115,38 @@ describe('Lightbox', () => {
     expect(screen.queryByTestId('lightbox-crop')).not.toBeInTheDocument();
   });
 
+  it('renders the kind label in the lightbox metadata', async () => {
+    render(Lightbox, {
+      photos: [
+        { id: 'p1', alt: 'first', kind: 'uv' as const },
+        { id: 'p2', alt: 'second', kind: 'visible' as const },
+      ],
+      startIndex: 0,
+      onClose: vi.fn(),
+    });
+
+    const kind = screen.getByTestId('lightbox-kind');
+    expect(kind).toHaveTextContent('UV');
+    expect(kind).toHaveAttribute('data-kind', 'uv');
+
+    await fireEvent.keyDown(window, { key: 'ArrowRight' });
+    await waitFor(() => {
+      const next = screen.getByTestId('lightbox-kind');
+      expect(next).toHaveTextContent('Visible');
+      expect(next).toHaveAttribute('data-kind', 'visible');
+    });
+  });
+
+  it('defaults the kind label to Visible when kind is absent', () => {
+    render(Lightbox, {
+      photos: [{ id: 'p1', alt: 'first' }],
+      startIndex: 0,
+      onClose: vi.fn(),
+    });
+
+    expect(screen.getByTestId('lightbox-kind')).toHaveTextContent('Visible');
+  });
+
   it('hides nav arrows and counter when only one photo is shown', () => {
     render(Lightbox, {
       photos: [PHOTOS[0]!],

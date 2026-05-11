@@ -753,6 +753,11 @@ export interface components {
              */
             readonly $schema?: string;
             /**
+             * @description New photo kind; omit to leave unchanged.
+             * @enum {string}
+             */
+            kind?: "visible" | "uv" | "other";
+            /**
              * Format: int64
              * @description New manual ordering position; omit to leave unchanged.
              */
@@ -847,6 +852,11 @@ export interface components {
             file_id: string;
             /** @description UUIDv7 primary key. */
             id: string;
+            /**
+             * @description Lighting condition the photo was taken under: visible, uv, or other.
+             * @enum {string}
+             */
+            kind: "visible" | "uv" | "other";
             /**
              * Format: int64
              * @description Manual ordering; 1-indexed within the specimen's photos.
@@ -2898,6 +2908,8 @@ export interface operations {
                      * @description The image file to upload.
                      */
                     file: string;
+                    /** @description Optional photo kind: visible, uv, or other. Defaults to visible. */
+                    kind?: string;
                     /** @description Optional ISO 8601 timestamp; defaults to EXIF DateTimeOriginal when present. */
                     taken_at?: string;
                 };

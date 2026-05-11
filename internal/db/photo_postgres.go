@@ -29,10 +29,16 @@ func NewPhotoPostgres(pool *pgxpool.Pool) *PhotoPostgres {
 // ErrPhotoNotFound (more useful than leaking the constraint name).
 func (r *PhotoPostgres) Create(ctx context.Context, tx domain.Tx, p domain.Photo) error {
 	exec := r.execer(tx)
+	// Mirror the photo_kind column's default — empty zero-value would
+	// otherwise be sent as '' and rejected by Postgres' enum cast,
+	// surfacing as a confusing 500 instead of the v1 default.
+	if p.Kind == "" {
+		p.Kind = domain.PhotoKindVisible
+	}
 	const q = `
-		INSERT INTO photos (id, specimen_id, file_id, taken_at, position, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)`
-	_, err := exec.Exec(ctx, q, p.ID, p.SpecimenID, p.FileID, p.TakenAt, p.Position, p.CreatedAt)
+		INSERT INTO photos (id, specimen_id, file_id, kind, taken_at, position, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`
+	_, err := exec.Exec(ctx, q, p.ID, p.SpecimenID, p.FileID, p.Kind, p.TakenAt, p.Position, p.CreatedAt)
 	if err != nil {
 		if isFKViolation(err) {
 			// Either specimen_id or file_id didn't resolve. Return a
@@ -47,7 +53,7 @@ func (r *PhotoPostgres) Create(ctx context.Context, tx domain.Tx, p domain.Photo
 // GetByID returns the photo with the given id, or domain.ErrPhotoNotFound.
 func (r *PhotoPostgres) GetByID(ctx context.Context, id uuid.UUID) (domain.Photo, error) {
 	const q = `
-		SELECT id, specimen_id, file_id, taken_at, position, created_at
+		SELECT id, specimen_id, file_id, kind, taken_at, position, created_at
 		FROM photos WHERE id = $1`
 	row := r.pool.QueryRow(ctx, q, id)
 	p, err := scanPhoto(row)
@@ -65,11 +71,14 @@ func (r *PhotoPostgres) GetByID(ctx context.Context, id uuid.UUID) (domain.Photo
 // ErrPhotoNotFound when no row matched.
 func (r *PhotoPostgres) Update(ctx context.Context, tx domain.Tx, p domain.Photo) error {
 	exec := r.execer(tx)
+	if p.Kind == "" {
+		p.Kind = domain.PhotoKindVisible
+	}
 	const q = `
 		UPDATE photos
-		   SET taken_at = $2, position = $3
+		   SET taken_at = $2, position = $3, kind = $4
 		 WHERE id = $1`
-	tag, err := exec.Exec(ctx, q, p.ID, p.TakenAt, p.Position)
+	tag, err := exec.Exec(ctx, q, p.ID, p.TakenAt, p.Position, p.Kind)
 	if err != nil {
 		return fmt.Errorf("photo repo: update: %w", err)
 	}
@@ -112,7 +121,7 @@ func (r *PhotoPostgres) ListBySpecimen(
 
 	args := []any{specimenID, limit + 1}
 	sql := `
-		SELECT id, specimen_id, file_id, taken_at, position, created_at
+		SELECT id, specimen_id, file_id, kind, taken_at, position, created_at
 		FROM photos
 		WHERE specimen_id = $1`
 	if page.Cursor != "" {
@@ -168,9 +177,11 @@ func scanPhoto(s rowScanner) (domain.Photo, error) {
 	var p domain.Photo
 	var takenAt *time.Time
 	var createdAt time.Time
-	if err := s.Scan(&p.ID, &p.SpecimenID, &p.FileID, &takenAt, &p.Position, &createdAt); err != nil {
+	var kind string
+	if err := s.Scan(&p.ID, &p.SpecimenID, &p.FileID, &kind, &takenAt, &p.Position, &createdAt); err != nil {
 		return domain.Photo{}, err
 	}
+	p.Kind = domain.PhotoKind(kind)
 	p.TakenAt = takenAt
 	p.CreatedAt = createdAt
 	return p, nil

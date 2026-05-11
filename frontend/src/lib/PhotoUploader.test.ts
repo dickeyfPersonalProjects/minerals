@@ -103,11 +103,31 @@ describe('PhotoUploader', () => {
     expect(fd).toBeInstanceOf(FormData);
     expect(fd.get('file')).toBeInstanceOf(File);
     expect((fd.get('file') as File).name).toBe('a.jpg');
+    // Default kind is 'visible' (mi-5b6); the form field is sent
+    // explicitly even when the user hasn't touched the selector.
+    expect(fd.get('kind')).toBe('visible');
 
     await waitFor(() =>
       expect(screen.getByTestId('photo-upload-item')).toHaveAttribute('data-status', 'success'),
     );
     expect(screen.getByTestId('photo-upload-item')).toHaveTextContent('Uploaded');
+  });
+
+  it('sends the selected kind in the multipart form', async () => {
+    mockPost.mockResolvedValue(ok());
+    const onUploaded = vi.fn();
+
+    render(PhotoUploader, { specimenId: SPECIMEN_ID, onUploaded });
+
+    await fireEvent.click(screen.getByTestId('photo-kind-uv'));
+
+    const input = screen.getByTestId('photo-file-input') as HTMLInputElement;
+    await fireEvent.change(input, { target: { files: [jpeg('uv.jpg', 1024)] } });
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+    const opts = mockPost.mock.calls[0]![1];
+    const fd = opts.bodySerializer(opts.body) as FormData;
+    expect(fd.get('kind')).toBe('uv');
   });
 
   it('rejects disallowed types client-side without calling the API', async () => {

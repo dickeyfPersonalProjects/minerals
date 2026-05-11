@@ -73,6 +73,12 @@
   }
   const { specimenId, onUploaded }: Props = $props();
 
+  // Photo kind applied to the next batch of uploads (mi-5b6). The
+  // selector is sticky for the session so capturing a series of UV
+  // shots doesn't require re-selecting on every drop.
+  type Kind = 'visible' | 'uv' | 'other';
+  let kind: Kind = $state('visible');
+
   let items: UploadItem[] = $state([]);
   let dragDepth = $state(0);
   let isDragging = $derived(dragDepth > 0);
@@ -89,7 +95,7 @@
     Object.assign(items[i] as UploadItem, fields);
   }
 
-  async function uploadOne(id: number, file: File): Promise<void> {
+  async function uploadOne(id: number, file: File, uploadKind: Kind): Promise<void> {
     patch(id, { status: 'uploading' });
     try {
       const result = await client.POST('/api/v1/specimens/{id}/photos', {
@@ -102,6 +108,11 @@
         bodySerializer: () => {
           const fd = new FormData();
           fd.append('file', file, file.name);
+          // Always send `kind` — the server's default and the
+          // selector's default both happen to be 'visible', but
+          // round-tripping the explicit value avoids drift if
+          // either default ever changes.
+          fd.append('kind', uploadKind);
           return fd;
         },
         // Per-file errors render inline on the upload row; a
@@ -131,6 +142,9 @@
 
   async function processAll(toUpload: { id: number; file: File }[]): Promise<void> {
     busy = true;
+    // Capture the selector at batch start so changes mid-upload
+    // don't split a single drop across kinds.
+    const batchKind = kind;
     try {
       let cursor = 0;
       const workers = Array.from({ length: Math.min(CONCURRENCY, toUpload.length) }, async () => {
@@ -138,7 +152,7 @@
           const idx = cursor++;
           const next = toUpload[idx];
           if (!next) continue;
-          await uploadOne(next.id, next.file);
+          await uploadOne(next.id, next.file, batchKind);
         }
       });
       await Promise.all(workers);
@@ -246,6 +260,26 @@
     <p class="mt-1 text-xs text-[var(--color-text-muted)]">
       JPEG, PNG, WebP, or HEIC · up to 100 MiB each
     </p>
+    <fieldset
+      class="mt-3 inline-flex flex-wrap items-center justify-center gap-3 text-xs text-[var(--color-text-muted)]"
+      data-testid="photo-kind-selector"
+    >
+      <legend class="sr-only">Photo kind</legend>
+      {#each [{ value: 'visible', label: 'Visible' }, { value: 'uv', label: 'UV' }, { value: 'other', label: 'Other' }] as opt (opt.value)}
+        <label class="inline-flex cursor-pointer items-center gap-1.5">
+          <input
+            type="radio"
+            name="photo-kind"
+            value={opt.value}
+            checked={kind === opt.value}
+            onchange={() => (kind = opt.value as Kind)}
+            class="h-3.5 w-3.5 accent-[var(--color-accent)]"
+            data-testid={`photo-kind-${opt.value}`}
+          />
+          <span>{opt.label}</span>
+        </label>
+      {/each}
+    </fieldset>
     <p class="mt-3 hidden text-sm text-[var(--color-text-muted)] sm:block">
       Drag and drop here, or
     </p>

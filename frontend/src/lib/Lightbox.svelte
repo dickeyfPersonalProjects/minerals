@@ -1,13 +1,23 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
 
+  type LightboxPhotoKind = 'visible' | 'uv' | 'other';
   interface Props {
-    photos: { id: string; alt: string }[];
+    photos: { id: string; alt: string; kind?: LightboxPhotoKind }[];
     startIndex: number;
     onClose: () => void;
     onDelete?: (photoId: string) => void;
     onCrop?: (photoId: string) => void;
   }
+
+  // Mirror of SpecimenDetail's PHOTO_KIND_LABELS — the lightbox is
+  // standalone enough that duplicating three strings beats threading
+  // a label map through props.
+  const KIND_LABELS: Record<LightboxPhotoKind, string> = {
+    visible: 'Visible',
+    uv: 'UV',
+    other: 'Other',
+  };
 
   const { photos, startIndex, onClose, onDelete, onCrop }: Props = $props();
 
@@ -129,6 +139,7 @@
   {/if}
 
   {#if current}
+    {@const currentKind: LightboxPhotoKind = current.kind ?? 'visible'}
     <figure
       class="pointer-events-none relative z-10 flex max-h-full max-w-full flex-col items-center gap-3"
     >
@@ -138,11 +149,18 @@
         class="max-h-[85vh] max-w-full rounded-md object-contain shadow-xl"
         data-testid="lightbox-image"
       />
-      {#if photos.length > 1}
-        <figcaption class="text-xs text-white/70" data-testid="lightbox-counter">
-          {index + 1} / {photos.length}
-        </figcaption>
-      {/if}
+      <figcaption class="flex items-center gap-2 text-xs text-white/70" data-testid="lightbox-meta">
+        <span
+          class="rounded bg-white/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white"
+          data-testid="lightbox-kind"
+          data-kind={currentKind}
+        >
+          {KIND_LABELS[currentKind]}
+        </span>
+        {#if photos.length > 1}
+          <span data-testid="lightbox-counter">{index + 1} / {photos.length}</span>
+        {/if}
+      </figcaption>
     </figure>
   {/if}
 </div>
