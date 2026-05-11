@@ -77,6 +77,10 @@ var (
 	ErrCollectorReferenced       = fmt.Errorf("collector referenced")
 	ErrMineralSpeciesNotFound    = fmt.Errorf("mineral species not found")
 	ErrMineralSpeciesConflict    = fmt.Errorf("mineral species conflict")
+	ErrQRSheetNotFound           = fmt.Errorf("qr sheet not found")
+	ErrQRSheetConflict           = fmt.Errorf("qr sheet conflict")
+	ErrQRSheetSpecimenNotFound   = fmt.Errorf("qr sheet specimen not found")
+	ErrQRSheetTemplateInvalid    = fmt.Errorf("qr sheet template invalid")
 )
 
 // Page is the cursor-pagination request shape (per §10).
@@ -409,6 +413,93 @@ type MineralSpeciesRepo interface {
 	// rows; user-entered rows have a NULL mindat_id and are
 	// unreachable through this method.
 	FindByMindatID(ctx context.Context, mindatID string) (MineralSpecies, error)
+}
+
+// QRSheetTemplate is the discriminator for the avery-style label
+// templates the printing pipeline knows about (mi-c78 epic). The
+// vocabulary is fixed at compile time — there are no user-defined
+// templates in v1 — so the API layer validates against
+// QRSheetTemplateCapacity() before the value reaches the database.
+type QRSheetTemplate string
+
+// QRSheetTemplateCapacity returns the number of stickers per page for
+// the named template, or (0, false) if the template is unknown to v1.
+// Used by the API layer to validate POST/PATCH bodies AND by the GET
+// handler to compute page count = ceil(specimen_count / capacity).
+func QRSheetTemplateCapacity(t QRSheetTemplate) (int, bool) {
+	switch t {
+	case "avery-5160":
+		return 30, true
+	case "avery-5163":
+		return 10, true
+	case "avery-5164":
+		return 6, true
+	case "avery-22806":
+		return 12, true
+	case "avery-l7160":
+		return 21, true
+	}
+	return 0, false
+}
+
+// QRSheet is the per-user persistent working set of specimens whose
+// QR labels are queued for printing (mi-c78.1). v1 enforces one
+// active sheet per user via UNIQUE(user_id) on the table.
+type QRSheet struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	Template  QRSheetTemplate
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// QRSheetEntry is one row of a sheet's specimens-with-thumbnail join,
+// returned by QRSheetRepo.ListSpecimens. The repo joins specimens
+// (for the display name) and photos (for the lowest-positioned
+// thumbnail). FirstPhotoID is nil for specimens with no photos; the
+// API layer turns a non-nil FirstPhotoID into a /api/v1/photos/{id}/thumb
+// URL on its way out.
+type QRSheetEntry struct {
+	SpecimenID   uuid.UUID
+	SpecimenName string
+	Position     int
+	AddedAt      time.Time
+	FirstPhotoID *uuid.UUID
+}
+
+// QRSheetRepo is the consumer-side interface for the qr_sheets and
+// qr_sheet_specimens tables (mi-c78.1). Every method is user-scoped:
+// the API never trusts a sheet id from the client, it identifies the
+// active sheet by the request's user.
+type QRSheetRepo interface {
+	// GetByUser returns the user's active sheet, or
+	// ErrQRSheetNotFound when none exists.
+	GetByUser(ctx context.Context, userID uuid.UUID) (QRSheet, error)
+	// Create inserts a new sheet. Returns ErrQRSheetConflict when the
+	// user already has one (UNIQUE(user_id) violation).
+	Create(ctx context.Context, tx Tx, s QRSheet) error
+	// UpdateTemplate writes the template on the user's sheet and
+	// bumps updated_at. Returns ErrQRSheetNotFound when the user has
+	// no sheet.
+	UpdateTemplate(ctx context.Context, tx Tx, userID uuid.UUID, template QRSheetTemplate, updatedAt time.Time) error
+	// Delete removes the user's sheet (cascading to qr_sheet_specimens
+	// rows). Returns ErrQRSheetNotFound when none exists.
+	Delete(ctx context.Context, tx Tx, userID uuid.UUID) error
+	// AddSpecimen appends a specimen to the end of the user's sheet.
+	// Idempotent: when the specimen is already on the sheet, the call
+	// succeeds without changing position. Returns ErrQRSheetNotFound
+	// when the user has no sheet and ErrSpecimenNotFound when
+	// specimen_id doesn't exist.
+	AddSpecimen(ctx context.Context, tx Tx, userID, specimenID uuid.UUID, addedAt time.Time) error
+	// RemoveSpecimen drops a specimen from the user's sheet and
+	// repacks positions so there are no gaps. Returns
+	// ErrQRSheetNotFound when the user has no sheet and
+	// ErrQRSheetSpecimenNotFound when the specimen isn't on it.
+	RemoveSpecimen(ctx context.Context, tx Tx, userID, specimenID uuid.UUID) error
+	// ListSpecimens returns the sheet's specimens (joined with their
+	// display name and lowest-positioned photo id, if any) ordered
+	// by position ascending.
+	ListSpecimens(ctx context.Context, sheetID uuid.UUID) ([]QRSheetEntry, error)
 }
 
 // SpecimenCollectorRepo is the consumer-side interface for the

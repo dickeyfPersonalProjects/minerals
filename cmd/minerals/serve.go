@@ -139,6 +139,7 @@ func runServe(_ []string) error {
 			Repo:   db.NewMineralSpeciesPostgres(pool),
 			Mindat: newMindatClient(cfg.MindatAPIKey),
 		},
+		QRSheets: db.NewQRSheetPostgres(pool),
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        db.NewJournalEntryPostgres(pool),
 			Attachments:    db.NewJournalEntryFilePostgres(pool),

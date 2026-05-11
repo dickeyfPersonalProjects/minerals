@@ -80,6 +80,9 @@ type Deps struct {
 	// The Mindat client is optional — nil mindat falls through to
 	// DB-only mode.
 	MineralSpecies *MineralSpeciesServiceDeps
+	// QRSheets is wired in production (mi-c78.1) to expose the
+	// /api/v1/qr-sheet surface backing the printable label workflow.
+	QRSheets domain.QRSheetRepo
 }
 
 // New returns an http.Handler with the v1 routes wired up. Callers
@@ -122,6 +125,9 @@ func New(deps Deps) http.Handler {
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "mineral-species", Description: "Mindat-backed mineral species lookup with DB-as-canonical-store (mi-dtg / F-1).",
 	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "qr-sheets", Description: "Per-user QR sticker sheet builder (mi-c78.1). One active sheet per user.",
+	})
 
 	humaAPI := humago.New(mux, cfg)
 	registerSystemOperations(humaAPI, deps)
@@ -132,6 +138,7 @@ func New(deps Deps) http.Handler {
 	registerSpecimenCollectorOperations(humaAPI, deps.Specimens, deps.SpecimenCollectors)
 	registerJournalFileOperations(humaAPI, mux, deps.JournalFiles)
 	registerMineralSpeciesOperations(humaAPI, deps.MineralSpecies)
+	registerQRSheetOperations(humaAPI, deps.QRSheets)
 
 	// Protected /api/v1/* fallback. Real handlers land in feature
 	// beads; for now any unmatched /api/v1/ path falls through to a

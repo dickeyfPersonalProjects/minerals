@@ -1,0 +1,369 @@
+// QR sheet HTTP surface (mi-c78.1 / mol-c78 epic). Implements the
+// six §10 endpoints that back the printable-label sheet builder:
+//
+//	GET    /api/v1/qr-sheet                              (active sheet for current user)
+//	POST   /api/v1/qr-sheet                              (create — 409 when one already exists)
+//	PATCH  /api/v1/qr-sheet                              (switch template)
+//	DELETE /api/v1/qr-sheet                              (discard)
+//	POST   /api/v1/qr-sheet/specimens                    (append specimen — idempotent)
+//	DELETE /api/v1/qr-sheet/specimens/{specimen_id}      (remove + repack positions)
+//
+// The sheet is implicit in the auth context (one per user); clients
+// never name a sheet id on the wire.
+package api
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/google/uuid"
+
+	"github.com/dickeyfPersonalProjects/minerals/internal/auth"
+	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
+)
+
+// QRSheetSpecimenView is one specimen row in the GET response. The
+// thumbnail URL is derived from the underlying photo id (when the
+// specimen has any photos) so the frontend can render the label
+// preview without a second round-trip. Specimens with no photos
+// surface a nil ThumbnailURL.
+type QRSheetSpecimenView struct {
+	SpecimenID   uuid.UUID `json:"specimen_id" doc:"UUID of the specimen."`
+	Name         string    `json:"name" doc:"Display name of the specimen."`
+	Position     int       `json:"position" doc:"1-indexed position on the sheet."`
+	ThumbnailURL *string   `json:"thumbnail_url" doc:"Path to the specimen's first photo thumbnail; null when the specimen has no photos."`
+	AddedAt      time.Time `json:"added_at" doc:"RFC 3339 timestamp the specimen was added to the sheet."`
+}
+
+// QRSheetView is the GET response shape — sheet metadata plus the
+// derived page count and the ordered specimens list.
+type QRSheetView struct {
+	ID        uuid.UUID             `json:"id" doc:"UUIDv7 primary key of the sheet."`
+	Template  string                `json:"template" doc:"Avery-style template identifier (e.g. 'avery-5160')."`
+	PageCount int                   `json:"page_count" doc:"Number of pages needed to print every specimen at this template's capacity. 0 when the sheet is empty."`
+	Specimens []QRSheetSpecimenView `json:"specimens" doc:"Specimens on the sheet in position-ascending order."`
+	CreatedAt time.Time             `json:"created_at" doc:"RFC 3339 creation timestamp."`
+	UpdatedAt time.Time             `json:"updated_at" doc:"RFC 3339 last-update timestamp."`
+}
+
+type createQRSheetInput struct {
+	Body createQRSheetBody
+}
+
+type createQRSheetBody struct {
+	Template string `json:"template" doc:"Avery-style template identifier; see GET /api/v1/qr-sheet for the supported vocabulary."`
+}
+
+type patchQRSheetInput struct {
+	Body patchQRSheetBody
+}
+
+type patchQRSheetBody struct {
+	Template string `json:"template" doc:"New template identifier."`
+}
+
+type qrSheetOutput struct {
+	Body QRSheetView
+}
+
+type createQRSheetOutput struct {
+	Location string `header:"Location" doc:"URL of the newly created sheet."`
+	Body     QRSheetView
+}
+
+type deleteQRSheetOutput struct{}
+
+type addQRSheetSpecimenInput struct {
+	Body addQRSheetSpecimenBody
+}
+
+type addQRSheetSpecimenBody struct {
+	SpecimenID string `json:"specimen_id" doc:"UUID of the specimen to append to the sheet."`
+}
+
+type addQRSheetSpecimenOutput struct {
+	Body QRSheetView
+}
+
+type removeQRSheetSpecimenInput struct {
+	SpecimenID string `path:"specimen_id" doc:"UUID of the specimen to remove from the sheet."`
+}
+
+type removeQRSheetSpecimenOutput struct{}
+
+// QRSheetService wires huma operations against a domain.QRSheetRepo
+// and the specimen repo (needed to surface ErrSpecimenNotFound up
+// front for the add path).
+type QRSheetService struct {
+	repo domain.QRSheetRepo
+}
+
+func registerQRSheetOperations(api huma.API, repo domain.QRSheetRepo) {
+	if repo == nil {
+		return
+	}
+	s := &QRSheetService{repo: repo}
+	mws := huma.Middlewares{humaAuth}
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-qr-sheet",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/qr-sheet",
+		Summary:     "Get the current user's QR sheet",
+		Description: "Returns the active QR sticker sheet for the authenticated user, including the ordered list of specimens and the calculated page count for the chosen template. 404 when the user has no active sheet.",
+		Tags:        []string{"qr-sheets"},
+		Errors:      []int{http.StatusUnauthorized, http.StatusNotFound},
+		Middlewares: mws,
+	}, s.get)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "create-qr-sheet",
+		Method:        http.MethodPost,
+		Path:          "/api/v1/qr-sheet",
+		Summary:       "Create the current user's QR sheet",
+		Description:   "Creates an empty sheet with the supplied template. Returns 409 when the user already has an active sheet — use PATCH to change template, DELETE + POST to reset.",
+		Tags:          []string{"qr-sheets"},
+		DefaultStatus: http.StatusCreated,
+		Errors:        []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusConflict},
+		Middlewares:   mws,
+	}, s.create)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "patch-qr-sheet",
+		Method:      http.MethodPatch,
+		Path:        "/api/v1/qr-sheet",
+		Summary:     "Update the current user's QR sheet template",
+		Description: "Switches the template on the active sheet. Specimen membership is preserved; only the page-count calculation changes. Returns 404 when the user has no active sheet.",
+		Tags:        []string{"qr-sheets"},
+		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound},
+		Middlewares: mws,
+	}, s.patch)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "delete-qr-sheet",
+		Method:        http.MethodDelete,
+		Path:          "/api/v1/qr-sheet",
+		Summary:       "Delete the current user's QR sheet",
+		Description:   "Discards the active sheet and every specimen on it. Returns 404 when the user has no active sheet.",
+		Tags:          []string{"qr-sheets"},
+		DefaultStatus: http.StatusNoContent,
+		Errors:        []int{http.StatusUnauthorized, http.StatusNotFound},
+		Middlewares:   mws,
+	}, s.delete)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "add-qr-sheet-specimen",
+		Method:      http.MethodPost,
+		Path:        "/api/v1/qr-sheet/specimens",
+		Summary:     "Append a specimen to the current user's QR sheet",
+		Description: "Appends the supplied specimen at the next free position. Idempotent — re-adding a specimen already on the sheet succeeds without changing its position. Returns 404 when the user has no sheet, or when specimen_id doesn't exist.",
+		Tags:        []string{"qr-sheets"},
+		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound},
+		Middlewares: mws,
+	}, s.addSpecimen)
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "remove-qr-sheet-specimen",
+		Method:        http.MethodDelete,
+		Path:          "/api/v1/qr-sheet/specimens/{specimen_id}",
+		Summary:       "Remove a specimen from the current user's QR sheet",
+		Description:   "Removes the specimen and repacks remaining positions so they stay contiguous. Returns 404 when the user has no sheet, or when the specimen isn't on it.",
+		Tags:          []string{"qr-sheets"},
+		DefaultStatus: http.StatusNoContent,
+		Errors:        []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound},
+		Middlewares:   mws,
+	}, s.removeSpecimen)
+}
+
+func (s *QRSheetService) get(ctx context.Context, _ *struct{}) (*qrSheetOutput, error) {
+	user := auth.FromContext(ctx)
+	view, err := s.loadView(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &qrSheetOutput{Body: view}, nil
+}
+
+func (s *QRSheetService) create(
+	ctx context.Context, in *createQRSheetInput,
+) (*createQRSheetOutput, error) {
+	template, err := parseQRTemplate(in.Body.Template)
+	if err != nil {
+		return nil, err
+	}
+	user := auth.FromContext(ctx)
+
+	now := time.Now().UTC()
+	sheet := domain.QRSheet{
+		ID:        domain.NewID(),
+		UserID:    user.ID,
+		Template:  template,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := s.repo.Create(ctx, nil, sheet); err != nil {
+		return nil, mapQRSheetError(err)
+	}
+	view := toQRSheetView(sheet, nil)
+	return &createQRSheetOutput{
+		Location: "/api/v1/qr-sheet",
+		Body:     view,
+	}, nil
+}
+
+func (s *QRSheetService) patch(
+	ctx context.Context, in *patchQRSheetInput,
+) (*qrSheetOutput, error) {
+	template, err := parseQRTemplate(in.Body.Template)
+	if err != nil {
+		return nil, err
+	}
+	user := auth.FromContext(ctx)
+
+	now := time.Now().UTC()
+	if err := s.repo.UpdateTemplate(ctx, nil, user.ID, template, now); err != nil {
+		return nil, mapQRSheetError(err)
+	}
+	view, err := s.loadView(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &qrSheetOutput{Body: view}, nil
+}
+
+func (s *QRSheetService) delete(
+	ctx context.Context, _ *struct{},
+) (*deleteQRSheetOutput, error) {
+	user := auth.FromContext(ctx)
+	if err := s.repo.Delete(ctx, nil, user.ID); err != nil {
+		return nil, mapQRSheetError(err)
+	}
+	return &deleteQRSheetOutput{}, nil
+}
+
+func (s *QRSheetService) addSpecimen(
+	ctx context.Context, in *addQRSheetSpecimenInput,
+) (*addQRSheetSpecimenOutput, error) {
+	specimenID, err := parseUUID(in.Body.SpecimenID, "specimen_id")
+	if err != nil {
+		return nil, err
+	}
+	user := auth.FromContext(ctx)
+
+	now := time.Now().UTC()
+	if err := s.repo.AddSpecimen(ctx, nil, user.ID, specimenID, now); err != nil {
+		return nil, mapQRSheetError(err)
+	}
+	view, err := s.loadView(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &addQRSheetSpecimenOutput{Body: view}, nil
+}
+
+func (s *QRSheetService) removeSpecimen(
+	ctx context.Context, in *removeQRSheetSpecimenInput,
+) (*removeQRSheetSpecimenOutput, error) {
+	specimenID, err := parseUUID(in.SpecimenID, "specimen_id")
+	if err != nil {
+		return nil, err
+	}
+	user := auth.FromContext(ctx)
+	if err := s.repo.RemoveSpecimen(ctx, nil, user.ID, specimenID); err != nil {
+		return nil, mapQRSheetError(err)
+	}
+	return &removeQRSheetSpecimenOutput{}, nil
+}
+
+// loadView reads the user's sheet + its specimens and renders the
+// wire view (with derived page count and per-specimen thumbnail URL).
+// Returns mapped errors so handler funcs can pass them through unchanged.
+func (s *QRSheetService) loadView(
+	ctx context.Context, userID uuid.UUID,
+) (QRSheetView, error) {
+	sheet, err := s.repo.GetByUser(ctx, userID)
+	if err != nil {
+		return QRSheetView{}, mapQRSheetError(err)
+	}
+	entries, err := s.repo.ListSpecimens(ctx, sheet.ID)
+	if err != nil {
+		return QRSheetView{}, newAPIError(http.StatusInternalServerError, "internal_error",
+			"internal server error", nil)
+	}
+	return toQRSheetView(sheet, entries), nil
+}
+
+func toQRSheetView(s domain.QRSheet, entries []domain.QRSheetEntry) QRSheetView {
+	specimens := make([]QRSheetSpecimenView, 0, len(entries))
+	for _, e := range entries {
+		v := QRSheetSpecimenView{
+			SpecimenID: e.SpecimenID,
+			Name:       e.SpecimenName,
+			Position:   e.Position,
+			AddedAt:    e.AddedAt,
+		}
+		if e.FirstPhotoID != nil {
+			url := "/api/v1/photos/" + e.FirstPhotoID.String() + "/thumb"
+			v.ThumbnailURL = &url
+		}
+		specimens = append(specimens, v)
+	}
+	return QRSheetView{
+		ID:        s.ID,
+		Template:  string(s.Template),
+		PageCount: qrSheetPageCount(s.Template, len(entries)),
+		Specimens: specimens,
+		CreatedAt: s.CreatedAt,
+		UpdatedAt: s.UpdatedAt,
+	}
+}
+
+// qrSheetPageCount = ceil(count / capacity); 0 when the sheet is empty.
+// Unknown templates (which the API rejects at write time) fall back
+// to one page per specimen so the GET handler never panics on stale
+// or future data.
+func qrSheetPageCount(t domain.QRSheetTemplate, count int) int {
+	if count == 0 {
+		return 0
+	}
+	capacity, ok := domain.QRSheetTemplateCapacity(t)
+	if !ok || capacity <= 0 {
+		return count
+	}
+	return (count + capacity - 1) / capacity
+}
+
+// parseQRTemplate validates the template against the v1 vocabulary
+// (per the mi-c78 epic spec).
+func parseQRTemplate(raw string) (domain.QRSheetTemplate, error) {
+	t := domain.QRSheetTemplate(raw)
+	if _, ok := domain.QRSheetTemplateCapacity(t); !ok {
+		return "", newAPIError(http.StatusBadRequest, "invalid_template",
+			"template is not a supported avery template",
+			map[string]any{"field": "template", "value": raw})
+	}
+	return t, nil
+}
+
+func mapQRSheetError(err error) error {
+	switch {
+	case errors.Is(err, domain.ErrQRSheetNotFound):
+		return newAPIError(http.StatusNotFound, "qr_sheet_not_found",
+			"no active qr sheet for the current user", nil)
+	case errors.Is(err, domain.ErrQRSheetConflict):
+		return newAPIError(http.StatusConflict, "qr_sheet_conflict",
+			"an active qr sheet already exists for the current user; PATCH to switch template or DELETE first to reset",
+			map[string]any{"constraint": "one_sheet_per_user"})
+	case errors.Is(err, domain.ErrQRSheetSpecimenNotFound):
+		return newAPIError(http.StatusNotFound, "qr_sheet_specimen_not_found",
+			"specimen is not on the current user's qr sheet", nil)
+	case errors.Is(err, domain.ErrSpecimenNotFound):
+		return newAPIError(http.StatusNotFound, "specimen_not_found",
+			"no such specimen", nil)
+	}
+	return newAPIError(http.StatusInternalServerError, "internal_error",
+		"internal server error", nil)
+}
