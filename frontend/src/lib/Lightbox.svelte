@@ -6,9 +6,10 @@
     startIndex: number;
     onClose: () => void;
     onDelete?: (photoId: string) => void;
+    onCrop?: (photoId: string) => void;
   }
 
-  const { photos, startIndex, onClose, onDelete }: Props = $props();
+  const { photos, startIndex, onClose, onDelete, onCrop }: Props = $props();
 
   // The lightbox owns the active index after open; only the
   // initial value is read from props (parent remounts to reopen).
@@ -78,17 +79,32 @@
     ✕
   </button>
 
-  {#if onDelete && current}
+  {#if current}
     {@const target = current}
-    <button
-      type="button"
-      class="absolute left-4 top-4 z-10 rounded-md bg-red-600/90 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-600"
-      onclick={() => onDelete(target.id)}
-      aria-label="Delete photo"
-      data-testid="lightbox-delete"
-    >
-      Delete
-    </button>
+    <div class="absolute left-4 top-4 z-10 flex gap-2">
+      {#if onCrop}
+        <button
+          type="button"
+          class="rounded-md bg-white/15 px-3 py-1.5 text-sm font-medium text-white hover:bg-white/25"
+          onclick={() => onCrop(target.id)}
+          aria-label="Crop photo"
+          data-testid="lightbox-crop"
+        >
+          Crop
+        </button>
+      {/if}
+      {#if onDelete}
+        <button
+          type="button"
+          class="rounded-md bg-red-600/90 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-600"
+          onclick={() => onDelete(target.id)}
+          aria-label="Delete photo"
+          data-testid="lightbox-delete"
+        >
+          Delete
+        </button>
+      {/if}
+    </div>
   {/if}
 
   {#if photos.length > 1}

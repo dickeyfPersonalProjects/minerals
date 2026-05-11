@@ -89,6 +89,32 @@ describe('Lightbox', () => {
     expect(onDelete).toHaveBeenCalledWith('p2');
   });
 
+  it('onCrop is called with the current photo id', async () => {
+    const onCrop = vi.fn();
+    render(Lightbox, {
+      photos: PHOTOS,
+      startIndex: 1,
+      onClose: vi.fn(),
+      onCrop,
+    });
+
+    await fireEvent.click(screen.getByTestId('lightbox-crop'));
+
+    expect(onCrop).toHaveBeenCalledTimes(1);
+    expect(onCrop).toHaveBeenCalledWith('p2');
+  });
+
+  it('hides the action bar when no action callbacks are provided', () => {
+    render(Lightbox, {
+      photos: PHOTOS,
+      startIndex: 0,
+      onClose: vi.fn(),
+    });
+
+    expect(screen.queryByTestId('lightbox-delete')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('lightbox-crop')).not.toBeInTheDocument();
+  });
+
   it('hides nav arrows and counter when only one photo is shown', () => {
     render(Lightbox, {
       photos: [PHOTOS[0]!],

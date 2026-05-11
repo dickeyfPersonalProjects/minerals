@@ -10,6 +10,7 @@
     type JournalEntryFormSubmitResult,
   } from '../lib/JournalEntryForm.svelte';
   import type { JournalEntryFormValues } from '../lib/schemas/journal';
+  import ImageCropModal from '../lib/ImageCropModal.svelte';
   import Lightbox from '../lib/Lightbox.svelte';
   import PhotoUploader from '../lib/PhotoUploader.svelte';
   import { formatLocal } from '../lib/time';
@@ -40,6 +41,7 @@
   let collectors: CollectorLink[] = $state([]);
   let loadState: LoadState = $state({ kind: 'idle' });
   let lightboxIndex: number | null = $state(null);
+  let cropTarget: Photo | null = $state(null);
   let journalCreating = $state(false);
   let editingEntryId: string | null = $state(null);
   let editingChain = $state(false);
@@ -179,6 +181,24 @@
 
   function closeLightbox() {
     lightboxIndex = null;
+  }
+
+  function requestCropPhoto(id: string) {
+    const target = photos.find((p) => p.id === id);
+    if (!target) return;
+    // Close the lightbox so the crop modal is the only overlay; the
+    // gallery indexes shift after crop apply.
+    lightboxIndex = null;
+    cropTarget = target;
+  }
+
+  function closeCrop() {
+    cropTarget = null;
+  }
+
+  async function handleCropApplied() {
+    if (!specimen) return;
+    await refetchPhotos(specimen.id);
   }
 
   function requestDeletePhoto(id: string) {
@@ -493,6 +513,15 @@
         </button>
         <button
           type="button"
+          onclick={() => requestCropPhoto(heroPhoto.id)}
+          aria-label="Crop photo"
+          data-testid="hero-photo-crop"
+          class="absolute right-12 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
+        >
+          Crop
+        </button>
+        <button
+          type="button"
           onclick={() => requestDeletePhoto(heroPhoto.id)}
           aria-label="Delete photo"
           data-testid="hero-photo-delete"
@@ -784,6 +813,18 @@
       startIndex={lightboxIndex}
       onClose={closeLightbox}
       onDelete={requestDeletePhoto}
+      onCrop={requestCropPhoto}
+    />
+  {/if}
+
+  {#if cropTarget && specimen}
+    <ImageCropModal
+      specimenId={specimen.id}
+      photoId={cropTarget.id}
+      position={cropTarget.position}
+      takenAt={cropTarget.taken_at ?? null}
+      onClose={closeCrop}
+      onApplied={handleCropApplied}
     />
   {/if}
 
