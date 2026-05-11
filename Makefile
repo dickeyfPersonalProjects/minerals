@@ -32,7 +32,7 @@ clean:
 	rm -rf bin/
 
 # --- mi-bi6: backend skeleton + migrate/lint targets ----------------
-.PHONY: lint fmt-check migrate-up migrate-down migrate-version migrate-create test-integration
+.PHONY: lint fmt-check migrate-up migrate-down migrate-version migrate-create test-integration license-check
 
 lint:
 	golangci-lint run
@@ -58,6 +58,20 @@ migrate-create:
 
 test-integration:
 	go test -tags integration ./...
+
+# Mechanical enforcement of the CONTRACT §16 license allowlist (mi-q7n).
+# --ignore skips first-party packages (our own module has no LICENSE file at
+# the repo root); their *dependencies* are still checked, which is the point.
+# No upstream modules currently require an override; if a transitive dep ever
+# ships without a SPDX-recognized LICENSE, add a documented entry here rather
+# than widening --ignore.
+LICENSE_ALLOWLIST := MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,Unlicense,CC0-1.0
+LICENSE_IGNORE := github.com/dickeyfPersonalProjects/minerals
+
+license-check:
+	go-licenses check ./... \
+		--allowed_licenses=$(LICENSE_ALLOWLIST) \
+		--ignore=$(LICENSE_IGNORE)
 
 # ── Frontend (mi-p5h) ─────────────────────────────────────────────
 .PHONY: test-frontend test-cover-frontend

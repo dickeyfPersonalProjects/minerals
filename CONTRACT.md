@@ -3374,6 +3374,18 @@ license MUST surface the issue for review, not silently accept
 it. The project's stance is "we want to keep redistribution and
 operation options open."
 
+**Enforcement**: the allowlist above is mechanically checked in
+CI by `go-licenses` (per mi-q7n). The `license-check` Makefile
+target is the local equivalent; run it before committing
+dependency changes. The CI gate fails on any direct or
+transitive dependency whose detected SPDX license is outside the
+allowlist, or whose LICENSE file is missing/unrecognized. First-
+party packages (this module itself) are skipped via `--ignore`
+because the repo has no top-level LICENSE file; their
+*dependencies* are still checked. If a future upstream module
+ships without a recognizable LICENSE, prefer a documented
+override in the Makefile over widening `--ignore`.
+
 ## Vendoring
 
 - v1 does NOT vendor dependencies. `go.mod` + `go.sum` + Go
