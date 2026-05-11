@@ -3,6 +3,19 @@ run:
   timeout: 5m
 linters:
   default: standard
+  enable:
+    - sloglint
   exclusions:
     paths:
       - frontend
+  settings:
+    sloglint:
+      kv-only: true
+      no-mixed-args: true
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/dickeyfPersonalProjects/minerals

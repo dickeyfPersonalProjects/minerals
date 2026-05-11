@@ -84,34 +84,24 @@ func Logging(next http.Handler) http.Handler {
 			userID = user.ID.String()
 		}
 		attrs := []any{
-			slog.String("request_id", auth.RequestID(ctx)),
-			slog.String("method", r.Method),
-			slog.String("path", r.URL.Path),
-			slog.Int("status", lw.status),
-			slog.Int64("duration_ms", dur),
-			slog.String("user_id", userID),
-			slog.Int("bytes_out", lw.bytes),
-			slog.String("remote_ip", remoteIP(r)),
+			"request_id", auth.RequestID(ctx),
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", lw.status,
+			"duration_ms", dur,
+			"user_id", userID,
+			"bytes_out", lw.bytes,
+			"remote_ip", remoteIP(r),
 		}
 		switch {
 		case lw.status >= 500:
-			slog.LogAttrs(ctx, slog.LevelError, "http request", toAttrs(attrs)...)
+			slog.ErrorContext(ctx, "http request", attrs...)
 		case lw.status >= 400:
-			slog.LogAttrs(ctx, slog.LevelWarn, "http request", toAttrs(attrs)...)
+			slog.WarnContext(ctx, "http request", attrs...)
 		default:
-			slog.LogAttrs(ctx, slog.LevelInfo, "http request", toAttrs(attrs)...)
+			slog.InfoContext(ctx, "http request", attrs...)
 		}
 	})
-}
-
-func toAttrs(in []any) []slog.Attr {
-	out := make([]slog.Attr, 0, len(in))
-	for _, v := range in {
-		if a, ok := v.(slog.Attr); ok {
-			out = append(out, a)
-		}
-	}
-	return out
 }
 
 // remoteIP returns the best guess for the client IP (per §14). The
@@ -137,11 +127,11 @@ func Recovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				slog.LogAttrs(r.Context(), slog.LevelError, "panic recovered",
-					slog.Any("panic", rec),
-					slog.String("stack", string(debug.Stack())),
-					slog.String("request_id", auth.RequestID(r.Context())),
-					slog.String("path", r.URL.Path),
+				slog.ErrorContext(r.Context(), "panic recovered",
+					"panic", rec,
+					"stack", string(debug.Stack()),
+					"request_id", auth.RequestID(r.Context()),
+					"path", r.URL.Path,
 				)
 				writeError(w, http.StatusInternalServerError,
 					"internal_error", "internal server error", nil)
