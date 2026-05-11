@@ -317,7 +317,10 @@
     crystal_system: 'Crystal system',
     color: 'Color',
     luster: 'Luster',
-    fluorescence: 'Fluorescence',
+    fluorescence: 'Fluorescence', // legacy free-text key — rendered as-is for unmigrated data
+    fluorescence_sw: 'Fluorescence (SW 254 nm)',
+    fluorescence_mw: 'Fluorescence (MW ~312 nm)',
+    fluorescence_lw: 'Fluorescence (LW ~365 nm)',
     radioactive: 'Radioactive',
     magnetic: 'Magnetic',
     reacts_to_acid: 'Reacts to acid',
@@ -346,7 +349,15 @@
     return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   }
 
-  type TypeDatum = { key: string; label: string; value: string };
+  const FLUORESCENCE_KEYS = new Set(['fluorescence_sw', 'fluorescence_mw', 'fluorescence_lw']);
+
+  type TypeDatum = {
+    key: string;
+    label: string;
+    value: string;
+    // When set, the row renders these as color chips instead of plain text.
+    chips?: string[];
+  };
 
   function typeDataEntries(s: Specimen): TypeDatum[] {
     const td = (s.type_data ?? {}) as Partial<MineralData & RockData & MeteoriteData & FossilData> &
@@ -355,9 +366,12 @@
     for (const [key, raw] of Object.entries(td)) {
       if (raw === null || raw === undefined || raw === '') continue;
       let value: string;
+      let chips: string[] | undefined;
       if (Array.isArray(raw)) {
         if (raw.length === 0) continue;
-        value = raw.join(', ');
+        const strs = raw.map((x) => String(x));
+        value = strs.join(', ');
+        if (FLUORESCENCE_KEYS.has(key)) chips = strs;
       } else if (typeof raw === 'boolean') {
         value = raw ? 'Yes' : 'No';
       } else if (key === 'fall_or_find_date' && typeof raw === 'string') {
@@ -366,9 +380,37 @@
       } else {
         value = String(raw);
       }
-      out.push({ key, label: TYPE_DATA_LABELS[key] ?? titleCase(key), value });
+      out.push({ key, label: TYPE_DATA_LABELS[key] ?? titleCase(key), value, chips });
     }
     return out;
+  }
+
+  // Tailwind-class lookup for fluorescence color chips. Anything outside
+  // the closed enum falls back to a neutral chip — that lets legacy
+  // free-text 'fluorescence' values still render harmlessly.
+  const FLUORESCENCE_CHIP_CLASS: Record<string, string> = {
+    Red: 'bg-red-500/15 text-red-700 border-red-500/40 dark:text-red-300',
+    Orange: 'bg-orange-500/15 text-orange-700 border-orange-500/40 dark:text-orange-300',
+    Yellow: 'bg-yellow-400/20 text-yellow-800 border-yellow-500/40 dark:text-yellow-200',
+    Green: 'bg-green-500/15 text-green-700 border-green-500/40 dark:text-green-300',
+    Blue: 'bg-blue-500/15 text-blue-700 border-blue-500/40 dark:text-blue-300',
+    Violet: 'bg-violet-500/15 text-violet-700 border-violet-500/40 dark:text-violet-300',
+    Pink: 'bg-pink-500/15 text-pink-700 border-pink-500/40 dark:text-pink-300',
+    White: 'bg-slate-100 text-slate-800 border-slate-300 dark:bg-slate-200/20 dark:text-slate-100',
+    Cream: 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-200/20 dark:text-amber-100',
+    'Blue-green': 'bg-teal-500/15 text-teal-700 border-teal-500/40 dark:text-teal-300',
+    'Blue-violet': 'bg-indigo-500/15 text-indigo-700 border-indigo-500/40 dark:text-indigo-300',
+    'Red-orange': 'bg-orange-600/15 text-orange-800 border-orange-600/40 dark:text-orange-300',
+    'Orange-yellow': 'bg-amber-400/20 text-amber-800 border-amber-500/40 dark:text-amber-200',
+    'Greenish-yellow': 'bg-lime-400/20 text-lime-800 border-lime-500/40 dark:text-lime-200',
+    'Cherry red': 'bg-rose-600/15 text-rose-700 border-rose-600/40 dark:text-rose-300',
+  };
+
+  function chipClass(color: string): string {
+    return (
+      FLUORESCENCE_CHIP_CLASS[color] ??
+      'bg-[var(--color-surface-2)] text-[var(--color-text)] border-[var(--color-border)]'
+    );
   }
 
   function localityEntries(
@@ -921,7 +963,22 @@
               {#each td as row (row.key)}
                 <div class="flex justify-between gap-2">
                   <dt class="text-[var(--color-text-muted)]">{row.label}</dt>
-                  <dd class="text-right text-[var(--color-text)]">{row.value}</dd>
+                  <dd class="text-right text-[var(--color-text)]">
+                    {#if row.chips && row.chips.length > 0}
+                      <span
+                        class="inline-flex flex-wrap justify-end gap-1"
+                        data-testid={`type-data-${row.key}`}
+                      >
+                        {#each row.chips as color (color)}
+                          <span class="rounded-full border px-2 py-0.5 text-xs {chipClass(color)}">
+                            {color}
+                          </span>
+                        {/each}
+                      </span>
+                    {:else}
+                      {row.value}
+                    {/if}
+                  </dd>
                 </div>
               {/each}
             </dl>

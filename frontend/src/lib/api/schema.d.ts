@@ -780,7 +780,9 @@ export interface components {
             chemical_formula?: string;
             color?: string;
             crystal_system?: string;
-            fluorescence?: string;
+            fluorescence_lw?: string[] | null;
+            fluorescence_mw?: string[] | null;
+            fluorescence_sw?: string[] | null;
             luster?: string;
             magnetic?: boolean;
             mindat_id?: string;

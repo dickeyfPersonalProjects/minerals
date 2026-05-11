@@ -16,6 +16,8 @@
     emptyFormValues,
     resetTypeDataDefaults,
     specimenFormSchema,
+    FLUORESCENCE_COLORS,
+    type FluorescenceColor,
     type SpecimenFormValues,
     type SpecimenType,
   } from './schemas/specimen';
@@ -122,7 +124,11 @@
       m_mohs_hardness: d.mohs_hardness != null ? String(d.mohs_hardness) : '',
       m_color: d.color ?? '',
       m_luster: d.luster ?? '',
-      m_fluorescence: d.fluorescence ?? '',
+      // Mindat returns prose fluorescence text; the structured per-wavelength
+      // model has no safe mapping for it. Leave the user to fill in by hand.
+      m_fluorescence_sw: $data.m_fluorescence_sw,
+      m_fluorescence_mw: $data.m_fluorescence_mw,
+      m_fluorescence_lw: $data.m_fluorescence_lw,
       m_radioactive: Boolean(d.radioactive),
       m_magnetic: Boolean(d.magnetic),
       m_reacts_to_acid: Boolean(d.reacts_to_acid),
@@ -638,20 +644,6 @@
         </div>
         <div>
           <label
-            for="specimen-m-fluorescence"
-            class="mb-1 block text-xs text-[var(--color-text-muted)]"
-          >
-            Fluorescence
-          </label>
-          <input
-            id="specimen-m-fluorescence"
-            name="m_fluorescence"
-            type="text"
-            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
-          />
-        </div>
-        <div>
-          <label
             for="specimen-m-mindat-id"
             class="mb-1 block text-xs text-[var(--color-text-muted)]"
           >
@@ -665,6 +657,60 @@
           />
         </div>
       </div>
+
+      <fieldset class="space-y-2" data-testid="fluorescence-fieldset">
+        <legend class="text-xs font-medium text-[var(--color-text-muted)]">
+          UV fluorescence (select 'None' if non-fluorescent under that wavelength)
+        </legend>
+        {#each [{ wave: 'sw', label: 'Shortwave (254 nm)', field: 'm_fluorescence_sw' }, { wave: 'mw', label: 'Midwave (~312 nm)', field: 'm_fluorescence_mw' }, { wave: 'lw', label: 'Longwave (~365 nm)', field: 'm_fluorescence_lw' }] as { wave, label, field } (wave)}
+          {@const selected = $data[field as keyof SpecimenFormValues] as FluorescenceColor[]}
+          {@const none = selected.length === 0}
+          <div
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)]/40 p-3"
+            data-testid={`fluorescence-row-${wave}`}
+          >
+            <div class="mb-2 flex items-center justify-between">
+              <span class="text-xs font-medium text-[var(--color-text)]">{label}</span>
+              <label class="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
+                <input
+                  type="checkbox"
+                  checked={none}
+                  data-testid={`fluorescence-${wave}-none`}
+                  onchange={(e) => {
+                    if ((e.currentTarget as HTMLInputElement).checked) {
+                      setData(field as keyof SpecimenFormValues, [] as FluorescenceColor[]);
+                    }
+                  }}
+                />
+                None
+              </label>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              {#each FLUORESCENCE_COLORS as color (color)}
+                {@const on = selected.includes(color)}
+                <button
+                  type="button"
+                  data-testid={`fluorescence-${wave}-${color}`}
+                  aria-pressed={on}
+                  onclick={() => {
+                    const cur = $data[field as keyof SpecimenFormValues] as FluorescenceColor[];
+                    const next = cur.includes(color)
+                      ? cur.filter((c) => c !== color)
+                      : [...cur, color];
+                    setData(field as keyof SpecimenFormValues, next);
+                  }}
+                  class="rounded-full border px-2.5 py-0.5 text-xs transition-colors {on
+                    ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-fg)]'
+                    : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:bg-[var(--color-surface-2)]'}"
+                >
+                  {color}
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/each}
+      </fieldset>
+
       <label class="flex items-center gap-2 text-sm text-[var(--color-text)]">
         <input
           type="checkbox"

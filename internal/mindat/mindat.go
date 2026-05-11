@@ -126,7 +126,6 @@ type geomaterial struct {
 	CrystalSystem string  `json:"csystem"`
 	Colour        string  `json:"colour"`
 	Lustretype    string  `json:"lustretype"`
-	Fluorescence  string  `json:"fluorescence"`
 }
 
 // LookupByName performs an exact-name lookup against Mindat's
@@ -145,7 +144,11 @@ func (c *Client) LookupByName(ctx context.Context, name string) (*MineralRecord,
 
 	q := url.Values{}
 	q.Set("name", name)
-	q.Set("fields", "id,name,ima_formula,mindat_formula,hardness_min,hardness_max,csystem,colour,lustretype,fluorescence")
+	// Note: Mindat's free-text 'fluorescence' field is intentionally
+	// not requested. MineralData stores UV fluorescence as three
+	// structured per-wavelength color lists (mi-qas); Mindat's
+	// prose answer can't be safely mapped into that enum.
+	q.Set("fields", "id,name,ima_formula,mindat_formula,hardness_min,hardness_max,csystem,colour,lustretype")
 	endpoint := c.baseURL + "geomaterials/?" + q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -232,9 +235,6 @@ func toMineralRecord(g geomaterial) *MineralRecord {
 	}
 	if l := strings.TrimSpace(g.Lustretype); l != "" {
 		rec.Data.Luster = &l
-	}
-	if f := strings.TrimSpace(g.Fluorescence); f != "" {
-		rec.Data.Fluorescence = &f
 	}
 	rec.Data.MindatID = &rec.MindatID
 	return rec

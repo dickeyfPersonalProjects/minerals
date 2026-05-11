@@ -55,6 +55,39 @@ const optionalDate = z.union([z.string(), z.null()]).refine(
 
 // --- type-specific schemas ----------------------------------------
 
+// Closed UV-fluorescence color vocabulary (mi-qas). Kept in lockstep
+// with internal/domain.ValidFluorescenceColors on the Go side; only
+// colors that genuinely occur in mineral UV fluorescence are listed.
+// "None" is represented by an empty selection (null on the wire), not
+// a sentinel string.
+export const FLUORESCENCE_COLORS = [
+  'Red',
+  'Orange',
+  'Yellow',
+  'Green',
+  'Blue',
+  'Violet',
+  'Pink',
+  'White',
+  'Cream',
+  'Blue-green',
+  'Blue-violet',
+  'Red-orange',
+  'Orange-yellow',
+  'Greenish-yellow',
+  'Cherry red',
+] as const;
+
+export type FluorescenceColor = (typeof FLUORESCENCE_COLORS)[number];
+
+const fluorescenceColorSet = new Set<string>(FLUORESCENCE_COLORS);
+
+const fluorescenceColorList = z
+  .array(z.string())
+  .refine((xs) => xs.every((c) => fluorescenceColorSet.has(c)), {
+    message: `Each color must be one of: ${FLUORESCENCE_COLORS.join(', ')}`,
+  });
+
 export const mineralDataSchema = z.object({
   m_chemical_formula: z.string().max(200, 'Too long'),
   m_mineral_species: z.string().max(500, 'Too long'),
@@ -62,7 +95,9 @@ export const mineralDataSchema = z.object({
   m_mohs_hardness: optionalNumber('Mohs hardness must be 0–10', (n) => n >= 0 && n <= 10),
   m_color: z.string().max(100, 'Too long'),
   m_luster: z.string().max(100, 'Too long'),
-  m_fluorescence: z.string().max(200, 'Too long'),
+  m_fluorescence_sw: fluorescenceColorList,
+  m_fluorescence_mw: fluorescenceColorList,
+  m_fluorescence_lw: fluorescenceColorList,
   m_radioactive: z.boolean(),
   m_magnetic: z.boolean(),
   m_reacts_to_acid: z.boolean(),
@@ -174,7 +209,9 @@ export function emptyFormValues(type: SpecimenType = 'mineral'): SpecimenFormVal
     m_mohs_hardness: '',
     m_color: '',
     m_luster: '',
-    m_fluorescence: '',
+    m_fluorescence_sw: [],
+    m_fluorescence_mw: [],
+    m_fluorescence_lw: [],
     m_radioactive: false,
     m_magnetic: false,
     m_reacts_to_acid: false,
@@ -217,7 +254,9 @@ export function resetTypeDataDefaults(
     m_mohs_hardness: empty.m_mohs_hardness,
     m_color: empty.m_color,
     m_luster: empty.m_luster,
-    m_fluorescence: empty.m_fluorescence,
+    m_fluorescence_sw: empty.m_fluorescence_sw,
+    m_fluorescence_mw: empty.m_fluorescence_mw,
+    m_fluorescence_lw: empty.m_fluorescence_lw,
     m_radioactive: empty.m_radioactive,
     m_magnetic: empty.m_magnetic,
     m_reacts_to_acid: empty.m_reacts_to_acid,
@@ -277,7 +316,9 @@ export function specimenToFormValues(s: SpecimenView): SpecimenFormValues {
     v.m_mohs_hardness = td.mohs_hardness == null ? '' : String(td.mohs_hardness);
     v.m_color = td.color ?? '';
     v.m_luster = td.luster ?? '';
-    v.m_fluorescence = td.fluorescence ?? '';
+    v.m_fluorescence_sw = sanitizeFluorescence(td.fluorescence_sw);
+    v.m_fluorescence_mw = sanitizeFluorescence(td.fluorescence_mw);
+    v.m_fluorescence_lw = sanitizeFluorescence(td.fluorescence_lw);
     v.m_radioactive = Boolean(td.radioactive);
     v.m_magnetic = Boolean(td.magnetic);
     v.m_reacts_to_acid = Boolean(td.reacts_to_acid);
@@ -486,7 +527,9 @@ function buildTypeData(
     if (hardness !== null) out.mohs_hardness = hardness;
     if (v.m_color.trim()) out.color = v.m_color.trim();
     if (v.m_luster.trim()) out.luster = v.m_luster.trim();
-    if (v.m_fluorescence.trim()) out.fluorescence = v.m_fluorescence.trim();
+    if (v.m_fluorescence_sw.length > 0) out.fluorescence_sw = [...v.m_fluorescence_sw];
+    if (v.m_fluorescence_mw.length > 0) out.fluorescence_mw = [...v.m_fluorescence_mw];
+    if (v.m_fluorescence_lw.length > 0) out.fluorescence_lw = [...v.m_fluorescence_lw];
     if (v.m_radioactive) out.radioactive = true;
     if (v.m_magnetic) out.magnetic = true;
     if (v.m_reacts_to_acid) out.reacts_to_acid = true;
@@ -565,7 +608,9 @@ function typeDataEqual(
       (aa.mohs_hardness ?? null) === (bb.mohs_hardness ?? null) &&
       (aa.color ?? '') === (bb.color ?? '') &&
       (aa.luster ?? '') === (bb.luster ?? '') &&
-      (aa.fluorescence ?? '') === (bb.fluorescence ?? '') &&
+      arraysEqual(aa.fluorescence_sw ?? [], bb.fluorescence_sw ?? []) &&
+      arraysEqual(aa.fluorescence_mw ?? [], bb.fluorescence_mw ?? []) &&
+      arraysEqual(aa.fluorescence_lw ?? [], bb.fluorescence_lw ?? []) &&
       Boolean(aa.radioactive) === Boolean(bb.radioactive) &&
       Boolean(aa.magnetic) === Boolean(bb.magnetic) &&
       Boolean(aa.reacts_to_acid) === Boolean(bb.reacts_to_acid) &&
@@ -606,6 +651,18 @@ function typeDataEqual(
     Boolean(aa.prepared) === Boolean(bb.prepared) &&
     (aa.prep_notes ?? '') === (bb.prep_notes ?? '')
   );
+}
+
+// sanitizeFluorescence drops anything outside the closed enum so the
+// edit form doesn't trip its own validator on legacy/foreign data
+// (mi-qas). Returns a fresh array to break aliasing with the API view.
+function sanitizeFluorescence(raw: readonly string[] | null | undefined): FluorescenceColor[] {
+  if (!raw) return [];
+  const out: FluorescenceColor[] = [];
+  for (const c of raw) {
+    if (fluorescenceColorSet.has(c)) out.push(c as FluorescenceColor);
+  }
+  return out;
 }
 
 function arraysEqual<T>(a: readonly T[] | null, b: readonly T[] | null): boolean {
