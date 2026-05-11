@@ -159,3 +159,54 @@ func TestRender_EmptyInput(t *testing.T) {
 		t.Errorf("expected empty output, got %q", got)
 	}
 }
+
+// FuzzRender drives arbitrary input through the §17 render+sanitize
+// pipeline. The primary goal is panic / infinite-loop discovery on
+// untrusted input; the secondary goal is a defensive check that no
+// dangerous element ever appears in the output as a literal tag.
+//
+// Tag-shape tokens (e.g. "<script") cannot appear from typed text —
+// goldmark escapes user `<` to `&lt;`, and bluemonday drops the
+// elements outright — so a hit on these substrings is always a real
+// finding. Scheme tokens like "javascript:" can appear inside text /
+// code spans (a user is free to type the word) and so are not
+// asserted here; the unit tests cover their attribute-stripping.
+func FuzzRender(f *testing.F) {
+	seeds := []string{
+		"",
+		"# Heading\n\nA **bold** *italic* word with `code` and ~~strike~~.\n\n" +
+			"- item 1\n- item 2\n\n> quote\n\n---\n",
+		"Hello <script>alert(1)</script> world",
+		`<img src="x" onerror="alert(1)"> <iframe src="//evil"></iframe> ` +
+			`<style>body{display:none}</style>`,
+		"[click](javascript:alert(1))",
+		"[d](data:text/html;base64,PHNjcmlwdD4=)",
+		"[f](file:///etc/passwd)",
+		"[ext](https://example.com)",
+		"[mail](mailto:a@b.example)",
+		`<p style="color:red">red</p>`,
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	r := markdown.NewRenderer()
+	bannedTags := []string{
+		"<script", "<iframe", "<style", "<object",
+		"<embed", "<form", "<frame", "<svg", "<math",
+	}
+
+	f.Fuzz(func(t *testing.T, in string) {
+		out, err := r.RenderString(in)
+		if err != nil {
+			t.Fatalf("render returned error on input %q: %v", in, err)
+		}
+		lower := strings.ToLower(out)
+		for _, banned := range bannedTags {
+			if strings.Contains(lower, banned) {
+				t.Errorf("output contains banned tag %q for input %q\noutput: %s",
+					banned, in, out)
+			}
+		}
+	})
+}
