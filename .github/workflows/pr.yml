@@ -83,6 +83,13 @@ jobs:
           version: v2.12.2
           args: --timeout=5m
 
+      # Mechanical enforcement of CONTRACT §16 license allowlist (mi-q7n).
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses@latest
+
+      - name: License check
+        run: make license-check
+
       - name: Install gotestsum
         run: go install gotest.tools/gotestsum@v1.13.0
 
