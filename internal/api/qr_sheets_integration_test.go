@@ -3,9 +3,12 @@
 package api_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -386,5 +389,115 @@ func TestIntegration_QRSheetAPI_GetIncludesThumbnailURL(t *testing.T) {
 	}
 	if got.Specimens[0].Name != "withphoto" {
 		t.Errorf("name = %q", got.Specimens[0].Name)
+	}
+}
+
+// pdfRequest issues a POST to the PDF endpoint and returns
+// (status, body, headers). The PDF endpoint is binary so we read the
+// raw response rather than reuse doJSON.
+func pdfRequest(t *testing.T, srv *httptest.Server) (int, []byte, http.Header) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/qr-sheet/pdf", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return resp.StatusCode, body, resp.Header
+}
+
+func TestIntegration_QRSheetPDF_NoSheet_Returns404(t *testing.T) {
+	srv, _ := qrSheetTestSrv(t)
+
+	status, body, _ := pdfRequest(t, srv)
+	if status != http.StatusNotFound {
+		t.Fatalf("status = %d want 404\nbody=%s", status, string(body))
+	}
+	var env envelopeBody
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Error.Code != "qr_sheet_not_found" {
+		t.Errorf("code = %q want qr_sheet_not_found", env.Error.Code)
+	}
+}
+
+func TestIntegration_QRSheetPDF_EmptySheet_Returns400(t *testing.T) {
+	srv, _ := qrSheetTestSrv(t)
+
+	doJSON(t, srv.Client(), http.MethodPost, srv.URL+"/api/v1/qr-sheet",
+		map[string]any{"template": "avery-5160"})
+
+	status, body, _ := pdfRequest(t, srv)
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d want 400\nbody=%s", status, string(body))
+	}
+	var env envelopeBody
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Error.Code != "qr_sheet_empty" {
+		t.Errorf("code = %q want qr_sheet_empty", env.Error.Code)
+	}
+}
+
+func TestIntegration_QRSheetPDF_RendersForAllTemplates(t *testing.T) {
+	templates := []string{
+		"avery-5160", "avery-5163", "avery-5164", "avery-22806", "avery-l7160",
+	}
+	for _, tmpl := range templates {
+		t.Run(tmpl, func(t *testing.T) {
+			srv, pool := qrSheetTestSrv(t)
+			doJSON(t, srv.Client(), http.MethodPost, srv.URL+"/api/v1/qr-sheet",
+				map[string]any{"template": tmpl})
+			id := seedAPISpecimen(t, pool, "p-"+tmpl)
+			doJSON(t, srv.Client(), http.MethodPost,
+				srv.URL+"/api/v1/qr-sheet/specimens",
+				map[string]any{"specimen_id": id.String()})
+
+			status, body, hdr := pdfRequest(t, srv)
+			if status != http.StatusOK {
+				t.Fatalf("status = %d\nbody=%s", status, string(body))
+			}
+			if ct := hdr.Get("Content-Type"); ct != "application/pdf" {
+				t.Errorf("Content-Type = %q want application/pdf", ct)
+			}
+			if cd := hdr.Get("Content-Disposition"); !strings.Contains(cd, `filename="qr-sheet.pdf"`) {
+				t.Errorf("Content-Disposition = %q missing filename", cd)
+			}
+			if !bytes.HasPrefix(body, []byte("%PDF-")) {
+				t.Fatalf("response is not a PDF (first bytes: %q)", string(body[:min(8, len(body))]))
+			}
+		})
+	}
+}
+
+func TestIntegration_QRSheetPDF_AutoPaginates(t *testing.T) {
+	srv, pool := qrSheetTestSrv(t)
+	// avery-5164 has capacity 6/page. Seed 7 specimens → expect a
+	// 2-page PDF and (with our Encode pattern) two /Type /Page entries.
+	doJSON(t, srv.Client(), http.MethodPost, srv.URL+"/api/v1/qr-sheet",
+		map[string]any{"template": "avery-5164"})
+	for i := 0; i < 7; i++ {
+		id := seedAPISpecimen(t, pool, "p")
+		doJSON(t, srv.Client(), http.MethodPost,
+			srv.URL+"/api/v1/qr-sheet/specimens",
+			map[string]any{"specimen_id": id.String()})
+	}
+
+	status, body, _ := pdfRequest(t, srv)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d body=%s", status, string(body))
+	}
+	pages := bytes.Count(body, []byte("/Type /Page\n"))
+	if pages != 2 {
+		t.Errorf("page count = %d want 2 (7 specimens / 6 per sheet)", pages)
 	}
 }
