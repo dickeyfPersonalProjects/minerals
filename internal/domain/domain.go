@@ -6,6 +6,8 @@ package domain
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -236,6 +238,12 @@ type File struct {
 // MineralData is the typed shape stored in specimens.type_data when
 // type='mineral'. Optional fields use pointers so omitempty round-trips
 // cleanly.
+//
+// UV fluorescence (mi-qas) is stored as three per-wavelength color
+// lists. A nil slice means "not fluorescent under this wavelength"
+// (or unknown); a populated slice carries one or more validated
+// color strings from ValidFluorescenceColors. Multi-color specimens
+// (e.g. red-and-green calcite) hold multiple entries per wavelength.
 type MineralData struct {
 	ChemicalFormula *string  `json:"chemical_formula,omitempty"`
 	MineralSpecies  []string `json:"mineral_species,omitempty"`
@@ -243,7 +251,9 @@ type MineralData struct {
 	MohsHardness    *float64 `json:"mohs_hardness,omitempty"`
 	Color           *string  `json:"color,omitempty"`
 	Luster          *string  `json:"luster,omitempty"`
-	Fluorescence    *string  `json:"fluorescence,omitempty"`
+	FluorescenceSW  []string `json:"fluorescence_sw,omitempty"`
+	FluorescenceMW  []string `json:"fluorescence_mw,omitempty"`
+	FluorescenceLW  []string `json:"fluorescence_lw,omitempty"`
 	Radioactive     *bool    `json:"radioactive,omitempty"`
 	Magnetic        *bool    `json:"magnetic,omitempty"`
 	ReactsToAcid    *bool    `json:"reacts_to_acid,omitempty"`
@@ -295,6 +305,44 @@ var validFallOrFind = map[string]struct{}{
 	"fall": {}, "find": {},
 }
 
+// ValidFluorescenceColors is the closed vocabulary of UV fluorescence
+// colors accepted on MineralData.FluorescenceSW/MW/LW (mi-qas). The
+// list is drawn from the Henkel Glossary of Fluorescent Minerals and
+// the Fluorescent Mineral Society vocabulary — only colors that
+// genuinely occur in mineral UV fluorescence are included. "Black"
+// and "Brown" are intentionally excluded (non-fluorescent shows as
+// null, not "Black"); generic display-color names like "Cyan", "Teal",
+// "Magenta" are excluded in favor of the mineralogical vocabulary
+// (e.g. "Blue-green").
+var ValidFluorescenceColors = map[string]struct{}{
+	"Red":             {},
+	"Orange":          {},
+	"Yellow":          {},
+	"Green":           {},
+	"Blue":            {},
+	"Violet":          {},
+	"Pink":            {},
+	"White":           {},
+	"Cream":           {},
+	"Blue-green":      {},
+	"Blue-violet":     {},
+	"Red-orange":      {},
+	"Orange-yellow":   {},
+	"Greenish-yellow": {},
+	"Cherry red":      {},
+}
+
+// fluorescenceColorList returns ValidFluorescenceColors as a
+// deterministic comma-joined string for use in error messages.
+func fluorescenceColorList() string {
+	out := make([]string, 0, len(ValidFluorescenceColors))
+	for c := range ValidFluorescenceColors {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return strings.Join(out, ", ")
+}
+
 // Validate checks MineralData invariants beyond JSON-schema shape.
 // Empty pointers (the v1 default) are always valid — the struct is a
 // sparse bag of optional fields.
@@ -302,6 +350,21 @@ func (m MineralData) Validate() error {
 	if m.MohsHardness != nil {
 		if *m.MohsHardness < 0 || *m.MohsHardness > 10 {
 			return fmt.Errorf("%w: mohs_hardness must be in [0,10]", ErrSpecimenTypeDataInvalid)
+		}
+	}
+	for _, group := range []struct {
+		field  string
+		colors []string
+	}{
+		{"fluorescence_sw", m.FluorescenceSW},
+		{"fluorescence_mw", m.FluorescenceMW},
+		{"fluorescence_lw", m.FluorescenceLW},
+	} {
+		for _, c := range group.colors {
+			if _, ok := ValidFluorescenceColors[c]; !ok {
+				return fmt.Errorf("%w: %s color %q is not a recognized UV fluorescence color; valid: %s",
+					ErrSpecimenTypeDataInvalid, group.field, c, fluorescenceColorList())
+			}
 		}
 	}
 	return nil

@@ -124,6 +124,44 @@ func TestMineralData_MarshalBooleans(t *testing.T) {
 	})
 }
 
+func TestMineralData_Validate_FluorescenceColors(t *testing.T) {
+	// Empty per-wavelength slices remain valid (the v1 sparse default).
+	if err := (MineralData{}).Validate(); err != nil {
+		t.Errorf("empty fluorescence: %v", err)
+	}
+
+	// A representative valid color in each wavelength bucket.
+	good := MineralData{
+		FluorescenceSW: []string{"Red"},
+		FluorescenceMW: []string{"Blue-green", "White"},
+		FluorescenceLW: []string{"Cherry red"},
+	}
+	if err := good.Validate(); err != nil {
+		t.Errorf("good fluorescence: %v", err)
+	}
+
+	// Every enum entry must round-trip through Validate.
+	for color := range ValidFluorescenceColors {
+		m := MineralData{FluorescenceSW: []string{color}}
+		if err := m.Validate(); err != nil {
+			t.Errorf("valid color %q rejected: %v", color, err)
+		}
+	}
+
+	// An unknown color in any wavelength must trip ErrSpecimenTypeDataInvalid.
+	for _, m := range []MineralData{
+		{FluorescenceSW: []string{"Mauve"}},
+		{FluorescenceMW: []string{"Cyan"}},       // generic display name, excluded
+		{FluorescenceLW: []string{"Brown"}},      // excluded (not documented)
+		{FluorescenceSW: []string{"Red", "BAD"}}, // mix valid + invalid
+	} {
+		err := m.Validate()
+		if !errors.Is(err, ErrSpecimenTypeDataInvalid) {
+			t.Errorf("invalid fluorescence color in %+v: got %v, want ErrSpecimenTypeDataInvalid", m, err)
+		}
+	}
+}
+
 func TestRockData_Validate(t *testing.T) {
 	if err := (RockData{}).Validate(); err != nil {
 		t.Errorf("empty RockData.Validate(): %v", err)
