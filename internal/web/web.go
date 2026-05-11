@@ -43,6 +43,10 @@ func Handler() http.Handler {
 			http.Error(w, "web assets unavailable", http.StatusInternalServerError)
 		})
 	}
+	return handlerFor(sub)
+}
+
+func handlerFor(sub fs.FS) http.Handler {
 	files := http.FS(sub)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -66,8 +70,12 @@ func Handler() http.Handler {
 				return
 			}
 			_ = idx.Close()
+			// Rewrite to "/" so http.FileServer serves index.html
+			// directly. Using "/index.html" triggers FileServer's
+			// canonical-path redirect (301 to "/"), which breaks
+			// deep-link refreshes.
 			r2 := r.Clone(r.Context())
-			r2.URL.Path = "/index.html"
+			r2.URL.Path = "/"
 			http.FileServer(files).ServeHTTP(w, r2)
 			return
 		}
