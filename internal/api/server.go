@@ -139,6 +139,7 @@ func New(deps Deps) http.Handler {
 	registerJournalFileOperations(humaAPI, mux, deps.JournalFiles)
 	registerMineralSpeciesOperations(humaAPI, deps.MineralSpecies)
 	registerQRSheetOperations(humaAPI, deps.QRSheets)
+	registerSpecimenRedirect(mux)
 
 	// Protected /api/v1/* fallback. Real handlers land in feature
 	// beads; for now any unmatched /api/v1/ path falls through to a
