@@ -2,6 +2,8 @@ module github.com/dickeyfPersonalProjects/minerals
 
 go 1.25.0
 
+toolchain go1.25.10
+
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.17
@@ -9,10 +11,14 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.100.1
 	github.com/aws/smithy-go v1.25.1
 	github.com/danielgtaylor/huma/v2 v2.37.3
+	github.com/dsoprea/go-exif/v3 v3.0.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
+	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/oklog/ulid/v2 v2.1.1
+	github.com/yuin/goldmark v1.8.2
+	golang.org/x/image v0.39.0
 )
 
 require (
@@ -30,7 +36,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.21 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.42.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
-	github.com/dsoprea/go-exif/v3 v3.0.1 // indirect
 	github.com/dsoprea/go-logging v0.0.0-20200710184922-b02d349568dd // indirect
 	github.com/dsoprea/go-utility/v2 v2.0.0-20221003172846-a3e1774ef349 // indirect
 	github.com/go-errors/errors v1.4.2 // indirect
@@ -41,10 +46,7 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/lib/pq v1.10.9 // indirect
-	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
-	github.com/yuin/goldmark v1.8.2 // indirect
-	golang.org/x/image v0.39.0 // indirect
-	golang.org/x/net v0.50.0 // indirect
+	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

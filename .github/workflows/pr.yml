@@ -99,6 +99,14 @@ jobs:
         # actions/setup-go@v5 default).
         run: gotestsum --junitfile junit.xml -- -race -shuffle=on ./...
 
+      # SCA: known CVEs in direct + transitive Go deps, scoped to
+      # reachable callgraph (per mi-xql / Q-1 R3).
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: govulncheck
+        run: make vulncheck
+
       - name: Upload junit.xml
         if: always()
         uses: actions/upload-artifact@v4

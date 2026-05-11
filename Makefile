@@ -32,7 +32,7 @@ clean:
 	rm -rf bin/
 
 # --- mi-bi6: backend skeleton + migrate/lint targets ----------------
-.PHONY: lint fmt-check migrate-up migrate-down migrate-version migrate-create test-integration license-check
+.PHONY: lint fmt-check migrate-up migrate-down migrate-version migrate-create test-integration license-check vulncheck
 
 lint:
 	golangci-lint run
@@ -72,6 +72,13 @@ license-check:
 	go-licenses check ./... \
 		--allowed_licenses=$(LICENSE_ALLOWLIST) \
 		--ignore=$(LICENSE_IGNORE)
+
+# SCA against known CVEs in direct + transitive Go deps. Scoped to the
+# reachable callgraph, so it's lower-noise than naive SBOM scanners
+# (per mi-xql / Q-1 R3 / CONTRACT §16). Install separately:
+#   go install golang.org/x/vuln/cmd/govulncheck@latest
+vulncheck:
+	govulncheck ./...
 
 # ── Frontend (mi-p5h) ─────────────────────────────────────────────
 .PHONY: test-frontend test-cover-frontend
