@@ -1,0 +1,23 @@
+# Local-only git hooks (mi-cyb).
+#
+# Opt-in per clone via `make hooks-install`. Closes the worktree-skips-hooks
+# gap by enforcing `make fmt-check` before commit and `make lint && make test`
+# before push, without requiring developers to remember.
+#
+# CI runs the same gates independently — see .github/workflows/pr.yml — so
+# these hooks are a local convenience, not a load-bearing gate.
+#
+# Reference: docs/quality/backend-code-quality.md §3.12.
+
+pre-commit:
+  parallel: true
+  commands:
+    fmt-check:
+      run: make fmt-check
+
+pre-push:
+  commands:
+    lint:
+      run: make lint
+    test:
+      run: make test

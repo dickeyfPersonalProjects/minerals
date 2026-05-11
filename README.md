@@ -49,6 +49,19 @@ make compose-down       # stop everything (volumes preserved)
 make compose-down-v     # stop + wipe volumes (fresh DB / MinIO next run)
 ```
 
+### Local git hooks (optional)
+
+Enforce `make fmt-check` before commit and `make lint && make test`
+before push, so the same gates CI runs catch problems on your machine
+first. Opt-in per clone:
+
+```bash
+make hooks-install
+```
+
+This installs [lefthook](https://github.com/evilmartians/lefthook)
+into `$GOPATH/bin` if missing and wires up the hooks in `lefthook.yml`.
+
 ## Where to go next
 
 - **`CONTRACT.md`** — operational rulebook: layout, dev workflow, CI,
