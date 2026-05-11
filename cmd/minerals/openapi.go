@@ -189,7 +189,7 @@ func runOpenAPI(args []string) error {
 	}
 
 	// Silence the request log so stdout stays clean JSON.
-	slog.SetDefault(slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	slog.SetDefault(slog.New(slog.DiscardHandler))
 
 	handler := api.New(api.Deps{
 		Collectors: specStubCollectorRepo{},
