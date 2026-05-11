@@ -5,6 +5,7 @@ linters:
   default: standard
   enable:
     - bodyclose
+    - depguard
     - errorlint
     - gosec
     - noctx
@@ -20,6 +21,23 @@ linters:
         linters:
           - noctx
   settings:
+    depguard:
+      # Mechanically enforces the import-related rules in CONTRACT.md §17.
+      # Rules use lax mode so imports not in any deny list are allowed.
+      rules:
+        no-database-sql:
+          list-mode: lax
+          deny:
+            - pkg: database/sql
+              desc: "CONTRACT.md §17: use pgx, not database/sql"
+        auth-api-no-math-rand:
+          list-mode: lax
+          files:
+            - "**/internal/auth/**"
+            - "**/internal/api/**"
+          deny:
+            - pkg: math/rand
+              desc: "CONTRACT.md §17: use crypto/rand in auth/api code"
     sloglint:
       kv-only: true
       no-mixed-args: true
