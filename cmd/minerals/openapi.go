@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -178,6 +179,33 @@ func (specStubSpecimenCollectorRepo) ReplaceChain(context.Context, domain.Tx, uu
 	return nil
 }
 
+// specStubQRSheetRepo is a never-called stand-in so the
+// type-derived OpenAPI spec advertises the /api/v1/qr-sheet routes
+// during `make gen-api-client` codegen (mi-c78.1 / mi-c78.3).
+type specStubQRSheetRepo struct{}
+
+func (specStubQRSheetRepo) GetByUser(context.Context, uuid.UUID) (domain.QRSheet, error) {
+	return domain.QRSheet{}, domain.ErrQRSheetNotFound
+}
+func (specStubQRSheetRepo) Create(context.Context, domain.Tx, domain.QRSheet) error {
+	return domain.ErrQRSheetNotFound
+}
+func (specStubQRSheetRepo) UpdateTemplate(context.Context, domain.Tx, uuid.UUID, domain.QRSheetTemplate, time.Time) error {
+	return domain.ErrQRSheetNotFound
+}
+func (specStubQRSheetRepo) Delete(context.Context, domain.Tx, uuid.UUID) error {
+	return domain.ErrQRSheetNotFound
+}
+func (specStubQRSheetRepo) AddSpecimen(context.Context, domain.Tx, uuid.UUID, uuid.UUID, time.Time) error {
+	return domain.ErrQRSheetNotFound
+}
+func (specStubQRSheetRepo) RemoveSpecimen(context.Context, domain.Tx, uuid.UUID, uuid.UUID) error {
+	return domain.ErrQRSheetNotFound
+}
+func (specStubQRSheetRepo) ListSpecimens(context.Context, uuid.UUID) ([]domain.QRSheetEntry, error) {
+	return nil, nil
+}
+
 // runOpenAPI writes the type-derived OpenAPI spec served by the
 // running server at /api/v1/openapi.json to stdout. The frontend
 // codegen Makefile target consumes the output. Uses an in-process
@@ -210,6 +238,7 @@ func runOpenAPI(args []string) error {
 		MineralSpecies: &api.MineralSpeciesServiceDeps{
 			Repo: specStubMineralSpeciesRepo{},
 		},
+		QRSheets: specStubQRSheetRepo{},
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        specStubJournalRepo{},
 			Attachments:    specStubJournalAttachmentRepo{},

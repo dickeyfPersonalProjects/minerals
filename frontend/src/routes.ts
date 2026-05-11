@@ -11,11 +11,16 @@ import SpecimenDetail from './routes/SpecimenDetail.svelte';
 import SpecimenEdit from './routes/SpecimenEdit.svelte';
 import Collectors from './routes/Collectors.svelte';
 import CollectorEdit from './routes/CollectorEdit.svelte';
+import QRPreview from './routes/QRPreview.svelte';
 
 export const routes: RouteDefinition = {
   '/': Specimens,
   '/specimens': Specimens,
   '/specimens/new': SpecimenNew,
+  // Static routes must precede the `:id` capture (svelte-spa-router
+  // matches in declaration order; otherwise `/specimens/qr` resolves
+  // as a specimen id).
+  '/specimens/qr': QRPreview,
   '/specimens/:id': SpecimenDetail,
   '/specimens/:id/edit': SpecimenEdit,
   '/collectors': Collectors,
