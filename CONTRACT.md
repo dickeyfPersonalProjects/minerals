@@ -3393,6 +3393,18 @@ because the repo has no top-level LICENSE file; their
 ships without a recognizable LICENSE, prefer a documented
 override in the Makefile over widening `--ignore`.
 
+## Vulnerability scanning (SCA)
+
+Known CVEs in direct + transitive Go dependencies (and in the Go
+standard library) are scanned by `govulncheck`
+(`golang.org/x/vuln/cmd/govulncheck`, BSD-3-Clause). It walks the
+reachable callgraph, so its findings are scoped to code actually
+invoked — lower noise than naive SBOM scanners. CI runs
+`govulncheck ./...` after the unit-test step and fails on any
+finding (per mi-xql / Q-1 R3). The `vulncheck` Makefile target is
+the local equivalent; run it before bumping deps or the Go
+toolchain.
+
 ## Vendoring
 
 - v1 does NOT vendor dependencies. `go.mod` + `go.sum` + Go
