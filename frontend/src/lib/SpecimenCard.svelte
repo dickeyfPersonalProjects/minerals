@@ -162,7 +162,7 @@
         <img
           src={thumbUrl}
           alt={`Photo of ${specimen.name}`}
-          class="h-full w-full object-cover"
+          class="h-full w-full bg-black object-contain"
           loading="lazy"
           onerror={() => (thumbFailed = true)}
         />
