@@ -1,0 +1,139 @@
+# Minerals — Roadmap
+
+This is the source of truth for the project roadmap.
+
+**Rules:**
+- When a bead is filed for a roadmap item, link it here as `(mi-xxx)`.
+- When a polecat completes a bead, update the item: change `[ ]` → `[x]` and note the PR.
+- New roadmap items go through the mayor before being filed as beads.
+
+---
+
+## V1 — Core Cataloging
+
+*Scope: single-overseer, personal use, local network. No real auth, no public sharing.*
+
+### Specimen management
+- [x] Specimen CRUD — mineral, rock, meteorite types with `type_data` JSONB (#56)
+- [x] UUIDv7 primary keys across all tables
+- [x] Catalog number — nullable human-assigned field (schema only; auto-gen is v2)
+- [x] Locality — free-form text + optional structured JSONB (country, region, site, lat/lon, mindat_id)
+- [x] Collector/provenance tracking — normalized `collectors` + `specimen_collectors` join (#56)
+- [x] Mindat-backed mineral species lookup/autocomplete (#56)
+- [x] Editable markdown description per specimen
+- [ ] **Fossil specimen type** `(mi-6o8)`
+- [ ] **Photo-kind metadata** (visible / UV / other) `(mi-5b6)`
+
+### Photos
+- [x] Multiple photos per specimen with position ordering
+- [x] Go-proxied upload (browser → Go → MinIO) — S3 never exposed to client
+- [x] EXIF filtering allowlist (keeps photographic metadata, strips GPS/XMP/IPTC)
+- [x] Synchronous display (1600px) + thumbnail (400px) variant generation on upload
+- [x] Image crop editor — destructive, replaces original, irreversibility warning (#69)
+- [ ] **Image rotate controls** (+90°/−90° buttons + free-form slider) `(mi-uov)`
+
+### Observation journal
+- [x] Append-only journal entries per specimen (body markdown, editable post-creation)
+- [x] Journal entry file attachments
+
+### Search & navigation
+- [x] Full-text search via Postgres `tsvector`
+- [x] Cursor-based pagination on list endpoints
+
+### QR code & label printing
+- [ ] **QR preview page + single-specimen print** `(mi-c78.3)`
+- [ ] **QR sheet backend API** (sheet persistence, add/remove specimens) `(mi-c78.1)`
+- [ ] **QR sheet PDF generation** (server-side, all 5 Avery templates) `(mi-c78.2)`
+- [ ] **QR sheet builder UI** (specimen grid add/remove, navbar indicator, template switcher) `(mi-c78.4)`
+
+### Infrastructure & deployment
+- [x] Kubernetes deployment via Flux (k3s cluster)
+- [x] MinIO object storage (one bucket per environment)
+- [x] Postgres 16 with migrations
+- [x] Docker Compose for local development
+- [x] `/healthz` + `/readyz` endpoints
+- [x] OpenAPI 3 docs served at `/docs` (Redoc)
+
+### Auth (stub)
+- [x] Auth middleware slot — no-op stub populates single overseer user
+- [x] `author_id` on all writable rows from day one
+- [x] Routes pre-grouped into public vs protected buckets
+
+### Quality & CI
+- [x] `gofmt`, `go vet`, `golangci-lint` (standard set) in CI
+- [x] Unit tests + integration tests (with Postgres + MinIO services)
+- [x] `go test -race -shuffle=on` + `gotestsum` JUnit output (#60)
+- [x] `make test-cover` + coverage artifact upload (#60)
+- [x] Frontend: prettier, eslint, svelte-check, vitest in CI (#58)
+- [x] Frontend coverage reporting (#58)
+- [x] `govulncheck` CI step `(mi-xql)`
+- [x] `gosec`, `errorlint`, `bodyclose`, `noctx` linters `(mi-h01)`
+- [x] `go-licenses` gate for §16 allowlist (#68)
+- [x] `depguard` import constraint rules `(mi-3xm)`
+- [x] `goimports` + `sloglint` linters `(mi-4wm)`
+- [x] `gocritic`, `revive`, `misspell`, `prealloc` linters `(mi-aqa)`
+- [x] Fuzz harnesses for markdown sanitizer + EXIF parser `(mi-h8j)`
+- [x] a11y tests (vitest-axe) on largest forms `(mi-k9t)`
+- [x] Property-based tests for specimen schema marshalling (#80)
+- [ ] **`lefthook` pre-commit/pre-push hooks** `(mi-cyb)`
+- [ ] **Test coverage audit + gap analysis** `(mi-5si)` *(blocked: waiting on quality wave)*
+
+---
+
+## V2 — Multi-user + Public Sharing
+
+*Unlocks when v1 is stable and tested in real use.*
+
+### Auth
+- [ ] Real OIDC authentication via Keycloak operator (cluster already has it)
+- [ ] Replace stub middleware — handlers, context keys, route groupings stay identical
+- [ ] One-time migration: backfill stub `author_id` to real overseer UUID
+- [ ] Per-row authorization (visibility-based reads, ownership-based writes)
+- [ ] CSRF mitigation (decided alongside auth model)
+
+### Public sharing
+- [ ] Visibility UX — expose `private | unlisted | public` control in specimen UI (column already exists)
+- [ ] Public specimen pages (no auth required)
+- [ ] Direct-S3 / presigned-GET fast path for public file downloads
+
+### Catalog numbering
+- [ ] Auto-generation with customizable ID scheme (e.g. `FD-2026-0042`, user-defined template)
+
+### Photo metadata
+- [ ] Per-specimen / per-photo "preserve full EXIF" opt-in (GPS, XMP, MakerNotes for provenance)
+
+### Storage
+- [ ] MinIO bucket versioning
+- [ ] Orphan cleanup job (files in MinIO with no `files`-row reference)
+- [ ] Collector merging UI (combine near-duplicate collector entries)
+
+---
+
+## V3 — Advanced Features
+
+*Research and planning needed before scoping.*
+
+### Specimen types & data
+- [ ] Gamma spectrum capture, storage, and display
+- [ ] Advanced journal UX (research and design phase before filing)
+
+### Search
+- [ ] Faceted search / aggregation endpoints ("count by type", "count by collector")
+- [ ] Advanced query syntax (`field:value`, AND/OR/NOT)
+- [ ] Fuzzy / trigram matching for typos (`pg_trgm`)
+- [ ] Search across journal entries
+
+### Mobile
+- [ ] Mobile-optimized view / PWA
+
+---
+
+## Deferred / out of scope (recorded decisions)
+
+- **CodeQL** — license is GitHub's own terms (not OSI); deferred until license posture is resolved (§3.13)
+- **Custom QR label templates** — deferred until real use cases are understood
+- **Mutation testing** (`gremlins`, `go-mutesting`) — too noisy at this stage; revisit post-coverage audit
+- **Renovate / Dependabot** — §16 defers to manual updates in v1
+- **SBOM generation** — not needed until distribution requirements change
+- **Strict `type_data` DB constraints** — app-side validation via Go structs is sufficient for v1
+- **Type reclassification** — API rejects type changes in v1; delete + re-create is the policy
