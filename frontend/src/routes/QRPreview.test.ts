@@ -33,6 +33,7 @@ const printSpy = vi.fn();
 Object.defineProperty(window, 'print', { value: printSpy, writable: true });
 
 import QRPreview from './QRPreview.svelte';
+import { __resetQrSheetStore } from '../lib/qrSheet';
 
 const SPECIMEN_ID = '11111111-1111-1111-1111-111111111111';
 const SPECIMEN_ID_2 = '22222222-2222-2222-2222-222222222222';
@@ -80,6 +81,7 @@ beforeEach(() => {
   mockPatch.mockReset();
   mockToString.mockReset();
   printSpy.mockReset();
+  __resetQrSheetStore();
   // Default QR renderer returns a tiny stub SVG so {@html} has
   // something to insert. Tests that care about the encoded value
   // assert against `data-qr-value` on the wrapper, not the SVG body.
@@ -211,7 +213,7 @@ describe('QRPreview route — single mode', () => {
     expect(mockPost).toHaveBeenCalledTimes(1);
   });
 
-  it('"Add to sheet" creates a sheet first when one does not exist', async () => {
+  it('"Start a sheet" opens the template selector, then creates the sheet and adds the specimen', async () => {
     setHash(`#/specimens/qr?specimen=${SPECIMEN_ID}`);
     mockGet.mockImplementation(async (path: string) => {
       if (path === '/api/v1/specimens/{id}') {
@@ -226,20 +228,16 @@ describe('QRPreview route — single mode', () => {
       }
       return { data: undefined, error: undefined, response: new Response() };
     });
-    // Sequence: append→404, create→201, append→200.
+    // Sequence after user confirms a non-default template:
+    //   create → 201, append → 200.
     mockPost
       .mockResolvedValueOnce({
-        data: undefined,
-        error: { error: { code: 'not_found', message: 'no sheet' } },
-        response: new Response(null, { status: 404 }),
-      })
-      .mockResolvedValueOnce({
-        data: sheetView(),
+        data: sheetView({ template: 'avery-22806' }),
         error: undefined,
         response: new Response(null, { status: 201 }),
       })
       .mockResolvedValueOnce({
-        data: sheetView(),
+        data: sheetView({ template: 'avery-22806' }),
         error: undefined,
         response: new Response(),
       });
@@ -248,13 +246,26 @@ describe('QRPreview route — single mode', () => {
     const btn = await screen.findByTestId('qr-add-to-sheet');
     expect(btn).toHaveTextContent('Start a sheet with this specimen');
     await fireEvent.click(btn);
-    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(3));
-    expect(mockPost.mock.calls[0]?.[0]).toBe('/api/v1/qr-sheet/specimens');
-    expect(mockPost.mock.calls[1]?.[0]).toBe('/api/v1/qr-sheet');
-    expect(mockPost.mock.calls[1]?.[1]).toEqual(
-      expect.objectContaining({ body: { template: 'avery-5160' } }),
+    // Clicking opens the template picker — no POST yet.
+    await screen.findByTestId('template-selector');
+    expect(mockPost).not.toHaveBeenCalled();
+
+    // Pick a non-default template, confirm.
+    const options = screen.getAllByTestId('template-option');
+    const target = options.find((o) => o.getAttribute('data-template-id') === 'avery-22806');
+    expect(target).toBeDefined();
+    await fireEvent.click(target!);
+    await fireEvent.click(screen.getByTestId('template-selector-confirm'));
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(2));
+    expect(mockPost.mock.calls[0]?.[0]).toBe('/api/v1/qr-sheet');
+    expect(mockPost.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ body: { template: 'avery-22806' } }),
     );
-    expect(mockPost.mock.calls[2]?.[0]).toBe('/api/v1/qr-sheet/specimens');
+    expect(mockPost.mock.calls[1]?.[0]).toBe('/api/v1/qr-sheet/specimens');
+    expect(mockPost.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ body: { specimen_id: SPECIMEN_ID } }),
+    );
   });
 });
 
@@ -358,5 +369,150 @@ describe('QRPreview route — sheet mode', () => {
     render(QRPreview);
     await screen.findByTestId('qr-sheet-no-specimens');
     expect(screen.getByTestId('qr-sheet-summary')).toHaveTextContent('0 specimens');
+  });
+
+  it('renders the specimen sidebar with one row per specimen', async () => {
+    setHash('#/specimens/qr');
+    const specimens = [
+      {
+        specimen_id: SPECIMEN_ID,
+        name: 'Smoky quartz',
+        position: 1,
+        thumbnail_url: null,
+        added_at: '2026-05-10T00:00:00Z',
+      },
+      {
+        specimen_id: SPECIMEN_ID_2,
+        name: 'Pyrite cube',
+        position: 2,
+        thumbnail_url: null,
+        added_at: '2026-05-10T00:00:00Z',
+      },
+    ];
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/qr-sheet') {
+        return {
+          data: sheetView({ template: 'avery-5160', specimens, page_count: 1 }),
+          error: undefined,
+          response: new Response(),
+        };
+      }
+      return { data: undefined, error: undefined, response: new Response() };
+    });
+    render(QRPreview);
+    await screen.findByTestId('qr-sheet-specimen-list');
+    const rows = screen.getAllByTestId('qr-sheet-specimen-row');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.getAttribute('data-specimen-id')).toBe(SPECIMEN_ID);
+    expect(rows[0]).toHaveTextContent('Smoky quartz');
+    expect(rows[1]).toHaveTextContent('Pyrite cube');
+  });
+
+  it('"Change template" opens the selector and PATCHes the new template on confirm', async () => {
+    setHash('#/specimens/qr');
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/qr-sheet') {
+        return {
+          data: sheetView({ template: 'avery-5160', specimens: [], page_count: 0 }),
+          error: undefined,
+          response: new Response(),
+        };
+      }
+      return { data: undefined, error: undefined, response: new Response() };
+    });
+    mockPatch.mockResolvedValue({
+      data: sheetView({ template: 'avery-l7160', specimens: [], page_count: 0 }),
+      error: undefined,
+      response: new Response(),
+    });
+    render(QRPreview);
+    await fireEvent.click(await screen.findByTestId('qr-sheet-change-template'));
+    await screen.findByTestId('template-selector');
+
+    const target = screen
+      .getAllByTestId('template-option')
+      .find((o) => o.getAttribute('data-template-id') === 'avery-l7160')!;
+    await fireEvent.click(target);
+    await fireEvent.click(screen.getByTestId('template-selector-confirm'));
+
+    await waitFor(() =>
+      expect(mockPatch).toHaveBeenCalledWith('/api/v1/qr-sheet', {
+        body: { template: 'avery-l7160' },
+      }),
+    );
+    // The summary should re-render against the new template.
+    await waitFor(() =>
+      expect(screen.getByTestId('qr-sheet-summary')).toHaveTextContent('Avery L7160'),
+    );
+  });
+
+  it('"Clear sheet" requires confirmation, then DELETEs', async () => {
+    setHash('#/specimens/qr');
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/qr-sheet') {
+        return {
+          data: sheetView({
+            template: 'avery-5160',
+            specimens: [],
+            page_count: 0,
+          }),
+          error: undefined,
+          response: new Response(),
+        };
+      }
+      return { data: undefined, error: undefined, response: new Response() };
+    });
+    mockDelete.mockResolvedValue({
+      data: undefined,
+      error: undefined,
+      response: new Response(null, { status: 204 }),
+    });
+
+    render(QRPreview);
+    await fireEvent.click(await screen.findByTestId('qr-sheet-clear'));
+    // Confirmation modal appears first; no DELETE yet.
+    await screen.findByTestId('confirm-modal');
+    expect(mockDelete).not.toHaveBeenCalled();
+
+    await fireEvent.click(screen.getByTestId('confirm-modal-confirm'));
+    await waitFor(() =>
+      expect(mockDelete).toHaveBeenCalledWith('/api/v1/qr-sheet', expect.anything()),
+    );
+  });
+
+  it('removing a specimen from the sidebar list DELETEs against the API', async () => {
+    setHash('#/specimens/qr');
+    const specimens = [
+      {
+        specimen_id: SPECIMEN_ID,
+        name: 'Smoky quartz',
+        position: 1,
+        thumbnail_url: null,
+        added_at: '2026-05-10T00:00:00Z',
+      },
+    ];
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/qr-sheet') {
+        return {
+          data: sheetView({ template: 'avery-5160', specimens, page_count: 1 }),
+          error: undefined,
+          response: new Response(),
+        };
+      }
+      return { data: undefined, error: undefined, response: new Response() };
+    });
+    mockDelete.mockResolvedValue({
+      data: undefined,
+      error: undefined,
+      response: new Response(null, { status: 204 }),
+    });
+    render(QRPreview);
+    await screen.findByTestId('qr-sheet-specimen-list');
+    await fireEvent.click(screen.getByTestId('qr-sheet-specimen-remove'));
+    await waitFor(() =>
+      expect(mockDelete).toHaveBeenCalledWith('/api/v1/qr-sheet/specimens/{specimen_id}', {
+        params: { path: { specimen_id: SPECIMEN_ID } },
+      }),
+    );
   });
 });

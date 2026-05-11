@@ -1,12 +1,26 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import { onMount, type Snippet } from 'svelte';
   import { link } from 'svelte-spa-router';
   import ThemeToggle from './ThemeToggle.svelte';
+  import { qrSheetState, refreshQrSheet } from './qrSheet';
 
   interface Props {
     children?: Snippet;
   }
   const { children }: Props = $props();
+
+  // Conditional "QR Sticker Sheet" nav item — only present when
+  // the user has an active sheet. The store is the single source of
+  // truth so add/remove/delete mutations elsewhere in the app
+  // toggle the nav item without an extra fetch.
+  const sheetState = $derived($qrSheetState);
+  const showQrSheetLink = $derived(sheetState.status === 'loaded');
+
+  onMount(() => {
+    // Probe once on app load. The store ignores 404s and keeps the
+    // nav item hidden when no sheet exists.
+    void refreshQrSheet();
+  });
 </script>
 
 <div class="flex min-h-screen flex-col bg-[var(--color-bg)] text-[var(--color-text)]">
@@ -29,6 +43,16 @@
         >
           Specimens
         </a>
+        {#if showQrSheetLink}
+          <a
+            href="/specimens/qr"
+            use:link
+            data-testid="nav-qr-sheet"
+            class="text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+          >
+            QR Sticker Sheet
+          </a>
+        {/if}
         <a
           href="/collectors"
           use:link
