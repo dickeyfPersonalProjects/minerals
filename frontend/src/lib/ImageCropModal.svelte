@@ -23,11 +23,44 @@
   let dirty = $state(false);
   let busy = $state(false);
   let imageError = $state(false);
+  let rotation = $state(0);
 
   const imageUrl = $derived(`/api/v1/photos/${photoId}/display`);
 
   function markDirty() {
     if (!dirty) dirty = true;
+  }
+
+  // Wrap to (-180, 180], matching the slider's range. Both 180 and -180
+  // would display identically; canonicalize to 180 so the slider knob
+  // doesn't jump ends after a full revolution.
+  function normalizeAngle(deg: number): number {
+    let n = deg % 360;
+    if (n > 180) n -= 360;
+    else if (n <= -180) n += 360;
+    return n;
+  }
+
+  function rotateBy(delta: number) {
+    if (!cropper) return;
+    rotation = normalizeAngle(rotation + delta);
+    cropper.rotateTo(rotation);
+    markDirty();
+  }
+
+  function onSliderInput(e: Event) {
+    if (!cropper) return;
+    const val = Number((e.currentTarget as HTMLInputElement).value);
+    rotation = val;
+    cropper.rotateTo(val);
+    markDirty();
+  }
+
+  function resetRotation() {
+    if (!cropper) return;
+    rotation = 0;
+    cropper.rotateTo(0);
+    markDirty();
   }
 
   function handleImageLoad() {
@@ -208,6 +241,58 @@
           onerror={handleImageError}
         />
       {/if}
+    </div>
+
+    <div class="flex flex-wrap items-center gap-3" data-testid="crop-modal-rotate-controls">
+      <div class="flex items-center gap-1">
+        <button
+          type="button"
+          onclick={() => rotateBy(-90)}
+          disabled={busy || imageError}
+          aria-label="Rotate 90 degrees counter-clockwise"
+          data-testid="crop-modal-rotate-left"
+          class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <span aria-hidden="true">↺</span>
+        </button>
+        <button
+          type="button"
+          onclick={() => rotateBy(90)}
+          disabled={busy || imageError}
+          aria-label="Rotate 90 degrees clockwise"
+          data-testid="crop-modal-rotate-right"
+          class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <span aria-hidden="true">↻</span>
+        </button>
+      </div>
+
+      <label class="flex flex-1 items-center gap-2 text-sm text-[var(--color-text)]">
+        <span class="sr-only">Rotation angle</span>
+        <input
+          type="range"
+          min="-180"
+          max="180"
+          step="1"
+          value={rotation}
+          oninput={onSliderInput}
+          disabled={busy || imageError}
+          aria-label="Rotation angle in degrees"
+          data-testid="crop-modal-rotate-slider"
+          class="flex-1 disabled:cursor-not-allowed disabled:opacity-60"
+        />
+      </label>
+
+      <button
+        type="button"
+        onclick={resetRotation}
+        disabled={busy || imageError}
+        aria-label="Reset rotation to zero degrees"
+        data-testid="crop-modal-rotate-readout"
+        class="min-w-[3.5rem] rounded-md px-2 py-1 text-right font-mono text-sm tabular-nums text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {rotation}°
+      </button>
     </div>
 
     <div
