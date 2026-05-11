@@ -36,8 +36,11 @@ type Config struct {
 // §15. Required-in-prod variables are not defaulted when ENV=prod;
 // see Load.
 const (
-	defaultPort              = "8080"
-	defaultDatabaseURL       = "postgres://minerals:minerals@localhost:5432/minerals?sslmode=disable"
+	defaultPort = "8080"
+	// defaultDatabaseURL embeds the dev-only minerals/minerals credentials matching
+	// docker-compose.yml. Load() rejects this URL when ENV=prod, so the embedded
+	// password cannot be used in production.
+	defaultDatabaseURL       = "postgres://minerals:minerals@localhost:5432/minerals?sslmode=disable" //nolint:gosec // G101: dev default; prod rejected in Load()
 	defaultS3Endpoint        = "http://localhost:9000"
 	defaultS3AccessKeyID     = "minioadmin"
 	defaultS3SecretAccessKey = "minioadmin"

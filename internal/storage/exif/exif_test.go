@@ -42,7 +42,7 @@ func makeJPEGWithExif(t *testing.T, rawExif []byte) []byte {
 		t.Fatalf("exif segment too large for test")
 	}
 	var lenBytes [2]byte
-	binary.BigEndian.PutUint16(lenBytes[:], uint16(len(exifPayload)+2))
+	binary.BigEndian.PutUint16(lenBytes[:], uint16(len(exifPayload)+2)) //nolint:gosec // G115: bounded by the check above
 
 	out := bytes.Buffer{}
 	out.Write(jp[:insertAt])
@@ -280,7 +280,7 @@ func injectPNGChunk(t *testing.T, src []byte, chunkType string, payload []byte) 
 	insertAt := 8 + 25
 	chunk := bytes.Buffer{}
 	var lenBytes [4]byte
-	binary.BigEndian.PutUint32(lenBytes[:], uint32(len(payload)))
+	binary.BigEndian.PutUint32(lenBytes[:], uint32(len(payload))) //nolint:gosec // G115: test fixture payloads are small (<1KB)
 	chunk.Write(lenBytes[:])
 	chunk.WriteString(chunkType)
 	chunk.Write(payload)
@@ -323,19 +323,19 @@ func TestStripWebPMetadata_DropsExifChunk(t *testing.T) {
 	b.Write([]byte{0, 0, 0, 0}) // placeholder size
 	b.WriteString("WEBP")
 	b.WriteString("VP8L")
-	vp8lPayload := []byte{0x2F, 0x00, 0x00, 0x00, 0x00, 0x00} // minimal-looking
-	if err := binary.Write(&b, binary.LittleEndian, uint32(len(vp8lPayload))); err != nil {
+	vp8lPayload := []byte{0x2F, 0x00, 0x00, 0x00, 0x00, 0x00}                               // minimal-looking
+	if err := binary.Write(&b, binary.LittleEndian, uint32(len(vp8lPayload))); err != nil { //nolint:gosec // G115: 6-byte fixed fixture
 		t.Fatalf("write len: %v", err)
 	}
 	b.Write(vp8lPayload)
 	b.WriteString("EXIF")
 	exifPayload := []byte{0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00}
-	if err := binary.Write(&b, binary.LittleEndian, uint32(len(exifPayload))); err != nil {
+	if err := binary.Write(&b, binary.LittleEndian, uint32(len(exifPayload))); err != nil { //nolint:gosec // G115: 10-byte fixed fixture
 		t.Fatalf("write exif len: %v", err)
 	}
 	b.Write(exifPayload)
 	raw := b.Bytes()
-	binary.LittleEndian.PutUint32(raw[4:8], uint32(len(raw)-8))
+	binary.LittleEndian.PutUint32(raw[4:8], uint32(len(raw)-8)) //nolint:gosec // G115: test fixture <1KB
 
 	out, err := stripWebPMetadata(raw)
 	if err != nil {

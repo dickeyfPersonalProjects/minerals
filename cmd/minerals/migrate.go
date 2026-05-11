@@ -132,7 +132,7 @@ func migrateCreate(args []string) error {
 	}
 
 	dir := "migrations"
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("migrate create: ensure dir: %w", err)
 	}
 
@@ -145,14 +145,18 @@ func migrateCreate(args []string) error {
 	downPath := filepath.Join(dir, prefix+".down.sql")
 
 	for _, p := range []string{upPath, downPath} {
-		if _, err := os.Stat(p); err == nil {
+		// name is validated by isSnakeCase above (no '/', '.', etc.),
+		// so p is contained under dir — no traversal possible.
+		if _, err := os.Stat(p); err == nil { //nolint:gosec // G703: path components are snake_case-validated above
 			return fmt.Errorf("migrate create: %s already exists", p)
 		}
 	}
-	if err := os.WriteFile(upPath, []byte(""), 0o644); err != nil {
+	// upPath/downPath are filepath.Join(dir, snake_case_name + ext) — see isSnakeCase
+	// guard above. No traversal possible.
+	if err := os.WriteFile(upPath, []byte(""), 0o600); err != nil { //nolint:gosec // G703: path is snake_case-validated above
 		return fmt.Errorf("migrate create: write up: %w", err)
 	}
-	if err := os.WriteFile(downPath, []byte(""), 0o644); err != nil {
+	if err := os.WriteFile(downPath, []byte(""), 0o600); err != nil { //nolint:gosec // G703: path is snake_case-validated above
 		return fmt.Errorf("migrate create: write down: %w", err)
 	}
 	fmt.Println(upPath)

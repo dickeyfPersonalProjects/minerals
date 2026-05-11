@@ -4,10 +4,21 @@ run:
 linters:
   default: standard
   enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - noctx
     - sloglint
   exclusions:
     paths:
       - frontend
+    rules:
+      # noctx in tests adds no value — httptest requests don't traverse a real
+      # client and there's no cancellation to honor. The linter's intent is
+      # production HTTP code that should plumb context for timeouts/cancellation.
+      - path: _test\.go
+        linters:
+          - noctx
   settings:
     sloglint:
       kv-only: true

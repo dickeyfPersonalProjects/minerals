@@ -1329,11 +1329,18 @@ security are deferred to their own sections (§9, §11–14, §17).
   Makefile target `make fmt` is your friend.
 - **`go vet`** must pass clean. `make vet` runs it.
 - **`golangci-lint`** is the recommended additional linter. A
-  baseline `.golangci.yml` ships at the repo root with conservative
-  defaults (`govet`, `errcheck`, `staticcheck`, `gosimple`,
-  `ineffassign`, `unused`). Polecats MUST NOT silence linter
-  warnings with `//nolint:` comments without a real reason; if you
-  do, the comment MUST name the specific lint and explain why.
+  baseline `.golangci.yml` ships at the repo root with the
+  v2 `standard` preset (`govet`, `errcheck`, `staticcheck`,
+  `ineffassign`, `unused`) plus a curated expansion: `bodyclose`
+  (unclosed HTTP response bodies), `errorlint` (`errors.Is/As`
+  misuse, fmt verbs on wrapped errors), `gosec` (security
+  smells), `noctx` (HTTP requests without context), `sloglint`
+  (`slog` key/value discipline). `noctx` is excluded for
+  `_test.go` files — `httptest` requests don't traverse a real
+  client. Polecats MUST NOT silence linter warnings with
+  `//nolint:` comments without a real reason; if you do, the
+  comment MUST name the specific lint (e.g. `//nolint:gosec //
+  G115: bounded above`) and explain why.
 
 ### Package layout
 

@@ -222,7 +222,7 @@ func runOpenAPI(args []string) error {
 		},
 	})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.json", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/openapi.json", nil)
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
