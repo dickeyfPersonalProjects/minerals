@@ -369,11 +369,11 @@ func (s *PhotoService) upload(ctx context.Context, in *uploadPhotoInput) (*uploa
 			return err
 		}
 		// Default position to max+1 for the specimen.
-		max, err := s.deps.Photos.MaxPosition(ctx, tx, specimenID)
+		maxPos, err := s.deps.Photos.MaxPosition(ctx, tx, specimenID)
 		if err != nil {
 			return err
 		}
-		photo.Position = max + 1
+		photo.Position = maxPos + 1
 		return s.deps.Photos.Create(ctx, tx, photo)
 	})
 	if txErr != nil {
@@ -691,8 +691,7 @@ func extensionForContentType(ct string) string {
 // mapPhotoError translates photo repo sentinels into §10 envelope
 // errors. Other errors become opaque 500.
 func mapPhotoError(err error) error {
-	switch {
-	case errors.Is(err, domain.ErrPhotoNotFound):
+	if errors.Is(err, domain.ErrPhotoNotFound) {
 		return newAPIError(http.StatusNotFound, "photo_not_found",
 			"no such photo", nil)
 	}
@@ -701,8 +700,7 @@ func mapPhotoError(err error) error {
 }
 
 func mapFileError(err error) error {
-	switch {
-	case errors.Is(err, domain.ErrFileNotFound):
+	if errors.Is(err, domain.ErrFileNotFound) {
 		return newAPIError(http.StatusNotFound, "file_not_found",
 			"no such file", nil)
 	}

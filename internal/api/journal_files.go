@@ -266,7 +266,7 @@ func (s *JournalFileService) upload(ctx context.Context, in *uploadJournalFileIn
 	// MinIO write (per §12 step 6): only the original — no variants
 	// for journal attachments. On any failure mid-flight, undo
 	// successful writes before returning.
-	written := []string{}
+	written := make([]string, 0, 1)
 	cleanup := func() {
 		for _, k := range written {
 			if err := s.deps.Storage.Delete(ctx, k); err != nil {
@@ -307,11 +307,11 @@ func (s *JournalFileService) upload(ctx context.Context, in *uploadJournalFileIn
 		if err := s.deps.Files.Create(ctx, tx, file); err != nil {
 			return err
 		}
-		max, err := s.deps.Attachments.MaxPosition(ctx, tx, entryID)
+		maxPos, err := s.deps.Attachments.MaxPosition(ctx, tx, entryID)
 		if err != nil {
 			return err
 		}
-		attachment.Position = max + 1
+		attachment.Position = maxPos + 1
 		return s.deps.Attachments.Create(ctx, tx, attachment)
 	})
 	if txErr != nil {

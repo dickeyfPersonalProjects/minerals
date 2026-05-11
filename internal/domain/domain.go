@@ -17,6 +17,8 @@ import (
 // SpecimenType is the discriminator for a specimens row.
 type SpecimenType string
 
+// Allowed SpecimenType values, matching the CHECK constraint in the
+// specimens table.
 const (
 	SpecimenMineral   SpecimenType = "mineral"
 	SpecimenRock      SpecimenType = "rock"
@@ -27,6 +29,8 @@ const (
 // stub-user-can-read-everything path; public sharing lands later.
 type Visibility string
 
+// Allowed Visibility values, matching the CHECK constraint in the
+// specimens table.
 const (
 	VisibilityPrivate  Visibility = "private"
 	VisibilityUnlisted Visibility = "unlisted"

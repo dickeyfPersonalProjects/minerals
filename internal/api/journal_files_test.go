@@ -87,13 +87,13 @@ func (f *fakeJournalAttachmentRepo) Delete(_ context.Context, _ domain.Tx, fileI
 func (f *fakeJournalAttachmentRepo) MaxPosition(_ context.Context, _ domain.Tx, entryID uuid.UUID) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	max := 0
+	maxPos := 0
 	for _, j := range f.rows {
-		if j.EntryID == entryID && j.Position > max {
-			max = j.Position
+		if j.EntryID == entryID && j.Position > maxPos {
+			maxPos = j.Position
 		}
 	}
-	return max, nil
+	return maxPos, nil
 }
 
 func newJournalFileServer(t *testing.T) (

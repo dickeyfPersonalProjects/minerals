@@ -77,7 +77,7 @@ func highestMigration() (uint, error) {
 	if err != nil {
 		return 0, err
 	}
-	var max uint
+	var maxVer uint
 	for _, f := range files {
 		matched, _ := path.Match("*.up.sql", f)
 		if !matched {
@@ -91,11 +91,11 @@ func highestMigration() (uint, error) {
 		if err != nil {
 			continue
 		}
-		if uint(n) > max {
-			max = uint(n)
+		if uint(n) > maxVer {
+			maxVer = uint(n)
 		}
 	}
-	return max, nil
+	return maxVer, nil
 }
 
 // newMigrate builds a *migrate.Migrate over the embedded sources and

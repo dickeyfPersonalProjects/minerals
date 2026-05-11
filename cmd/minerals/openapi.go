@@ -198,7 +198,7 @@ func runOpenAPI(args []string) error {
 			Files:          specStubFileRepo{},
 			Storage:        specStubStorage{},
 			MaxUploadBytes: 100 * 1024 * 1024,
-			RunInTx: func(ctx context.Context, fn func(tx domain.Tx) error) error {
+			RunInTx: func(_ context.Context, fn func(tx domain.Tx) error) error {
 				return fn(nil)
 			},
 		},
@@ -216,7 +216,7 @@ func runOpenAPI(args []string) error {
 			Files:          specStubFileRepo{},
 			Storage:        specStubStorage{},
 			MaxUploadBytes: 100 * 1024 * 1024,
-			RunInTx: func(ctx context.Context, fn func(tx domain.Tx) error) error {
+			RunInTx: func(_ context.Context, fn func(tx domain.Tx) error) error {
 				return fn(nil)
 			},
 		},
