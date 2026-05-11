@@ -595,7 +595,7 @@
           <img
             src={`/api/v1/photos/${heroPhoto.id}/display`}
             alt={`Photo of ${specimen.name}`}
-            class="aspect-[16/9] w-full object-cover transition group-hover:opacity-95"
+            class="block h-auto w-full transition group-hover:opacity-95"
             loading="eager"
           />
         </button>
