@@ -1,57 +1,73 @@
 <script lang="ts">
-  // /specimens/qr — shared print-preview page (mi-c78.3).
+  // /specimens/qr — shared print-preview page (mi-c78.3 + mi-c78.4).
   //
   // Two modes selected by the hash querystring:
   //   ?specimen={id}  → single mode: one large centred QR for the
   //                     specimen, encoded as the specimen's page
   //                     URL.
   //   (no query)      → sheet mode: render the user's active QR
-  //                     sheet onto the chosen Avery template grid.
+  //                     sheet onto the chosen Avery template grid,
+  //                     plus the on-sheet specimen list, "Change
+  //                     template" switcher, and "Clear sheet"
+  //                     destructive action.
   //
   // The print area contains ONLY the QR(s); a `qr-screen-only`
-  // wrapper holds the controls (back link, print button, "Add to
-  // sheet"). `@media print` rules in the head hide everything else
-  // so the sticker grid lands cleanly on the Avery sheet.
-  //
-  // Sheet builder UI (template selector, per-card add/remove,
-  // navbar item) lands in mi-c78.4 — this bead intentionally only
-  // exposes a "Print" button + a minimal "Add to sheet" affordance
-  // off the single-mode preview.
+  // wrapper holds the controls. `@media print` rules in the head
+  // hide everything else so the sticker grid lands cleanly on the
+  // Avery sheet.
   import { onMount, untrack } from 'svelte';
-  import { link, router } from 'svelte-spa-router';
+  import { link, push, router } from 'svelte-spa-router';
   import { client } from '../lib/api';
-  import { SUPPRESS_TOAST_HEADERS } from '../lib/api/wrapper';
   import type { components } from '../lib/api/schema';
+  import ConfirmModal from '../lib/ConfirmModal.svelte';
   import QrCode from '../lib/QrCode.svelte';
+  import TemplateSelector from '../lib/TemplateSelector.svelte';
   import {
     qrTemplate,
     templateCapacity,
     templatePageCount,
     tryQrTemplate,
     type QRTemplate,
+    type QRTemplateID,
   } from '../lib/qrTemplates';
+  import {
+    addSpecimenToSheet,
+    createSheet,
+    deleteSheet,
+    patchSheetTemplate,
+    qrSheetState,
+    refreshQrSheet,
+    removeSpecimenFromSheet,
+    type QRSheetView,
+    type QRSheetSpecimenView,
+  } from '../lib/qrSheet';
   import { toastError, toastSuccess } from '../lib/toasts';
 
   type Specimen = components['schemas']['SpecimenView'];
-  type SheetView = components['schemas']['QRSheetView'];
-  type SheetSpecimen = components['schemas']['QRSheetSpecimenView'];
 
-  const FALLBACK_TEMPLATE = 'avery-5160';
+  const FALLBACK_TEMPLATE: QRTemplateID = 'avery-5160';
 
   type Mode =
     | { kind: 'idle' }
     | { kind: 'loading' }
     | { kind: 'single'; specimen: Specimen }
-    | { kind: 'sheet'; sheet: SheetView }
+    | { kind: 'sheet' }
     | { kind: 'sheet-empty' }
     | { kind: 'error'; message: string };
 
   let view: Mode = $state({ kind: 'idle' });
-  let adding = $state(false);
-  // Local copy of whether the current user has an active sheet —
-  // surfaces the Add-to-sheet affordance view without a second
-  // fetch on every render. `null` means "haven't checked yet".
-  let hasSheet: boolean | null = $state(null);
+  let busy = $state(false);
+  let showTemplatePicker = $state(false);
+  let templatePickerMode: 'create-then-add' | 'change' = $state('create-then-add');
+  let showClearConfirm = $state(false);
+  let clearing = $state(false);
+
+  // Live sheet view backed by the store — sheet-mode reads from
+  // here so add/remove/patch mutations in any component update
+  // immediately.
+  const sheet = $derived($qrSheetState);
+  const hasSheet = $derived(sheet.status === 'loaded');
+  const currentSheet = $derived<QRSheetView | null>(sheet.status === 'loaded' ? sheet.sheet : null);
 
   const specimenIdFromQuery = $derived.by(() =>
     new URLSearchParams(router.querystring ?? '').get('specimen'),
@@ -85,79 +101,120 @@
       return;
     }
     view = { kind: 'single', specimen: data };
-    // Probe sheet existence so the "Add to sheet" button can show
-    // its accurate view. Failures degrade silently — the button
-    // can still be used (the API will create-on-add via mi-c78.4).
-    void probeSheet();
-  }
-
-  async function probeSheet(): Promise<void> {
-    const { data, response } = await client.GET('/api/v1/qr-sheet', {
-      headers: SUPPRESS_TOAST_HEADERS,
-    });
-    if (response.status === 404) {
-      hasSheet = false;
-      return;
-    }
-    hasSheet = data ? true : null;
+    // Probe sheet existence so the "Add to sheet" button shows
+    // its accurate label. Errors are swallowed by the store; the
+    // button degrades to the "start a sheet" copy on failure.
+    void refreshQrSheet();
   }
 
   async function loadSheet(): Promise<void> {
     view = { kind: 'loading' };
-    const { data, error, response } = await client.GET('/api/v1/qr-sheet', {
-      headers: SUPPRESS_TOAST_HEADERS,
-    });
-    if (response.status === 404) {
-      hasSheet = false;
+    const next = await refreshQrSheet();
+    if (next.status === 'none') {
       view = { kind: 'sheet-empty' };
       return;
     }
-    if (error) {
-      view = { kind: 'error', message: errorMessage(error, response.status) };
+    if (next.status === 'loaded') {
+      view = { kind: 'sheet' };
       return;
     }
-    if (!data) {
-      view = { kind: 'sheet-empty' };
-      return;
-    }
-    hasSheet = true;
-    view = { kind: 'sheet', sheet: data };
+    view = { kind: 'error', message: 'Could not load the sheet' };
   }
 
-  async function addToSheet(specimenId: string): Promise<void> {
-    if (adding) return;
-    adding = true;
+  function openCreateAndAdd(): void {
+    templatePickerMode = 'create-then-add';
+    showTemplatePicker = true;
+  }
+
+  function openChangeTemplate(): void {
+    templatePickerMode = 'change';
+    showTemplatePicker = true;
+  }
+
+  async function addToExistingSheet(specimenId: string): Promise<void> {
+    const result = await addSpecimenToSheet(specimenId);
+    if (result) toastSuccess('Added to QR sheet');
+  }
+
+  async function onAddCurrentSpecimenClick(specimenId: string): Promise<void> {
+    if (busy) return;
+    busy = true;
     try {
-      // First attempt: append to an existing sheet. 404 means the
-      // user has no sheet yet — create one with the v1 default
-      // template (mi-c78.4 will replace this with a chooser).
-      let resp = await client.POST('/api/v1/qr-sheet/specimens', {
-        body: { specimen_id: specimenId },
-        headers: SUPPRESS_TOAST_HEADERS,
-      });
-      if (resp.error && resp.response.status === 404) {
-        const create = await client.POST('/api/v1/qr-sheet', {
-          body: { template: FALLBACK_TEMPLATE },
-          headers: SUPPRESS_TOAST_HEADERS,
-        });
-        if (create.error) {
-          toastError(errorMessage(create.error, create.response.status));
-          return;
-        }
-        resp = await client.POST('/api/v1/qr-sheet/specimens', {
-          body: { specimen_id: specimenId },
-          headers: SUPPRESS_TOAST_HEADERS,
-        });
+      if (hasSheet) {
+        await addToExistingSheet(specimenId);
+      } else {
+        openCreateAndAdd();
       }
-      if (resp.error) {
-        toastError(errorMessage(resp.error, resp.response.status));
-        return;
-      }
-      hasSheet = true;
-      toastSuccess('Added to QR sheet');
     } finally {
-      adding = false;
+      busy = false;
     }
+  }
+
+  async function handleTemplateConfirm(template: QRTemplateID): Promise<void> {
+    if (busy) return;
+    busy = true;
+    try {
+      if (templatePickerMode === 'change') {
+        const updated = await patchSheetTemplate(template);
+        if (updated) toastSuccess('Template updated');
+      } else {
+        // create-then-add path. The "current specimen" is whatever
+        // single-mode is showing right now — if the dialog was
+        // opened from sheet mode somehow there's nothing to add,
+        // so we just create the (empty) sheet.
+        const newSheet = await createSheet(template);
+        if (!newSheet) return;
+        if (view.kind === 'single') {
+          await addSpecimenToSheet(view.specimen.id);
+          toastSuccess('Added to QR sheet');
+        }
+      }
+    } finally {
+      busy = false;
+      showTemplatePicker = false;
+    }
+  }
+
+  function handleTemplateCancel(): void {
+    if (busy) return;
+    showTemplatePicker = false;
+  }
+
+  async function onRemoveFromSheet(specimenId: string): Promise<void> {
+    if (busy) return;
+    busy = true;
+    try {
+      await removeSpecimenFromSheet(specimenId);
+    } finally {
+      busy = false;
+    }
+  }
+
+  function openClearConfirm(): void {
+    showClearConfirm = true;
+  }
+
+  async function confirmClearSheet(): Promise<void> {
+    if (clearing) return;
+    clearing = true;
+    try {
+      const ok = await deleteSheet();
+      if (ok) {
+        toastSuccess('QR sheet cleared');
+        view = { kind: 'sheet-empty' };
+        showClearConfirm = false;
+        void push('/specimens');
+      } else {
+        toastError('Could not clear the sheet');
+      }
+    } finally {
+      clearing = false;
+    }
+  }
+
+  function cancelClearSheet(): void {
+    if (clearing) return;
+    showClearConfirm = false;
   }
 
   function doPrint(): void {
@@ -166,7 +223,7 @@
 
   onMount(() => {
     // The print stylesheet matches `body[data-qr-print="true"]`
-    // so we can hide the layout chrome only while this route is
+    // so we hide the layout chrome only while this route is
     // mounted — every other page keeps its default print
     // behaviour.
     document.body.setAttribute('data-qr-print', 'true');
@@ -192,13 +249,29 @@
     });
   });
 
-  function templateForSheet(s: SheetView): QRTemplate {
+  // When the store transitions away from 'loaded' while we're on
+  // the sheet view (e.g. another component clears the sheet), the
+  // page should fall back to the empty state instead of holding
+  // stale data.
+  $effect(() => {
+    const status = sheet.status;
+    untrack(() => {
+      if (specimenIdFromQuery) return;
+      if (status === 'none' && view.kind === 'sheet') {
+        view = { kind: 'sheet-empty' };
+      } else if (status === 'loaded' && view.kind === 'sheet-empty') {
+        view = { kind: 'sheet' };
+      }
+    });
+  });
+
+  function templateForSheet(s: QRSheetView): QRTemplate {
     return tryQrTemplate(s.template) ?? qrTemplate(FALLBACK_TEMPLATE);
   }
 
-  function paginate(specimens: SheetSpecimen[], capacity: number): SheetSpecimen[][] {
+  function paginate(specimens: QRSheetSpecimenView[], capacity: number): QRSheetSpecimenView[][] {
     if (specimens.length === 0) return [];
-    const pages: SheetSpecimen[][] = [];
+    const pages: QRSheetSpecimenView[][] = [];
     for (let i = 0; i < specimens.length; i += capacity) {
       pages.push(specimens.slice(i, i + capacity));
     }
@@ -303,8 +376,8 @@
         </button>
         <button
           type="button"
-          onclick={() => addToSheet(sp.id)}
-          disabled={adding}
+          onclick={() => onAddCurrentSpecimenClick(sp.id)}
+          disabled={busy}
           data-testid="qr-add-to-sheet"
           class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-50"
         >
@@ -334,7 +407,7 @@
     >
       <p class="text-sm font-medium text-[var(--color-text)]">No QR sheet yet.</p>
       <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-        Start one by adding a specimen from its QR preview.
+        Start one by adding a specimen from any specimen card or QR preview.
       </p>
       <a
         href="/specimens"
@@ -344,10 +417,10 @@
         ← back to specimens
       </a>
     </div>
-  {:else if view.kind === 'sheet'}
-    {@const sheet = view.sheet}
-    {@const tmpl = templateForSheet(sheet)}
-    {@const specimens = sheet.specimens ?? []}
+  {:else if view.kind === 'sheet' && currentSheet}
+    {@const sheetData = currentSheet}
+    {@const tmpl = templateForSheet(sheetData)}
+    {@const specimens = sheetData.specimens ?? []}
     {@const cap = templateCapacity(tmpl)}
     {@const pageCount = templatePageCount(tmpl, specimens.length)}
     {@const pages = paginate(specimens, cap)}
@@ -362,14 +435,33 @@
           {pageCount === 1 ? 'page' : 'pages'}
         </p>
       </div>
-      <button
-        type="button"
-        onclick={doPrint}
-        data-testid="qr-print-button"
-        class="rounded-md bg-[var(--color-accent)] px-4 py-1.5 text-sm font-medium text-[var(--color-accent-fg)] hover:opacity-90"
-      >
-        Print
-      </button>
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onclick={openChangeTemplate}
+          disabled={busy}
+          data-testid="qr-sheet-change-template"
+          class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-50"
+        >
+          Change template
+        </button>
+        <button
+          type="button"
+          onclick={openClearConfirm}
+          data-testid="qr-sheet-clear"
+          class="rounded-md border border-red-500/40 bg-[var(--color-surface)] px-3 py-1.5 text-sm text-red-600 hover:bg-red-500/10 dark:text-red-400"
+        >
+          Clear sheet
+        </button>
+        <button
+          type="button"
+          onclick={doPrint}
+          data-testid="qr-print-button"
+          class="rounded-md bg-[var(--color-accent)] px-4 py-1.5 text-sm font-medium text-[var(--color-accent-fg)] hover:opacity-90"
+        >
+          Print
+        </button>
+      </div>
     </div>
 
     {#if specimens.length === 0}
@@ -377,9 +469,50 @@
         class="qr-screen-only rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center text-sm text-[var(--color-text-muted)]"
         data-testid="qr-sheet-no-specimens"
       >
-        Sheet is empty. Add specimens from any specimen's QR preview.
+        Sheet is empty. Add specimens from any specimen's QR preview or card.
       </div>
     {:else}
+      <!-- Screen-only specimen sidebar: ordered list with remove
+           buttons. Hidden in print so only the sticker grid hits
+           paper. -->
+      <ol
+        class="qr-screen-only space-y-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3"
+        data-testid="qr-sheet-specimen-list"
+      >
+        {#each specimens as sp (sp.specimen_id)}
+          <li
+            class="flex items-center justify-between gap-2 rounded px-2 py-1 text-sm hover:bg-[var(--color-surface-2)]"
+            data-testid="qr-sheet-specimen-row"
+            data-specimen-id={sp.specimen_id}
+          >
+            <span class="flex min-w-0 items-center gap-2">
+              <span
+                class="inline-block w-6 shrink-0 text-right font-mono text-xs text-[var(--color-text-muted)]"
+              >
+                {sp.position}.
+              </span>
+              <a
+                href={`/specimens/${sp.specimen_id}`}
+                use:link
+                class="truncate text-[var(--color-text)] hover:text-[var(--color-accent)]"
+              >
+                {sp.name}
+              </a>
+            </span>
+            <button
+              type="button"
+              onclick={() => onRemoveFromSheet(sp.specimen_id)}
+              disabled={busy}
+              aria-label={`Remove ${sp.name} from sheet`}
+              data-testid="qr-sheet-specimen-remove"
+              class="rounded-full px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              ✕
+            </button>
+          </li>
+        {/each}
+      </ol>
+
       <!-- PRINT AREA: one DOM node per physical page. -->
       <div data-testid="qr-sheet-pages">
         {#each pages as pageSpecimens, pageIdx (pageIdx)}
@@ -428,3 +561,25 @@
     {/if}
   {/if}
 </section>
+
+{#if showTemplatePicker}
+  <TemplateSelector
+    title={templatePickerMode === 'change' ? 'Change label template' : 'Choose label template'}
+    initial={(currentSheet && tryQrTemplate(currentSheet.template)?.id) || FALLBACK_TEMPLATE}
+    confirmLabel={templatePickerMode === 'change' ? 'Update template' : 'Use this template'}
+    onConfirm={handleTemplateConfirm}
+    onCancel={handleTemplateCancel}
+    {busy}
+  />
+{/if}
+
+{#if showClearConfirm}
+  <ConfirmModal
+    title="Clear QR sheet?"
+    message="This removes every specimen from your sheet and deletes it. You can build a new sheet at any time."
+    confirmLabel="Clear sheet"
+    busy={clearing}
+    onConfirm={confirmClearSheet}
+    onCancel={cancelClearSheet}
+  />
+{/if}
