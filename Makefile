@@ -126,3 +126,14 @@ compose-down:
 
 compose-down-v:
 	docker compose down -v
+
+# ── Local git hooks (mi-cyb) ──────────────────────────────────────
+# Installs lefthook into $GOPATH/bin (or $GOBIN) if missing, then wires
+# up the hooks defined in lefthook.yml. Opt-in per clone — CI runs the
+# same gates independently, so skipping this only loses local
+# convenience. See docs/quality/backend-code-quality.md §3.12.
+.PHONY: hooks-install
+
+hooks-install:
+	@command -v lefthook >/dev/null 2>&1 || go install github.com/evilmartians/lefthook@latest
+	lefthook install
