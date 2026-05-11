@@ -80,9 +80,9 @@ This is the source of truth for the project roadmap.
 
 ---
 
-## V2 — Multi-user + Public Sharing
+## V2 — Multi-user
 
-*Unlocks when v1 is stable and tested in real use.*
+*Focused on real authentication and making the app multi-user ready. Unlocks when v1 is stable and tested in real use.*
 
 ### Auth
 - [ ] Real OIDC authentication via Keycloak operator (cluster already has it)
@@ -102,22 +102,46 @@ This is the source of truth for the project roadmap.
 ### Photo metadata
 - [ ] Per-specimen / per-photo "preserve full EXIF" opt-in (GPS, XMP, MakerNotes for provenance)
 
-### Storage
+### Storage infrastructure
 - [ ] MinIO bucket versioning
 - [ ] Orphan cleanup job (files in MinIO with no `files`-row reference)
 - [ ] Collector merging UI (combine near-duplicate collector entries)
 
 ---
 
-## V3 — Advanced Features
+## V3 — Next wave of capabilities
 
-*Research and planning needed before scoping.*
+*Research and planning needed on several items before scoping beads.*
 
-### Specimen types & data
+### Specimen data
 - [ ] Gamma spectrum capture, storage, and display
 - [ ] Advanced journal UX (research and design phase before filing)
 
-### Search
+### Storage locations
+User-defined physical storage locations, hierarchical (e.g. House → Basement → Furnace Room → Drawer 1). Each specimen can be tagged with a location.
+- [ ] Storage location entity with parent/child nesting (no cycles)
+- [ ] Storage location manager UI (create, rename, reorder, nest)
+- [ ] Specimen ↔ location assignment (tag specimen from specimen page or from location view)
+- [ ] Location browser — view all specimens at a given location (and descendants)
+
+### Locality map view
+- [ ] Map view for localities using the structured `locality` JSONB (lat/lon)
+- [ ] Quick-fill from known localities (searchable library of named collecting sites)
+
+### Sub-collections
+User can define multiple sub-collections as named subsets of their collection. Sub-collections can be nested (child of another sub-collection), forming a DAG — no loops.
+- [ ] Sub-collection entity (name, description, parent)
+- [ ] Sub-collection manager UI (create, nest, rename)
+- [ ] Specimen ↔ sub-collection assignment (a specimen can belong to multiple sub-collections)
+- [ ] Sub-collection view — filtered specimen grid for a given sub-collection
+
+### Field-collecting trips
+Separate from the collection. Tracks field trips the user has logged. Each trip can be associated with specimens collected during it.
+- [ ] Trip entity (name, date range, location, notes) — detail design deferred
+- [ ] Trip ↔ specimen association
+- [ ] Trip log view
+
+### Search & discovery
 - [ ] Faceted search / aggregation endpoints ("count by type", "count by collector")
 - [ ] Advanced query syntax (`field:value`, AND/OR/NOT)
 - [ ] Fuzzy / trigram matching for typos (`pg_trgm`)
@@ -125,6 +149,18 @@ This is the source of truth for the project roadmap.
 
 ### Mobile
 - [ ] Mobile-optimized view / PWA
+
+---
+
+## V4 — Import & migration
+
+*Unlocks migration from existing tools and spreadsheets.*
+
+### Import adapters
+- [ ] CSV / XLSX import with interactive column mapping UI (unlocks migration from Excel)
+- [ ] MineralDB import adapter
+- [ ] Mineral Desk Curator import adapter
+- [ ] Mindat catalog import adapter
 
 ---
 
