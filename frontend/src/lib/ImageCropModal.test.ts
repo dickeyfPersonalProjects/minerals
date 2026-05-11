@@ -278,7 +278,7 @@ describe('ImageCropModal', () => {
     await waitFor(() => {
       expect(mockPOST).toHaveBeenCalledTimes(1);
     });
-    const postCall = mockPOST.mock.calls[0];
+    const postCall = mockPOST.mock.calls[0]!;
     expect(postCall[0]).toBe('/api/v1/specimens/{id}/photos');
     const postOpts = postCall[1] as {
       params: { path: { id: string } };
@@ -297,7 +297,7 @@ describe('ImageCropModal', () => {
     await waitFor(() => {
       expect(mockPATCH).toHaveBeenCalledTimes(1);
     });
-    const patchOpts = mockPATCH.mock.calls[0][1] as {
+    const patchOpts = mockPATCH.mock.calls[0]![1] as {
       params: { path: { id: string } };
       body: { position: number; taken_at?: string };
     };
@@ -307,7 +307,7 @@ describe('ImageCropModal', () => {
     await waitFor(() => {
       expect(mockDELETE).toHaveBeenCalledTimes(1);
     });
-    const deleteOpts = mockDELETE.mock.calls[0][1] as { params: { path: { id: string } } };
+    const deleteOpts = mockDELETE.mock.calls[0]![1] as { params: { path: { id: string } } };
     expect(deleteOpts.params.path.id).toBe('p-1');
 
     await waitFor(() => {
@@ -342,7 +342,7 @@ describe('ImageCropModal', () => {
       expect(mockPATCH).toHaveBeenCalledTimes(1);
     });
     const patchBody = (
-      mockPATCH.mock.calls[0][1] as { body: { position: number; taken_at?: string } }
+      mockPATCH.mock.calls[0]![1] as { body: { position: number; taken_at?: string } }
     ).body;
     expect(patchBody.position).toBe(3);
     expect(patchBody.taken_at).toBe('2026-01-02T03:04:05Z');
