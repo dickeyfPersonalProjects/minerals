@@ -176,8 +176,8 @@
   });
 
   function openLightbox(idx: number) {
-    if (photos.length === 0) return;
-    lightboxIndex = Math.max(0, Math.min(idx, photos.length - 1));
+    if (visiblePhotos.length === 0) return;
+    lightboxIndex = Math.max(0, Math.min(idx, visiblePhotos.length - 1));
   }
 
   function closeLightbox() {
@@ -412,9 +412,57 @@
     fossil: 'bg-[var(--color-fossil)] text-[var(--color-accent-fg)]',
   };
 
-  const lightboxPhotos = $derived(
-    photos.map((p) => ({ id: p.id, alt: specimen ? `Photo of ${specimen.name}` : 'Photo' })),
+  // Photo-kind UI metadata (mi-5b6). Mirrors the backend enum;
+  // 'visible' badges are suppressed because that's the v1 default
+  // and would clutter the gallery.
+  type PhotoKind = NonNullable<Photo['kind']>;
+  const PHOTO_KIND_LABELS: Record<PhotoKind, string> = {
+    visible: 'Visible',
+    uv: 'UV',
+    other: 'Other',
+  };
+  // Filter chip state; 'all' shows the whole gallery, anything else
+  // narrows to a single kind. Resets when navigating to a new
+  // specimen via the load $effect.
+  let kindFilter: 'all' | PhotoKind = $state('all');
+
+  $effect(() => {
+    void params?.id;
+    kindFilter = 'all';
+  });
+
+  // Counts per kind drive the filter chip labels and visibility
+  // (we hide chips for kinds with zero photos to avoid noise).
+  const kindCounts = $derived.by(() => {
+    const counts: Record<PhotoKind, number> = { visible: 0, uv: 0, other: 0 };
+    for (const p of photos) {
+      const k: PhotoKind = (p.kind as PhotoKind) ?? 'visible';
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+    return counts;
+  });
+
+  // The gallery uses this filtered list everywhere — the lightbox
+  // navigates within the visible subset so prev/next stays
+  // consistent with what the user sees.
+  const visiblePhotos = $derived(
+    kindFilter === 'all' ? photos : photos.filter((p) => (p.kind ?? 'visible') === kindFilter),
   );
+
+  const lightboxPhotos = $derived(
+    visiblePhotos.map((p) => ({
+      id: p.id,
+      alt: specimen ? `Photo of ${specimen.name}` : 'Photo',
+      kind: (p.kind as PhotoKind | undefined) ?? 'visible',
+    })),
+  );
+
+  const kindFilterOptions = $derived<{ value: 'all' | PhotoKind; label: string; count: number }[]>([
+    { value: 'all', label: 'All', count: photos.length },
+    { value: 'visible', label: 'Visible', count: kindCounts.visible },
+    { value: 'uv', label: 'UV', count: kindCounts.uv },
+    { value: 'other', label: 'Other', count: kindCounts.other },
+  ]);
 </script>
 
 {#if loadState.kind === 'loading' || loadState.kind === 'idle'}
@@ -445,8 +493,8 @@
   {@const td = typeDataEntries(specimen)}
   {@const loc = localityEntries(specimen.locality)}
   {@const phys = physicalEntries(specimen)}
-  {@const heroPhoto = photos[0]}
-  {@const restPhotos = photos.slice(1)}
+  {@const heroPhoto = visiblePhotos[0]}
+  {@const restPhotos = visiblePhotos.slice(1)}
   {@const specimenId = specimen.id}
 
   <article class="space-y-8" data-testid="specimen-detail">
@@ -506,7 +554,36 @@
       </div>
     </header>
 
+    {#if photos.length > 0}
+      <div
+        class="flex flex-wrap items-center gap-2"
+        role="group"
+        aria-label="Filter photos by kind"
+        data-testid="photo-kind-filter"
+      >
+        {#each kindFilterOptions as opt (opt.value)}
+          {#if opt.value === 'all' || opt.count > 0}
+            {@const active = kindFilter === opt.value}
+            <button
+              type="button"
+              onclick={() => (kindFilter = opt.value)}
+              data-testid={`photo-kind-filter-${opt.value}`}
+              data-active={active}
+              aria-pressed={active}
+              class="rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition {active
+                ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-fg)]'
+                : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]'}"
+            >
+              {opt.label}
+              <span class="ml-1 font-mono text-[10px] opacity-70">{opt.count}</span>
+            </button>
+          {/if}
+        {/each}
+      </div>
+    {/if}
+
     {#if heroPhoto}
+      {@const heroKind: PhotoKind = (heroPhoto.kind as PhotoKind | undefined) ?? 'visible'}
       <div class="group relative">
         <button
           type="button"
@@ -522,6 +599,15 @@
             loading="eager"
           />
         </button>
+        {#if heroKind !== 'visible'}
+          <span
+            class="pointer-events-none absolute left-2 top-2 rounded-full bg-black/65 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white"
+            data-testid="hero-photo-kind-badge"
+            data-kind={heroKind}
+          >
+            {PHOTO_KIND_LABELS[heroKind]}
+          </span>
+        {/if}
         <button
           type="button"
           onclick={() => requestCropPhoto(heroPhoto.id)}
@@ -545,6 +631,7 @@
       {#if restPhotos.length > 0}
         <ul class="flex flex-wrap gap-3" data-testid="photo-gallery">
           {#each restPhotos as photo, i (photo.id)}
+            {@const thumbKind: PhotoKind = (photo.kind as PhotoKind | undefined) ?? 'visible'}
             <li class="contents">
               <div class="group relative">
                 <button
@@ -561,6 +648,15 @@
                     loading="lazy"
                   />
                 </button>
+                {#if thumbKind !== 'visible'}
+                  <span
+                    class="pointer-events-none absolute bottom-1 left-1 rounded bg-black/70 px-1 text-[9px] font-semibold uppercase leading-3 tracking-wide text-white"
+                    data-testid="gallery-thumb-kind-badge"
+                    data-kind={thumbKind}
+                  >
+                    {PHOTO_KIND_LABELS[thumbKind]}
+                  </span>
+                {/if}
                 <button
                   type="button"
                   onclick={() => requestDeletePhoto(photo.id)}
@@ -818,7 +914,7 @@
     </div>
   </article>
 
-  {#if lightboxIndex !== null && photos.length > 0}
+  {#if lightboxIndex !== null && visiblePhotos.length > 0}
     <Lightbox
       photos={lightboxPhotos}
       startIndex={lightboxIndex}

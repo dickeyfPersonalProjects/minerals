@@ -240,6 +240,13 @@ func makeJPEG(t *testing.T, w, h int) []byte {
 }
 
 func makeMultipartUpload(t *testing.T, fileBytes []byte, contentType string, takenAt string) (body *bytes.Buffer, formContentType string) {
+	return makeMultipartUploadWithKind(t, fileBytes, contentType, takenAt, "")
+}
+
+// makeMultipartUploadWithKind extends makeMultipartUpload with the
+// optional `kind` form field (mi-5b6). An empty kind omits the field
+// entirely so the server applies its default of 'visible'.
+func makeMultipartUploadWithKind(t *testing.T, fileBytes []byte, contentType, takenAt, kind string) (body *bytes.Buffer, formContentType string) {
 	t.Helper()
 	body = &bytes.Buffer{}
 	mw := multipart.NewWriter(body)
@@ -256,6 +263,11 @@ func makeMultipartUpload(t *testing.T, fileBytes []byte, contentType string, tak
 	}
 	if takenAt != "" {
 		if err := mw.WriteField("taken_at", takenAt); err != nil {
+			t.Fatalf("write field: %v", err)
+		}
+	}
+	if kind != "" {
+		if err := mw.WriteField("kind", kind); err != nil {
 			t.Fatalf("write field: %v", err)
 		}
 	}
@@ -323,6 +335,92 @@ func TestPhotoUpload_Roundtrip(t *testing.T) {
 	wantSHA := sha256.Sum256(store.objects[originalKey])
 	if fileRow.SHA256 != hex.EncodeToString(wantSHA[:]) {
 		t.Errorf("sha256 mismatch")
+	}
+}
+
+func TestPhotoUpload_KindDefaultsToVisible(t *testing.T) {
+	h, photos, _, _ := newPhotoServer(t)
+	specimenID := uuid.New()
+	photos.specimens[specimenID] = true
+
+	jp := makeJPEG(t, 100, 100)
+	body, ct := makeMultipartUpload(t, jp, "image/jpeg", "")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/specimens/"+specimenID.String()+"/photos", body)
+	req.Header.Set("Content-Type", ct)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var got PhotoView
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Kind != "visible" {
+		t.Errorf("kind = %q, want visible", got.Kind)
+	}
+	stored, err := photos.GetByID(context.Background(), got.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if stored.Kind != domain.PhotoKindVisible {
+		t.Errorf("stored kind = %q, want visible", stored.Kind)
+	}
+}
+
+func TestPhotoUpload_KindRoundtrip(t *testing.T) {
+	for _, kind := range []string{"visible", "uv", "other"} {
+		t.Run(kind, func(t *testing.T) {
+			h, photos, _, _ := newPhotoServer(t)
+			specimenID := uuid.New()
+			photos.specimens[specimenID] = true
+
+			jp := makeJPEG(t, 100, 100)
+			body, ct := makeMultipartUploadWithKind(t, jp, "image/jpeg", "", kind)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost,
+				"/api/v1/specimens/"+specimenID.String()+"/photos", body)
+			req.Header.Set("Content-Type", ct)
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+			}
+			var got PhotoView
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if got.Kind != kind {
+				t.Errorf("kind = %q, want %q", got.Kind, kind)
+			}
+		})
+	}
+}
+
+func TestPhotoUpload_RejectsInvalidKind(t *testing.T) {
+	h, photos, _, _ := newPhotoServer(t)
+	specimenID := uuid.New()
+	photos.specimens[specimenID] = true
+
+	jp := makeJPEG(t, 100, 100)
+	body, ct := makeMultipartUploadWithKind(t, jp, "image/jpeg", "", "infrared")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/v1/specimens/"+specimenID.String()+"/photos", body)
+	req.Header.Set("Content-Type", ct)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var env envelopeBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode env: %v", err)
+	}
+	if env.Error.Code != "invalid_kind" {
+		t.Errorf("code = %q, want invalid_kind", env.Error.Code)
 	}
 }
 
@@ -662,6 +760,79 @@ func TestPhotoPatch_UpdatesPositionAndTakenAt(t *testing.T) {
 	}
 	if updated.TakenAt == nil || !updated.TakenAt.Equal(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)) {
 		t.Errorf("taken_at = %v", updated.TakenAt)
+	}
+}
+
+func TestPhotoPatch_UpdatesKind(t *testing.T) {
+	h, photos, files, _ := newPhotoServer(t)
+	specimenID := uuid.New()
+	photos.specimens[specimenID] = true
+
+	now := time.Now().UTC().Truncate(time.Second)
+	fileID := uuid.New()
+	files.rows[fileID] = domain.File{ID: fileID, S3Key: "files/" + fileID.String(),
+		ContentType: "image/jpeg", ByteSize: 100, SHA256: strings.Repeat("a", 64),
+		UploadedAt: now}
+	photoID := uuid.New()
+	photos.rows[photoID] = domain.Photo{
+		ID: photoID, SpecimenID: specimenID, FileID: fileID,
+		Kind: domain.PhotoKindVisible, Position: 1, CreatedAt: now,
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/photos/"+photoID.String(),
+		strings.NewReader(`{"kind": "uv"}`))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch: %d body=%s", rec.Code, rec.Body.String())
+	}
+	var view PhotoView
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if view.Kind != "uv" {
+		t.Errorf("response kind = %q, want uv", view.Kind)
+	}
+	if got := photos.rows[photoID].Kind; got != domain.PhotoKindUV {
+		t.Errorf("stored kind = %q, want uv", got)
+	}
+}
+
+func TestPhotoPatch_RejectsInvalidKind(t *testing.T) {
+	h, photos, files, _ := newPhotoServer(t)
+	specimenID := uuid.New()
+	photos.specimens[specimenID] = true
+
+	now := time.Now().UTC().Truncate(time.Second)
+	fileID := uuid.New()
+	files.rows[fileID] = domain.File{ID: fileID, S3Key: "files/" + fileID.String(),
+		ContentType: "image/jpeg", ByteSize: 100, SHA256: strings.Repeat("a", 64),
+		UploadedAt: now}
+	photoID := uuid.New()
+	photos.rows[photoID] = domain.Photo{
+		ID: photoID, SpecimenID: specimenID, FileID: fileID,
+		Kind: domain.PhotoKindVisible, Position: 1, CreatedAt: now,
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/photos/"+photoID.String(),
+		strings.NewReader(`{"kind": "infrared"}`))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+
+	// Huma's `enum` tag on the request body rejects unknown values
+	// with 422 before the handler runs; the handler's own
+	// IsValid() guard is defence-in-depth and only fires if the
+	// schema tag is ever loosened.
+	if rec.Code != http.StatusUnprocessableEntity && rec.Code != http.StatusBadRequest {
+		t.Fatalf("patch: %d body=%s (want 422 or 400)", rec.Code, rec.Body.String())
+	}
+	if got := photos.rows[photoID].Kind; got != domain.PhotoKindVisible {
+		t.Errorf("stored kind mutated to %q on rejected patch", got)
 	}
 }
 

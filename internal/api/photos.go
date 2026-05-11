@@ -79,12 +79,20 @@ type PhotoView struct {
 	ContentType string     `json:"content_type" doc:"Content-Type stored on the original file."`
 	ByteSize    int64      `json:"byte_size" doc:"Byte size of the stored original (post EXIF filter)."`
 	SHA256      string     `json:"sha256" doc:"Hex SHA-256 of the stored original bytes."`
+	Kind        string     `json:"kind" enum:"visible,uv,other" doc:"Lighting condition the photo was taken under: visible, uv, or other."`
 	TakenAt     *time.Time `json:"taken_at" doc:"When the photo was taken; defaulted from EXIF DateTimeOriginal when not provided."`
 	Position    int        `json:"position" doc:"Manual ordering; 1-indexed within the specimen's photos."`
 	CreatedAt   time.Time  `json:"created_at" doc:"RFC 3339 creation timestamp."`
 }
 
 func toPhotoView(p domain.Photo, f domain.File) PhotoView {
+	kind := string(p.Kind)
+	if kind == "" {
+		// Fakes that don't round-trip through Postgres can omit the
+		// default; emit the v1 default explicitly so the wire shape
+		// is always populated.
+		kind = string(domain.PhotoKindVisible)
+	}
 	return PhotoView{
 		ID:          p.ID,
 		SpecimenID:  p.SpecimenID,
@@ -92,6 +100,7 @@ func toPhotoView(p domain.Photo, f domain.File) PhotoView {
 		ContentType: f.ContentType,
 		ByteSize:    f.ByteSize,
 		SHA256:      f.SHA256,
+		Kind:        kind,
 		TakenAt:     p.TakenAt,
 		Position:    p.Position,
 		CreatedAt:   p.CreatedAt,
@@ -204,6 +213,7 @@ func (s *PhotoService) maxBytesMiddleware(ctx huma.Context, next func(huma.Conte
 type uploadPhotoForm struct {
 	File    huma.FormFile `form:"file" required:"true" doc:"The image file to upload."`
 	TakenAt string        `form:"taken_at" required:"false" doc:"Optional ISO 8601 timestamp; defaults to EXIF DateTimeOriginal when present."`
+	Kind    string        `form:"kind" required:"false" doc:"Optional photo kind: visible, uv, or other. Defaults to visible."`
 }
 
 type uploadPhotoInput struct {
@@ -259,6 +269,20 @@ func (s *PhotoService) upload(ctx context.Context, in *uploadPhotoInput) (*uploa
 		}
 		return nil, newAPIError(http.StatusBadRequest, "bad_request",
 			"failed to read upload body", nil)
+	}
+
+	// Kind defaults to 'visible' (per CONTRACT.md §12 / mi-5b6) when
+	// the form field is absent or empty. An invalid value is a 400
+	// rather than a silent coerce so callers learn about typos.
+	kind := domain.PhotoKindVisible
+	if raw := strings.ToLower(strings.TrimSpace(form.Kind)); raw != "" {
+		k := domain.PhotoKind(raw)
+		if !k.IsValid() {
+			return nil, newAPIError(http.StatusBadRequest, "invalid_kind",
+				"kind must be one of visible, uv, other",
+				map[string]any{"field": "kind"})
+		}
+		kind = k
 	}
 
 	// Default taken_at: caller-supplied value wins; fall back to EXIF.
@@ -360,6 +384,7 @@ func (s *PhotoService) upload(ctx context.Context, in *uploadPhotoInput) (*uploa
 		ID:         domain.NewID(),
 		SpecimenID: specimenID,
 		FileID:     fileID,
+		Kind:       kind,
 		TakenAt:    takenAt,
 		CreatedAt:  now,
 	}
@@ -463,6 +488,7 @@ type patchPhotoInput struct {
 type patchPhotoBody struct {
 	TakenAt  *time.Time `json:"taken_at,omitempty" doc:"New taken_at; pass null to clear, omit to leave unchanged."`
 	Position *int       `json:"position,omitempty" doc:"New manual ordering position; omit to leave unchanged."`
+	Kind     *string    `json:"kind,omitempty" enum:"visible,uv,other" doc:"New photo kind; omit to leave unchanged."`
 }
 
 type patchPhotoOutput struct {
@@ -490,6 +516,15 @@ func (s *PhotoService) patch(ctx context.Context, in *patchPhotoInput) (*patchPh
 				map[string]any{"field": "position"})
 		}
 		current.Position = *in.Body.Position
+	}
+	if in.Body.Kind != nil {
+		k := domain.PhotoKind(strings.ToLower(strings.TrimSpace(*in.Body.Kind)))
+		if !k.IsValid() {
+			return nil, newAPIError(http.StatusBadRequest, "invalid_kind",
+				"kind must be one of visible, uv, other",
+				map[string]any{"field": "kind"})
+		}
+		current.Kind = k
 	}
 
 	if err := s.deps.Photos.Update(ctx, nil, current); err != nil {

@@ -150,11 +150,37 @@ type Specimen struct {
 	UpdatedAt     time.Time
 }
 
+// PhotoKind discriminates the lighting condition a photo was taken
+// under (mi-5b6). The vocabulary is closed: 'visible' (ordinary
+// daylight / studio), 'uv' (UV-A fluorescence), 'other' (anything
+// else — IR, polarised, etc.). Existing rows default to 'visible'.
+type PhotoKind string
+
+// Allowed PhotoKind values, matching the photo_kind enum in the
+// photos table (migration 0004).
+const (
+	PhotoKindVisible PhotoKind = "visible"
+	PhotoKindUV      PhotoKind = "uv"
+	PhotoKindOther   PhotoKind = "other"
+)
+
+// IsValid reports whether k is one of the photo_kind enum values.
+// The zero value ("") returns false; callers default to
+// PhotoKindVisible explicitly when no kind is supplied.
+func (k PhotoKind) IsValid() bool {
+	switch k {
+	case PhotoKindVisible, PhotoKindUV, PhotoKindOther:
+		return true
+	}
+	return false
+}
+
 // Photo mirrors design §2.
 type Photo struct {
 	ID         uuid.UUID
 	SpecimenID uuid.UUID
 	FileID     uuid.UUID
+	Kind       PhotoKind
 	TakenAt    *time.Time
 	Position   int
 	CreatedAt  time.Time

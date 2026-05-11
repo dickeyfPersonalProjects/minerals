@@ -139,6 +139,92 @@ func TestIntegration_PhotoCreate_FKViolationMapsToNotFound(t *testing.T) {
 	}
 }
 
+// TestIntegration_PhotoKindRoundtrip exercises the migration-0004
+// photo_kind enum: Create with each allowed value round-trips through
+// GetByID; Update changes the value; the empty zero-value falls back
+// to 'visible' (matches the column default and the Create defaulting).
+func TestIntegration_PhotoKindRoundtrip(t *testing.T) {
+	pool := scopedDB(t)
+	ctx := authedCtx()
+	now := time.Now().UTC()
+
+	specID := uuid.New()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO specimens (id, type, name, author_id, created_at, updated_at)
+		VALUES ($1, 'mineral', 'photo-kind-test', $2, $3, $3)`,
+		specID, uuid.MustParse("00000000-0000-0000-0000-000000000001"), now); err != nil {
+		t.Fatalf("seed specimen: %v", err)
+	}
+	files := db.NewFilePostgres(pool)
+	photos := db.NewPhotoPostgres(pool)
+
+	for _, kind := range []domain.PhotoKind{
+		domain.PhotoKindVisible,
+		domain.PhotoKindUV,
+		domain.PhotoKindOther,
+	} {
+		fid := domain.NewID()
+		if err := files.Create(ctx, nil, domain.File{
+			ID: fid, S3Key: "files/" + fid.String(),
+			ContentType: "image/jpeg", ByteSize: 1, SHA256: "k" + string(kind),
+			UploadedAt: now,
+		}); err != nil {
+			t.Fatalf("create file: %v", err)
+		}
+		pid := domain.NewID()
+		if err := photos.Create(ctx, nil, domain.Photo{
+			ID: pid, SpecimenID: specID, FileID: fid,
+			Kind: kind, Position: 1, CreatedAt: now,
+		}); err != nil {
+			t.Fatalf("create photo (%s): %v", kind, err)
+		}
+		got, err := photos.GetByID(ctx, pid)
+		if err != nil {
+			t.Fatalf("get (%s): %v", kind, err)
+		}
+		if got.Kind != kind {
+			t.Errorf("kind round-trip: got %q, want %q", got.Kind, kind)
+		}
+	}
+
+	// Zero-value Kind on Create defaults to 'visible'.
+	fid := domain.NewID()
+	if err := files.Create(ctx, nil, domain.File{
+		ID: fid, S3Key: "files/" + fid.String(),
+		ContentType: "image/jpeg", ByteSize: 1, SHA256: "default",
+		UploadedAt: now,
+	}); err != nil {
+		t.Fatalf("create file: %v", err)
+	}
+	pid := domain.NewID()
+	if err := photos.Create(ctx, nil, domain.Photo{
+		ID: pid, SpecimenID: specID, FileID: fid,
+		Position: 1, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("create photo (default): %v", err)
+	}
+	got, err := photos.GetByID(ctx, pid)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Kind != domain.PhotoKindVisible {
+		t.Errorf("default kind = %q, want visible", got.Kind)
+	}
+
+	// Update flips it to UV.
+	got.Kind = domain.PhotoKindUV
+	if err := photos.Update(ctx, nil, got); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	after, err := photos.GetByID(ctx, pid)
+	if err != nil {
+		t.Fatalf("re-get: %v", err)
+	}
+	if after.Kind != domain.PhotoKindUV {
+		t.Errorf("after update kind = %q, want uv", after.Kind)
+	}
+}
+
 func TestIntegration_PhotoMaxPosition(t *testing.T) {
 	pool := scopedDB(t)
 	ctx := authedCtx()

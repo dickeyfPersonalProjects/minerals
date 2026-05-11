@@ -56,7 +56,7 @@ function specimen(seed: SpecimenSeed = {}) {
   };
 }
 
-type PhotoSeed = { id: string; position?: number };
+type PhotoSeed = { id: string; position?: number; kind?: 'visible' | 'uv' | 'other' };
 
 function photo(seed: PhotoSeed) {
   return {
@@ -66,6 +66,7 @@ function photo(seed: PhotoSeed) {
     content_type: 'image/jpeg',
     byte_size: 1234,
     sha256: 'deadbeef',
+    kind: seed.kind ?? 'visible',
     position: seed.position ?? 1,
     taken_at: null,
     created_at: '2026-05-01T12:00:00Z',
@@ -330,6 +331,38 @@ describe('SpecimenDetail route', () => {
 
     await waitFor(() => expect(screen.getByTestId('journal-empty')).toBeInTheDocument());
     expect(screen.getByTestId('specimen-detail')).toBeInTheDocument();
+  });
+
+  it('renders kind badges on non-visible photos and filters the gallery', async () => {
+    setupFetch({
+      photos: [
+        photo({ id: 'pppppppp-0000-0000-0000-000000000001', position: 1, kind: 'visible' }),
+        photo({ id: 'pppppppp-0000-0000-0000-000000000002', position: 2, kind: 'uv' }),
+        photo({ id: 'pppppppp-0000-0000-0000-000000000003', position: 3, kind: 'other' }),
+      ],
+    });
+
+    render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+
+    // Hero (visible) suppresses its badge; gallery thumbs show
+    // badges only for non-default kinds.
+    await screen.findByTestId('hero-photo');
+    expect(screen.queryByTestId('hero-photo-kind-badge')).toBeNull();
+    const badges = screen.getAllByTestId('gallery-thumb-kind-badge');
+    expect(badges).toHaveLength(2);
+    expect(badges.map((b) => b.getAttribute('data-kind'))).toEqual(['uv', 'other']);
+
+    // Filter to UV only — gallery shrinks to the one UV photo
+    // (which becomes the hero), and other-kind thumbs disappear.
+    await fireEvent.click(screen.getByTestId('photo-kind-filter-uv'));
+    await waitFor(() => {
+      const thumbs = screen.queryAllByTestId('gallery-thumb');
+      expect(thumbs).toHaveLength(0);
+    });
+    // The new hero is the UV photo, and since it's no longer
+    // 'visible' the hero badge appears.
+    const heroBadge = screen.getByTestId('hero-photo-kind-badge');
+    expect(heroBadge).toHaveAttribute('data-kind', 'uv');
   });
 
   it('opens and closes the lightbox when the hero photo is clicked', async () => {
