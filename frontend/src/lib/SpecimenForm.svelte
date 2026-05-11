@@ -157,7 +157,7 @@
       Type <span class="text-red-500" aria-hidden="true">*</span>
     </legend>
     <div class="flex flex-wrap gap-3">
-      {#each ['mineral', 'rock', 'meteorite'] as t (t)}
+      {#each ['mineral', 'rock', 'meteorite', 'fossil'] as t (t)}
         <label class="flex items-center gap-2 text-sm text-[var(--color-text)]">
           <input
             type="radio"
@@ -730,7 +730,7 @@
         </div>
       </div>
     </fieldset>
-  {:else}
+  {:else if $data.type === 'meteorite'}
     <fieldset class="space-y-3" data-testid="meteorite-fields">
       <legend class="text-sm font-medium text-[var(--color-text)]">Classification</legend>
       <div class="grid gap-3 sm:grid-cols-2">
@@ -832,6 +832,136 @@
           />
         </div>
       </div>
+    </fieldset>
+  {:else}
+    <fieldset class="space-y-3" data-testid="fossil-fields">
+      <legend class="text-sm font-medium text-[var(--color-text)]">Paleontology</legend>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label for="specimen-f-taxon" class="mb-1 block text-xs text-[var(--color-text-muted)]">
+            Taxon
+          </label>
+          <input
+            id="specimen-f-taxon"
+            name="f_taxon"
+            type="text"
+            placeholder="e.g. Tyrannosaurus rex"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-f-taxonomic-group"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Taxonomic group
+          </label>
+          <input
+            id="specimen-f-taxonomic-group"
+            name="f_taxonomic_group"
+            type="text"
+            placeholder="e.g. Dinosauria"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-f-geologic-period"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Geologic period
+          </label>
+          <input
+            id="specimen-f-geologic-period"
+            name="f_geologic_period"
+            type="text"
+            placeholder="e.g. Cretaceous"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-f-formation"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Formation
+          </label>
+          <input
+            id="specimen-f-formation"
+            name="f_formation"
+            type="text"
+            placeholder="e.g. Hell Creek Formation"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div class="sm:col-span-2">
+          <label
+            for="specimen-f-locality"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Stratigraphic locality
+          </label>
+          <input
+            id="specimen-f-locality"
+            name="f_locality"
+            type="text"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-f-preservation-type"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Preservation type
+          </label>
+          <input
+            id="specimen-f-preservation-type"
+            name="f_preservation_type"
+            type="text"
+            placeholder="e.g. Permineralized"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div>
+          <label
+            for="specimen-f-completeness"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Completeness
+          </label>
+          <input
+            id="specimen-f-completeness"
+            name="f_completeness"
+            type="text"
+            placeholder="e.g. Complete, Partial, Fragment"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        </div>
+        <div class="sm:col-span-2">
+          <label
+            for="specimen-f-prep-notes"
+            class="mb-1 block text-xs text-[var(--color-text-muted)]"
+          >
+            Prep notes
+          </label>
+          <textarea
+            id="specimen-f-prep-notes"
+            name="f_prep_notes"
+            rows="3"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          ></textarea>
+        </div>
+      </div>
+      <label class="flex items-center gap-2 text-sm text-[var(--color-text)]">
+        <input
+          type="checkbox"
+          name="f_prepared"
+          checked={$data.f_prepared}
+          class="text-[var(--color-accent)]"
+        />
+        Prep work done
+      </label>
     </fieldset>
   {/if}
 

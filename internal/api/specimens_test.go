@@ -216,6 +216,85 @@ func TestSpecimensCreateRejectsInvalidTypeData(t *testing.T) {
 	}
 }
 
+func TestSpecimensCreateFossil(t *testing.T) {
+	repo := newFakeSpecimenRepo()
+	h := newServerWithSpecimens(t, repo)
+
+	body := map[string]any{
+		"type":        "fossil",
+		"name":        "T-rex tooth",
+		"description": "Cretaceous theropod",
+		"type_data": map[string]any{
+			"taxon":             "Tyrannosaurus rex",
+			"taxonomic_group":   "Dinosauria",
+			"geologic_period":   "Cretaceous",
+			"formation":         "Hell Creek Formation",
+			"preservation_type": "Permineralized",
+			"completeness":      "Complete",
+			"prepared":          true,
+			"prep_notes":        "Air-abrasion only",
+		},
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/specimens", jsonBody(t, body))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var created SpecimenView
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if created.Type != domain.SpecimenFossil {
+		t.Errorf("type = %q, want fossil", created.Type)
+	}
+	var td map[string]any
+	_ = json.Unmarshal(created.TypeData, &td)
+	if td["taxon"] != "Tyrannosaurus rex" {
+		t.Errorf("taxon = %v", td["taxon"])
+	}
+	if td["prepared"] != true {
+		t.Errorf("prepared = %v", td["prepared"])
+	}
+}
+
+func TestSpecimensFossilFilterByType(t *testing.T) {
+	repo := newFakeSpecimenRepo()
+	h := newServerWithSpecimens(t, repo)
+
+	// Seed: 1 fossil, 1 mineral. ?type=fossil must return only the fossil.
+	bodyFossil := map[string]any{
+		"type": "fossil", "name": "Ammonite",
+		"type_data": map[string]any{"taxon": "Ammonite sp."},
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/specimens", jsonBody(t, bodyFossil))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("seed fossil: %d body=%s", rec.Code, rec.Body.String())
+	}
+	_ = mustCreateMineral(t, h, "Galena", map[string]any{})
+
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/specimens?type=fossil", nil)
+	h.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", rec2.Code, rec2.Body.String())
+	}
+	var lst specimenListBody
+	if err := json.Unmarshal(rec2.Body.Bytes(), &lst); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(lst.Items) != 1 {
+		t.Fatalf("got %d items, want 1", len(lst.Items))
+	}
+	if lst.Items[0].Type != domain.SpecimenFossil {
+		t.Errorf("filtered type = %q", lst.Items[0].Type)
+	}
+}
+
 func TestSpecimensCreateRejectsTypeDataShapeMismatch(t *testing.T) {
 	repo := newFakeSpecimenRepo()
 	h := newServerWithSpecimens(t, repo)

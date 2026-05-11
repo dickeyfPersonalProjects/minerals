@@ -19,6 +19,7 @@
   --color-mineral: oklch(60% 0.13 220);
   --color-rock: oklch(55% 0.08 80);
   --color-meteorite: oklch(45% 0.05 30);
+  --color-fossil: oklch(50% 0.09 160);
 }
 
 .dark {
@@ -34,6 +35,7 @@
   --color-mineral: oklch(78% 0.14 220);
   --color-rock: oklch(75% 0.1 80);
   --color-meteorite: oklch(72% 0.08 30);
+  --color-fossil: oklch(72% 0.09 160);
 }
 
 @theme inline {
@@ -48,6 +50,7 @@
   --color-mineral: var(--color-mineral);
   --color-rock: var(--color-rock);
   --color-meteorite: var(--color-meteorite);
+  --color-fossil: var(--color-fossil);
   --font-sans:
     'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }

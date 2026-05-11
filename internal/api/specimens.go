@@ -9,10 +9,11 @@
 //
 // type_data polymorphism (per CONTRACT.md §11): the wire field
 // `type_data` is JSON; its shape is selected by the sibling `type`
-// field (mineral|rock|meteorite). The OpenAPI spec advertises this as
-// an `anyOf` of the three concrete schemas — see SpecimenTypeData's
-// Schema method for the rationale (oneOf was rejected because every
-// type_data field is optional in v1, so `{}` matches all three).
+// field (mineral|rock|meteorite|fossil). The OpenAPI spec advertises
+// this as an `anyOf` of the four concrete schemas — see
+// SpecimenTypeData's Schema method for the rationale (oneOf was
+// rejected because every type_data field is optional in v1, so `{}`
+// matches all four).
 // Discrimination at the parent level (the `type` enum) is documented
 // in the schema description rather than encoded as an OpenAPI
 // `discriminator` mapping, because the discriminator field lives one
@@ -55,8 +56,9 @@ func (t SpecimenTypeData) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON captures the raw bytes for later type-specific
-// dispatch. Validation against MineralData/RockData/MeteoriteData
-// happens in the service layer once the parent `type` is known.
+// dispatch. Validation against MineralData/RockData/MeteoriteData/
+// FossilData happens in the service layer once the parent `type` is
+// known.
 func (t *SpecimenTypeData) UnmarshalJSON(b []byte) error {
 	*t = make([]byte, len(b))
 	copy(*t, b)
@@ -64,28 +66,30 @@ func (t *SpecimenTypeData) UnmarshalJSON(b []byte) error {
 }
 
 // Schema renders the OpenAPI 3.1 schema for the `type_data` field as
-// an `anyOf` of the three concrete shapes. The discriminator (`type`)
+// an `anyOf` of the four concrete shapes. The discriminator (`type`)
 // lives one level up in the parent body, so OpenAPI's
 // `discriminator` keyword (which requires a property within each
 // member of the union) doesn't fit; `anyOf` is the closest semantic
 // match: type_data is valid against any of MineralData/RockData/
-// MeteoriteData, with the parent `type` field determining which one
-// the server enforces. (Alternative considered: `oneOf`, rejected
-// because the empty object `{}` is a valid value of all three —
-// every field is optional in v1 — which makes oneOf fail validation
-// on common requests.)
+// MeteoriteData/FossilData, with the parent `type` field determining
+// which one the server enforces. (Alternative considered: `oneOf`,
+// rejected because the empty object `{}` is a valid value of all
+// four — every field is optional in v1 — which makes oneOf fail
+// validation on common requests.)
 func (SpecimenTypeData) Schema(r huma.Registry) *huma.Schema {
 	return &huma.Schema{
 		AnyOf: []*huma.Schema{
 			r.Schema(reflect.TypeOf(domain.MineralData{}), true, "MineralData"),
 			r.Schema(reflect.TypeOf(domain.RockData{}), true, "RockData"),
 			r.Schema(reflect.TypeOf(domain.MeteoriteData{}), true, "MeteoriteData"),
+			r.Schema(reflect.TypeOf(domain.FossilData{}), true, "FossilData"),
 		},
 		Description: "Type-specific fields. Shape is selected by the sibling `type` " +
 			"field: `mineral` -> MineralData, `rock` -> RockData, `meteorite` -> " +
-			"MeteoriteData. The server validates the body against the matching " +
-			"struct and silently strips fields that don't belong. PATCH semantics " +
-			"merge top-level keys; an explicit JSON `null` clears a field.",
+			"MeteoriteData, `fossil` -> FossilData. The server validates the body " +
+			"against the matching struct and silently strips fields that don't " +
+			"belong. PATCH semantics merge top-level keys; an explicit JSON `null` " +
+			"clears a field.",
 	}
 }
 
@@ -94,7 +98,7 @@ func (SpecimenTypeData) Schema(r huma.Registry) *huma.Schema {
 // regenerated from this type's OpenAPI schema.
 type SpecimenView struct {
 	ID            uuid.UUID           `json:"id" doc:"UUIDv7 primary key."`
-	Type          domain.SpecimenType `json:"type" enum:"mineral,rock,meteorite" doc:"Specimen kind discriminator (immutable after creation)."`
+	Type          domain.SpecimenType `json:"type" enum:"mineral,rock,meteorite,fossil" doc:"Specimen kind discriminator (immutable after creation)."`
 	CatalogNumber *string             `json:"catalog_number" doc:"Optional human catalog number; unique across all specimens when set."`
 	Name          string              `json:"name" doc:"Display name."`
 	Description   string              `json:"description" doc:"Markdown description; defaults to empty string."`
@@ -141,7 +145,7 @@ func toSpecimenView(s domain.Specimen) SpecimenView {
 type listSpecimensInput struct {
 	Limit            int    `query:"limit" minimum:"1" maximum:"200" doc:"Page size (1-200; defaults to 50, values above 200 silently clamped)."`
 	Cursor           string `query:"cursor" doc:"Opaque pagination cursor returned by the previous page (CONTRACT.md §10.3)."`
-	Type             string `query:"type" enum:"mineral,rock,meteorite" doc:"Filter by specimen type."`
+	Type             string `query:"type" enum:"mineral,rock,meteorite,fossil" doc:"Filter by specimen type."`
 	Visibility       string `query:"visibility" enum:"private,unlisted,public" doc:"Filter by visibility."`
 	HasCatalogNumber string `query:"has_catalog_number" enum:"true,false" doc:"true returns rows with a catalog_number set; false returns rows without. Omit to disable the filter."`
 	AcquiredAfter    string `query:"acquired_after" doc:"Inclusive lower bound on acquired_at (YYYY-MM-DD)."`
@@ -172,7 +176,7 @@ type createSpecimenInput struct {
 }
 
 type createSpecimenBody struct {
-	Type          domain.SpecimenType `json:"type" enum:"mineral,rock,meteorite" doc:"Specimen kind. Immutable after creation."`
+	Type          domain.SpecimenType `json:"type" enum:"mineral,rock,meteorite,fossil" doc:"Specimen kind. Immutable after creation."`
 	CatalogNumber *string             `json:"catalog_number,omitempty" doc:"Optional unique catalog number."`
 	Name          string              `json:"name" minLength:"1" maxLength:"500" doc:"Display name."`
 	Description   string              `json:"description,omitempty" doc:"Markdown description; defaults to empty."`
@@ -203,7 +207,7 @@ type patchSpecimenInput struct {
 // that submits the existing type round-trips successfully; a `type`
 // that differs from the stored value is rejected with 409.
 type patchSpecimenBody struct {
-	Type          *domain.SpecimenType `json:"type,omitempty" enum:"mineral,rock,meteorite" doc:"Sending a value other than the stored type is rejected with 409 (immutable per design §2)."`
+	Type          *domain.SpecimenType `json:"type,omitempty" enum:"mineral,rock,meteorite,fossil" doc:"Sending a value other than the stored type is rejected with 409 (immutable per design §2)."`
 	CatalogNumber *string              `json:"catalog_number,omitempty" doc:"Omit to leave unchanged; pass null to clear."`
 	Name          *string              `json:"name,omitempty" minLength:"1" maxLength:"500" doc:"Omit to leave unchanged."`
 	Description   *string              `json:"description,omitempty" doc:"Omit to leave unchanged."`
@@ -392,7 +396,7 @@ func (s *SpecimenService) create(ctx context.Context, in *createSpecimenInput) (
 	}
 	if !validSpecimenType(b.Type) {
 		return nil, newAPIError(http.StatusBadRequest, "invalid_type",
-			"type must be one of mineral|rock|meteorite",
+			"type must be one of mineral|rock|meteorite|fossil",
 			map[string]any{"field": "type"})
 	}
 	visibility := b.Visibility
@@ -587,9 +591,22 @@ func validateAndCanonicalizeTypeData(t domain.SpecimenType, raw []byte) ([]byte,
 				map[string]any{"field": "type_data", "type": "meteorite"})
 		}
 		return json.Marshal(d)
+	case domain.SpecimenFossil:
+		var d domain.FossilData
+		if err := json.Unmarshal(rawTrimmed, &d); err != nil {
+			return nil, newAPIError(http.StatusBadRequest, "invalid_type_data",
+				"type_data does not match FossilData shape",
+				map[string]any{"field": "type_data", "type": "fossil"})
+		}
+		if err := d.Validate(); err != nil {
+			return nil, newAPIError(http.StatusUnprocessableEntity, "invalid_type_data",
+				err.Error(),
+				map[string]any{"field": "type_data", "type": "fossil"})
+		}
+		return json.Marshal(d)
 	}
 	return nil, newAPIError(http.StatusBadRequest, "invalid_type",
-		"type must be one of mineral|rock|meteorite",
+		"type must be one of mineral|rock|meteorite|fossil",
 		map[string]any{"field": "type"})
 }
 
@@ -635,7 +652,7 @@ func bytesTrimSpace(b []byte) []byte {
 
 func validSpecimenType(t domain.SpecimenType) bool {
 	switch t {
-	case domain.SpecimenMineral, domain.SpecimenRock, domain.SpecimenMeteorite:
+	case domain.SpecimenMineral, domain.SpecimenRock, domain.SpecimenMeteorite, domain.SpecimenFossil:
 		return true
 	}
 	return false

@@ -82,10 +82,22 @@ export const meteoriteDataSchema = z.object({
   me_metbull_ref: z.string().max(50, 'Too long'),
 });
 
+export const fossilDataSchema = z.object({
+  f_taxon: z.string().max(200, 'Too long'),
+  f_taxonomic_group: z.string().max(200, 'Too long'),
+  f_geologic_period: z.string().max(100, 'Too long'),
+  f_formation: z.string().max(200, 'Too long'),
+  f_locality: z.string().max(500, 'Too long'),
+  f_preservation_type: z.string().max(100, 'Too long'),
+  f_completeness: z.string().max(100, 'Too long'),
+  f_prepared: z.boolean(),
+  f_prep_notes: z.string().max(2000, 'Too long'),
+});
+
 // --- base schema --------------------------------------------------
 
 export const specimenBaseSchema = z.object({
-  type: z.enum(['mineral', 'rock', 'meteorite']),
+  type: z.enum(['mineral', 'rock', 'meteorite', 'fossil']),
   name: trimmed.pipe(z.string().min(1, 'Name is required').max(200, 'Name is too long')),
   catalog_number: z.string().max(100, 'Catalog number is too long'),
   description: z.string().max(50_000, 'Description is too long'),
@@ -115,7 +127,8 @@ export const specimenBaseSchema = z.object({
 export const specimenFormSchema = specimenBaseSchema
   .merge(mineralDataSchema)
   .merge(rockDataSchema)
-  .merge(meteoriteDataSchema);
+  .merge(meteoriteDataSchema)
+  .merge(fossilDataSchema);
 
 export type SpecimenFormValues = z.infer<typeof specimenFormSchema>;
 
@@ -129,6 +142,7 @@ type PatchBody = components['schemas']['PatchSpecimenBody'];
 type MineralData = components['schemas']['MineralData'];
 type RockData = components['schemas']['RockData'];
 type MeteoriteData = components['schemas']['MeteoriteData'];
+type FossilData = components['schemas']['FossilData'];
 
 export function emptyFormValues(type: SpecimenType = 'mineral'): SpecimenFormValues {
   return {
@@ -170,6 +184,15 @@ export function emptyFormValues(type: SpecimenType = 'mineral'): SpecimenFormVal
     me_official_name: '',
     me_total_known_weight_g: '',
     me_metbull_ref: '',
+    f_taxon: '',
+    f_taxonomic_group: '',
+    f_geologic_period: '',
+    f_formation: '',
+    f_locality: '',
+    f_preservation_type: '',
+    f_completeness: '',
+    f_prepared: false,
+    f_prep_notes: '',
   };
 }
 
@@ -202,6 +225,15 @@ export function resetTypeDataDefaults(
     me_official_name: empty.me_official_name,
     me_total_known_weight_g: empty.me_total_known_weight_g,
     me_metbull_ref: empty.me_metbull_ref,
+    f_taxon: empty.f_taxon,
+    f_taxonomic_group: empty.f_taxonomic_group,
+    f_geologic_period: empty.f_geologic_period,
+    f_formation: empty.f_formation,
+    f_locality: empty.f_locality,
+    f_preservation_type: empty.f_preservation_type,
+    f_completeness: empty.f_completeness,
+    f_prepared: empty.f_prepared,
+    f_prep_notes: empty.f_prep_notes,
   };
 }
 
@@ -250,7 +282,7 @@ export function specimenToFormValues(s: SpecimenView): SpecimenFormValues {
     }
     v.r_composition = td.composition ?? '';
     v.r_formation_context = td.formation_context ?? '';
-  } else {
+  } else if (s.type === 'meteorite') {
     const td = (s.type_data ?? {}) as MeteoriteData;
     v.me_classification = td.classification ?? '';
     const ff = td.fall_or_find ?? '';
@@ -260,6 +292,17 @@ export function specimenToFormValues(s: SpecimenView): SpecimenFormValues {
     v.me_total_known_weight_g =
       td.total_known_weight_g == null ? '' : String(td.total_known_weight_g);
     v.me_metbull_ref = td.metbull_ref ?? '';
+  } else {
+    const td = (s.type_data ?? {}) as FossilData;
+    v.f_taxon = td.taxon ?? '';
+    v.f_taxonomic_group = td.taxonomic_group ?? '';
+    v.f_geologic_period = td.geologic_period ?? '';
+    v.f_formation = td.formation ?? '';
+    v.f_locality = td.locality ?? '';
+    v.f_preservation_type = td.preservation_type ?? '';
+    v.f_completeness = td.completeness ?? '';
+    v.f_prepared = Boolean(td.prepared);
+    v.f_prep_notes = td.prep_notes ?? '';
   }
   return v;
 }
@@ -419,7 +462,9 @@ function buildLocality(values: SpecimenFormValues): components['schemas']['Local
   return out;
 }
 
-function buildTypeData(v: SpecimenFormValues): MineralData | RockData | MeteoriteData | null {
+function buildTypeData(
+  v: SpecimenFormValues,
+): MineralData | RockData | MeteoriteData | FossilData | null {
   if (v.type === 'mineral') {
     const out: MineralData = {};
     if (v.m_chemical_formula.trim()) out.chemical_formula = v.m_chemical_formula.trim();
@@ -445,15 +490,28 @@ function buildTypeData(v: SpecimenFormValues): MineralData | RockData | Meteorit
     if (v.r_formation_context.trim()) out.formation_context = v.r_formation_context.trim();
     return Object.keys(out).length === 0 ? null : out;
   }
-  const out: MeteoriteData = {};
-  if (v.me_classification.trim()) out.classification = v.me_classification.trim();
-  if (v.me_fall_or_find) out.fall_or_find = v.me_fall_or_find;
-  const fdate = toRfc3339(v.me_fall_or_find_date);
-  if (fdate) out.fall_or_find_date = fdate;
-  if (v.me_official_name.trim()) out.official_name = v.me_official_name.trim();
-  const tkw = parseOptionalFloat(v.me_total_known_weight_g);
-  if (tkw !== null) out.total_known_weight_g = tkw;
-  if (v.me_metbull_ref.trim()) out.metbull_ref = v.me_metbull_ref.trim();
+  if (v.type === 'meteorite') {
+    const out: MeteoriteData = {};
+    if (v.me_classification.trim()) out.classification = v.me_classification.trim();
+    if (v.me_fall_or_find) out.fall_or_find = v.me_fall_or_find;
+    const fdate = toRfc3339(v.me_fall_or_find_date);
+    if (fdate) out.fall_or_find_date = fdate;
+    if (v.me_official_name.trim()) out.official_name = v.me_official_name.trim();
+    const tkw = parseOptionalFloat(v.me_total_known_weight_g);
+    if (tkw !== null) out.total_known_weight_g = tkw;
+    if (v.me_metbull_ref.trim()) out.metbull_ref = v.me_metbull_ref.trim();
+    return Object.keys(out).length === 0 ? null : out;
+  }
+  const out: FossilData = {};
+  if (v.f_taxon.trim()) out.taxon = v.f_taxon.trim();
+  if (v.f_taxonomic_group.trim()) out.taxonomic_group = v.f_taxonomic_group.trim();
+  if (v.f_geologic_period.trim()) out.geologic_period = v.f_geologic_period.trim();
+  if (v.f_formation.trim()) out.formation = v.f_formation.trim();
+  if (v.f_locality.trim()) out.locality = v.f_locality.trim();
+  if (v.f_preservation_type.trim()) out.preservation_type = v.f_preservation_type.trim();
+  if (v.f_completeness.trim()) out.completeness = v.f_completeness.trim();
+  if (v.f_prepared) out.prepared = true;
+  if (v.f_prep_notes.trim()) out.prep_notes = v.f_prep_notes.trim();
   return Object.keys(out).length === 0 ? null : out;
 }
 
@@ -483,8 +541,8 @@ function localityEqual(
 }
 
 function typeDataEqual(
-  a: MineralData | RockData | MeteoriteData,
-  b: MineralData | RockData | MeteoriteData,
+  a: MineralData | RockData | MeteoriteData | FossilData,
+  b: MineralData | RockData | MeteoriteData | FossilData,
   type: SpecimenView['type'],
 ): boolean {
   if (type === 'mineral') {
@@ -511,15 +569,30 @@ function typeDataEqual(
       (aa.formation_context ?? '') === (bb.formation_context ?? '')
     );
   }
-  const aa = a as MeteoriteData;
-  const bb = b as MeteoriteData;
+  if (type === 'meteorite') {
+    const aa = a as MeteoriteData;
+    const bb = b as MeteoriteData;
+    return (
+      (aa.classification ?? '') === (bb.classification ?? '') &&
+      (aa.fall_or_find ?? '') === (bb.fall_or_find ?? '') &&
+      (aa.fall_or_find_date ?? '') === (bb.fall_or_find_date ?? '') &&
+      (aa.official_name ?? '') === (bb.official_name ?? '') &&
+      (aa.total_known_weight_g ?? null) === (bb.total_known_weight_g ?? null) &&
+      (aa.metbull_ref ?? '') === (bb.metbull_ref ?? '')
+    );
+  }
+  const aa = a as FossilData;
+  const bb = b as FossilData;
   return (
-    (aa.classification ?? '') === (bb.classification ?? '') &&
-    (aa.fall_or_find ?? '') === (bb.fall_or_find ?? '') &&
-    (aa.fall_or_find_date ?? '') === (bb.fall_or_find_date ?? '') &&
-    (aa.official_name ?? '') === (bb.official_name ?? '') &&
-    (aa.total_known_weight_g ?? null) === (bb.total_known_weight_g ?? null) &&
-    (aa.metbull_ref ?? '') === (bb.metbull_ref ?? '')
+    (aa.taxon ?? '') === (bb.taxon ?? '') &&
+    (aa.taxonomic_group ?? '') === (bb.taxonomic_group ?? '') &&
+    (aa.geologic_period ?? '') === (bb.geologic_period ?? '') &&
+    (aa.formation ?? '') === (bb.formation ?? '') &&
+    (aa.locality ?? '') === (bb.locality ?? '') &&
+    (aa.preservation_type ?? '') === (bb.preservation_type ?? '') &&
+    (aa.completeness ?? '') === (bb.completeness ?? '') &&
+    Boolean(aa.prepared) === Boolean(bb.prepared) &&
+    (aa.prep_notes ?? '') === (bb.prep_notes ?? '')
   );
 }
 
