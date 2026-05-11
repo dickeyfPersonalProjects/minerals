@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { axe } from 'vitest-axe';
 import SpecimenForm from './SpecimenForm.svelte';
 import type { SpecimenFormSubmitResult } from './SpecimenForm.svelte';
 import { emptyFormValues, type SpecimenFormValues } from './schemas/specimen';
@@ -215,6 +216,22 @@ describe('SpecimenForm', () => {
       const fieldset = screen.getByTestId('type-fieldset') as HTMLFieldSetElement;
       expect(fieldset.disabled).toBe(true);
       expect(screen.getByTestId('type-immutable-hint')).toBeInTheDocument();
+    });
+  });
+
+  describe('accessibility (axe)', () => {
+    it('has no structural a11y violations on initial mineral render', async () => {
+      const { container } = render(SpecimenForm, {
+        mode: 'create',
+        submitLabel: 'Create',
+        onSubmit: vi.fn(),
+        initial: { type: 'mineral' },
+      });
+
+      // color-contrast requires real layout (canvas) and is skipped
+      // in jsdom — see bead mi-k9t constraints.
+      const results = await axe(container, { rules: { 'color-contrast': { enabled: false } } });
+      expect(results).toHaveNoViolations();
     });
   });
 });

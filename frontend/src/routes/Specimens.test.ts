@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { axe } from 'vitest-axe';
 
 // Hoisted mocks — the client and router are replaced for every
 // test. Each test sets `mockGet` to the fixture it wants and can
@@ -216,6 +217,39 @@ describe('Specimens route', () => {
     await fireEvent.click(screen.getByTestId('filter-type-mineral'));
 
     expect(mockReplace).toHaveBeenCalledWith('/specimens?type=mineral');
+  });
+
+  it('has no structural a11y violations on grid render', async () => {
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/specimens') {
+        return {
+          data: {
+            items: [
+              specimen({
+                id: '11111111-1111-1111-1111-111111111111',
+                name: 'Smoky quartz',
+                type: 'mineral',
+                visibility: 'public',
+                locality_text: 'Mont Blanc, France',
+              }),
+            ],
+            next_cursor: null,
+          },
+          error: undefined,
+          response: new Response(),
+        };
+      }
+      return { data: { items: [], next_cursor: null }, error: undefined };
+    });
+
+    const { container } = render(Specimens);
+
+    await waitFor(() => expect(screen.getByTestId('specimen-grid')).toBeInTheDocument());
+
+    // color-contrast requires real layout (canvas) and is skipped
+    // in jsdom — see bead mi-k9t constraints.
+    const results = await axe(container, { rules: { 'color-contrast': { enabled: false } } });
+    expect(results).toHaveNoViolations();
   });
 
   it('shows the filtered empty state when results are empty under filters', async () => {

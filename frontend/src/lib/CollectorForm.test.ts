@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { axe } from 'vitest-axe';
 import CollectorForm from './CollectorForm.svelte';
 import type { CollectorFormSubmitResult } from './CollectorForm.svelte';
 
@@ -104,5 +105,19 @@ describe('CollectorForm', () => {
 
     expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('Existing');
     expect((screen.getByLabelText(/notes/i) as HTMLTextAreaElement).value).toBe('Some notes');
+  });
+
+  describe('accessibility (axe)', () => {
+    it('has no structural a11y violations on initial render', async () => {
+      const { container } = render(CollectorForm, {
+        submitLabel: 'Create',
+        onSubmit: vi.fn(),
+      });
+
+      // color-contrast requires real layout (canvas) and is skipped
+      // in jsdom — see bead mi-k9t constraints.
+      const results = await axe(container, { rules: { 'color-contrast': { enabled: false } } });
+      expect(results).toHaveNoViolations();
+    });
   });
 });
