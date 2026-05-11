@@ -245,6 +245,8 @@ type MineralData struct {
 	Luster          *string  `json:"luster,omitempty"`
 	Fluorescence    *string  `json:"fluorescence,omitempty"`
 	Radioactive     *bool    `json:"radioactive,omitempty"`
+	Magnetic        *bool    `json:"magnetic,omitempty"`
+	ReactsToAcid    *bool    `json:"reacts_to_acid,omitempty"`
 	MindatID        *string  `json:"mindat_id,omitempty"`
 }
 

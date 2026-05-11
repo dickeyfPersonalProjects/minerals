@@ -1,7 +1,9 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -51,6 +53,75 @@ func TestMineralData_Validate(t *testing.T) {
 	if err := negative.Validate(); !errors.Is(err, ErrSpecimenTypeDataInvalid) {
 		t.Errorf("MohsHardness=-1: got %v, want ErrSpecimenTypeDataInvalid", err)
 	}
+}
+
+// TestMineralData_MarshalBooleans covers JSON marshalling of the three
+// observable boolean properties (Radioactive, Magnetic, ReactsToAcid).
+// Each is *bool so nil ("not recorded") must omit the key, false must
+// round-trip as false, and true as true.
+func TestMineralData_MarshalBooleans(t *testing.T) {
+	t.Run("nil pointers omit the keys", func(t *testing.T) {
+		b, err := json.Marshal(MineralData{})
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		got := string(b)
+		for _, key := range []string{"radioactive", "magnetic", "reacts_to_acid"} {
+			if strings.Contains(got, `"`+key+`"`) {
+				t.Errorf("empty MineralData JSON contains %q: %s", key, got)
+			}
+		}
+	})
+
+	t.Run("true values round-trip", func(t *testing.T) {
+		in := MineralData{
+			Radioactive:  ptr(true),
+			Magnetic:     ptr(true),
+			ReactsToAcid: ptr(true),
+		}
+		b, err := json.Marshal(in)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		var out MineralData
+		if err := json.Unmarshal(b, &out); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if out.Radioactive == nil || *out.Radioactive != true {
+			t.Errorf("Radioactive: got %v, want *true", out.Radioactive)
+		}
+		if out.Magnetic == nil || *out.Magnetic != true {
+			t.Errorf("Magnetic: got %v, want *true", out.Magnetic)
+		}
+		if out.ReactsToAcid == nil || *out.ReactsToAcid != true {
+			t.Errorf("ReactsToAcid: got %v, want *true", out.ReactsToAcid)
+		}
+	})
+
+	t.Run("false values round-trip", func(t *testing.T) {
+		in := MineralData{
+			Radioactive:  ptr(false),
+			Magnetic:     ptr(false),
+			ReactsToAcid: ptr(false),
+		}
+		b, err := json.Marshal(in)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		var out MineralData
+		if err := json.Unmarshal(b, &out); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if out.Radioactive == nil || *out.Radioactive != false {
+			t.Errorf("Radioactive: got %v, want *false", out.Radioactive)
+		}
+		if out.Magnetic == nil || *out.Magnetic != false {
+			t.Errorf("Magnetic: got %v, want *false", out.Magnetic)
+		}
+		if out.ReactsToAcid == nil || *out.ReactsToAcid != false {
+			t.Errorf("ReactsToAcid: got %v, want *false", out.ReactsToAcid)
+		}
+	})
 }
 
 func TestRockData_Validate(t *testing.T) {
