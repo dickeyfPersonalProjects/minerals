@@ -113,6 +113,7 @@ type SpecimenView struct {
 	MassG         *float64            `json:"mass_g" doc:"Mass in grams."`
 	Dimensions    *domain.Dimensions  `json:"dimensions" doc:"Optional structured dimensions."`
 	TypeData      SpecimenTypeData    `json:"type_data" doc:"Type-specific fields; shape governed by the parent type field."`
+	MainImageID   *uuid.UUID          `json:"main_image_id" nullable:"true" doc:"File id of the photo designated as this specimen's main image (mi-m8q). Null means fall back to the first photo by position."`
 	CreatedAt     time.Time           `json:"created_at" doc:"RFC 3339 creation timestamp."`
 	UpdatedAt     time.Time           `json:"updated_at" doc:"RFC 3339 last-update timestamp."`
 }
@@ -135,6 +136,7 @@ func toSpecimenView(s domain.Specimen) SpecimenView {
 		MassG:         s.MassG,
 		Dimensions:    s.Dimensions,
 		TypeData:      SpecimenTypeData(s.TypeData),
+		MainImageID:   s.MainImageID,
 		CreatedAt:     s.CreatedAt,
 		UpdatedAt:     s.UpdatedAt,
 	}
@@ -221,6 +223,7 @@ type patchSpecimenBody struct {
 	MassG         *float64             `json:"mass_g,omitempty" doc:"Omit to leave unchanged."`
 	Dimensions    *domain.Dimensions   `json:"dimensions,omitempty" doc:"Omit to leave unchanged."`
 	TypeData      *SpecimenTypeData    `json:"type_data,omitempty" doc:"Top-level merge: present keys overwrite, explicit null clears, omitted keys preserved."`
+	MainImageID   *uuid.UUID           `json:"main_image_id,omitempty" doc:"File id of the photo to designate as the specimen's main image (mi-m8q). Must be the file_id of an existing photo on this specimen, or the request is rejected with 422. To revert to the first-by-position fallback, delete the underlying photo — ON DELETE SET NULL handles the cleanup."`
 }
 
 type deleteSpecimenInput struct {
@@ -506,6 +509,18 @@ func (s *SpecimenService) patch(ctx context.Context, in *patchSpecimenInput) (*s
 	}
 	if b.Dimensions != nil {
 		current.Dimensions = b.Dimensions
+	}
+	if b.MainImageID != nil {
+		ok, hpErr := s.repo.HasPhotoWithFile(ctx, current.ID, *b.MainImageID)
+		if hpErr != nil {
+			return nil, mapSpecimenError(hpErr)
+		}
+		if !ok {
+			return nil, newAPIError(http.StatusUnprocessableEntity, "invalid_main_image_id",
+				"main_image_id must reference a photo on this specimen",
+				map[string]any{"field": "main_image_id"})
+		}
+		current.MainImageID = b.MainImageID
 	}
 
 	if b.TypeData != nil {

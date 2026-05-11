@@ -31,6 +31,7 @@ type SpecimenSeed = {
   type_data?: Record<string, unknown>;
   locality?: Record<string, unknown>;
   dimensions?: Record<string, unknown>;
+  main_image_id?: string | null;
 };
 
 function specimen(seed: SpecimenSeed = {}) {
@@ -53,16 +54,22 @@ function specimen(seed: SpecimenSeed = {}) {
     mass_g: seed.mass_g ?? null,
     price_cents: null,
     source_notes: null,
+    main_image_id: seed.main_image_id ?? null,
   };
 }
 
-type PhotoSeed = { id: string; position?: number; kind?: 'visible' | 'uv' | 'other' };
+type PhotoSeed = {
+  id: string;
+  position?: number;
+  kind?: 'visible' | 'uv' | 'other';
+  file_id?: string;
+};
 
 function photo(seed: PhotoSeed) {
   return {
     id: seed.id,
     specimen_id: SPECIMEN_ID,
-    file_id: 'aaaaaaaa-0000-0000-0000-000000000000',
+    file_id: seed.file_id ?? 'aaaaaaaa-0000-0000-0000-000000000000',
     content_type: 'image/jpeg',
     byte_size: 1234,
     sha256: 'deadbeef',
@@ -679,6 +686,88 @@ describe('SpecimenDetail route', () => {
       await fireEvent.click(screen.getByTestId('confirm-modal-confirm'));
       await waitFor(() => expect(mockDelete).toHaveBeenCalledTimes(1));
       expect(screen.getByTestId('confirm-modal')).toBeInTheDocument();
+    });
+  });
+
+  // mi-m8q: designate one photo as the specimen's main image.
+  // The hero floats to the photo whose file_id matches
+  // specimen.main_image_id; "Set as main" buttons sit on every
+  // other photo; clicking one PATCHes the specimen.
+  describe('main image flow', () => {
+    const FILE_A = 'aaaaaaaa-0000-0000-0000-000000000001';
+    const FILE_B = 'aaaaaaaa-0000-0000-0000-000000000002';
+
+    it('shows the Main badge on the hero when main_image_id matches', async () => {
+      const p1 = photo({ id: 'cafebabe-0000-0000-0000-000000000001', file_id: FILE_A });
+      setupFetch({
+        specimen: specimen({ main_image_id: FILE_A }),
+        photos: [p1],
+      });
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      expect(await screen.findByTestId('hero-photo-main-badge')).toBeInTheDocument();
+      expect(screen.queryByTestId('hero-photo-set-main')).not.toBeInTheDocument();
+    });
+
+    it('shows Set-as-main on the hero when no main is designated', async () => {
+      const p1 = photo({ id: 'cafebabe-0000-0000-0000-000000000001', file_id: FILE_A });
+      setupFetch({ specimen: specimen({ main_image_id: null }), photos: [p1] });
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      expect(await screen.findByTestId('hero-photo-set-main')).toBeInTheDocument();
+      expect(screen.queryByTestId('hero-photo-main-badge')).not.toBeInTheDocument();
+    });
+
+    it('hoists the designated photo to the hero slot even if it is not first by position', async () => {
+      // p1 sits at position 1 (would be the default hero); p2 at
+      // position 2 is the designated main image and must take over.
+      const p1 = photo({
+        id: 'cafebabe-0000-0000-0000-000000000001',
+        position: 1,
+        file_id: FILE_A,
+      });
+      const p2 = photo({
+        id: 'cafebabe-0000-0000-0000-000000000002',
+        position: 2,
+        file_id: FILE_B,
+      });
+      setupFetch({
+        specimen: specimen({ main_image_id: FILE_B }),
+        photos: [p1, p2],
+      });
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+
+      const hero = await screen.findByTestId('hero-photo');
+      const img = hero.querySelector('img') as HTMLImageElement;
+      expect(img.getAttribute('src')).toBe(`/api/v1/photos/${p2.id}/display`);
+      expect(screen.getByTestId('hero-photo-main-badge')).toBeInTheDocument();
+    });
+
+    it('PATCHes main_image_id when Set-as-main is clicked on a thumbnail', async () => {
+      const p1 = photo({
+        id: 'cafebabe-0000-0000-0000-000000000001',
+        position: 1,
+        file_id: FILE_A,
+      });
+      const p2 = photo({
+        id: 'cafebabe-0000-0000-0000-000000000002',
+        position: 2,
+        file_id: FILE_B,
+      });
+      setupFetch({ specimen: specimen({ main_image_id: null }), photos: [p1, p2] });
+      mockPatch.mockResolvedValueOnce({
+        data: { ...specimen(), main_image_id: FILE_B },
+        error: undefined,
+        response: new Response(null, { status: 200 }),
+      });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      const setBtn = await screen.findByTestId('gallery-thumb-set-main');
+      await fireEvent.click(setBtn);
+
+      await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
+      const [path, opts] = mockPatch.mock.calls[0]!;
+      expect(path).toBe('/api/v1/specimens/{id}');
+      expect(opts.params.path.id).toBe(SPECIMEN_ID);
+      expect(opts.body).toEqual({ main_image_id: FILE_B });
     });
   });
 });

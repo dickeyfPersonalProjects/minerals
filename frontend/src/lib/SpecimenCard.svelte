@@ -20,7 +20,10 @@
   }
   const { specimen }: Props = $props();
 
-  // Lazy-load the first photo's thumbnail. The list endpoint
+  // Lazy-load the card thumbnail. Preference (mi-m8q): the
+  // photo whose file_id matches specimen.main_image_id; fall back
+  // to the first photo by position when no main is set or the
+  // designated photo has since been deleted. The list endpoint
   // doesn't embed photo URLs (PhotoView lives at a sibling
   // endpoint), so each card resolves its own thumb. This is N+1
   // and should be replaced with an embedded thumb_url on
@@ -31,9 +34,18 @@
   $effect(() => {
     const ctrl = new AbortController();
     let alive = true;
+    const mainImageID = specimen.main_image_id;
+    // Pulling 100 keeps the request count at one per card while
+    // letting us find the main image (which may not be position 1)
+    // without a second round-trip. v1 caps photos per specimen well
+    // below 100 in practice; revisit when the wire shape embeds a
+    // dedicated main-thumb URL.
     client
       .GET('/api/v1/specimens/{id}/photos', {
-        params: { path: { id: specimen.id }, query: { limit: 1 } },
+        params: {
+          path: { id: specimen.id },
+          query: { limit: mainImageID ? 100 : 1 },
+        },
         signal: ctrl.signal,
       })
       .then(({ data, error }) => {
@@ -42,12 +54,14 @@
           thumbFailed = true;
           return;
         }
-        const first = data.items[0];
-        if (!first) {
+        const items = data.items;
+        const main = mainImageID ? items.find((p) => p.file_id === mainImageID) : undefined;
+        const chosen = main ?? items[0];
+        if (!chosen) {
           thumbFailed = true;
           return;
         }
-        thumbUrl = `/api/v1/photos/${first.id}/thumb`;
+        thumbUrl = `/api/v1/photos/${chosen.id}/thumb`;
       })
       .catch((err: unknown) => {
         if (!alive || ctrl.signal.aborted) return;
