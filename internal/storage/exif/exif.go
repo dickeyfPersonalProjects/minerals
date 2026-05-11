@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	exif "github.com/dsoprea/go-exif/v3"
@@ -339,8 +340,11 @@ func walkJPEGSegments(data []byte, filter bool) ([]byte, []byte, error) {
 					buf.Write(b[:len(b)-2])
 				case replacement != nil:
 					newLen := len(replacement) + 2
+					if newLen > 0xFFFF {
+						return nil, nil, fmt.Errorf("exif: filtered APP1 segment too large (%d bytes)", newLen)
+					}
 					var lenBytes [2]byte
-					binary.BigEndian.PutUint16(lenBytes[:], uint16(newLen))
+					binary.BigEndian.PutUint16(lenBytes[:], uint16(newLen)) //nolint:gosec // G115: bounded above
 					buf.Write(lenBytes[:])
 					buf.Write(replacement)
 				default:
@@ -549,7 +553,14 @@ func stripWebPMetadata(data []byte) ([]byte, error) {
 	}
 
 	// Patch the RIFF size header to reflect the new payload length.
+	// We always write the 12-byte WebP header above, so len(out) >= 12;
+	// payloadLen is non-negative. The 100 MiB upload cap (§7) keeps the
+	// value well below 4 GiB, but we check explicitly here.
 	out := buf.Bytes()
-	binary.LittleEndian.PutUint32(out[4:8], uint32(len(out)-8))
+	payloadLen := len(out) - 8
+	if payloadLen < 0 || uint64(payloadLen) > math.MaxUint32 {
+		return nil, errors.New("exif: WebP RIFF size out of uint32 range")
+	}
+	binary.LittleEndian.PutUint32(out[4:8], uint32(payloadLen)) //nolint:gosec // G115: bounded above
 	return out, nil
 }

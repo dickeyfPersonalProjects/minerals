@@ -488,10 +488,11 @@ func IsRecentUUIDv7(id uuid.UUID, t time.Time, drift time.Duration) bool {
 		return false
 	}
 	// UUIDv7 layout: first 48 bits are unix milliseconds, big-endian.
+	// ms is constructed from 48 bits, so it always fits in int64 (max 2^48-1).
 	b := id[:]
 	ms := uint64(b[0])<<40 | uint64(b[1])<<32 | uint64(b[2])<<24 |
 		uint64(b[3])<<16 | uint64(b[4])<<8 | uint64(b[5])
-	embedded := time.UnixMilli(int64(ms))
+	embedded := time.UnixMilli(int64(ms)) //nolint:gosec // G115: ms is a 48-bit value (see comment above), safe in int64
 	delta := embedded.Sub(t)
 	if delta < 0 {
 		delta = -delta
