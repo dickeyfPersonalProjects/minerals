@@ -43,6 +43,7 @@ function bodyAsView(body: CreateBody): SpecimenView {
     dimensions: body.dimensions ?? {},
     locality: body.locality ?? {},
     type_data: body.type_data ?? ({} as SpecimenView['type_data']),
+    main_image_id: null,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
   } satisfies SpecimenView;

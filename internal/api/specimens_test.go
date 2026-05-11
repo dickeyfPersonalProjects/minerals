@@ -23,16 +23,49 @@ import (
 // HTTP layer touches (errors propagated, fields preserved); the repo
 // implementation has its own integration tests for the SQL paths.
 type fakeSpecimenRepo struct {
-	mu        sync.Mutex
-	rows      map[uuid.UUID]domain.Specimen
-	createErr error
-	updateErr error
-	deleteErr error
-	listErr   error
+	mu   sync.Mutex
+	rows map[uuid.UUID]domain.Specimen
+	// photoFiles records (specimen_id -> set of file_ids of photos
+	// on that specimen). HasPhotoWithFile checks against it, and
+	// tests opt in by calling addPhotoFile when they need
+	// main_image_id validation to succeed.
+	photoFiles map[uuid.UUID]map[uuid.UUID]struct{}
+	createErr  error
+	updateErr  error
+	deleteErr  error
+	listErr    error
 }
 
 func newFakeSpecimenRepo() *fakeSpecimenRepo {
-	return &fakeSpecimenRepo{rows: map[uuid.UUID]domain.Specimen{}}
+	return &fakeSpecimenRepo{
+		rows:       map[uuid.UUID]domain.Specimen{},
+		photoFiles: map[uuid.UUID]map[uuid.UUID]struct{}{},
+	}
+}
+
+// addPhotoFile registers a (specimen_id, file_id) pair so the fake's
+// HasPhotoWithFile returns true for it. Tests covering main_image_id
+// PATCH happy paths use this to satisfy the validation guard.
+func (f *fakeSpecimenRepo) addPhotoFile(specimenID, fileID uuid.UUID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	set, ok := f.photoFiles[specimenID]
+	if !ok {
+		set = map[uuid.UUID]struct{}{}
+		f.photoFiles[specimenID] = set
+	}
+	set[fileID] = struct{}{}
+}
+
+func (f *fakeSpecimenRepo) HasPhotoWithFile(_ context.Context, specimenID, fileID uuid.UUID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	set, ok := f.photoFiles[specimenID]
+	if !ok {
+		return false, nil
+	}
+	_, ok = set[fileID]
+	return ok, nil
 }
 
 func (f *fakeSpecimenRepo) Create(ctx context.Context, _ domain.Tx, s domain.Specimen) error {
@@ -432,6 +465,57 @@ func TestSpecimensPatchAcceptsMatchingType(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSpecimensPatchMainImageIDSetsField(t *testing.T) {
+	repo := newFakeSpecimenRepo()
+	h := newServerWithSpecimens(t, repo)
+	created := mustCreateMineral(t, h, "Q", map[string]any{})
+
+	fileID := uuid.New()
+	// Register the (specimen, file) pair in the fake so the
+	// HasPhotoWithFile guard passes — mirrors a photo already
+	// uploaded on this specimen with that file_id.
+	repo.addPhotoFile(created.ID, fileID)
+
+	body := map[string]any{"main_image_id": fileID.String()}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/specimens/"+created.ID.String(), jsonBody(t, body))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var patched SpecimenView
+	if err := json.Unmarshal(rec.Body.Bytes(), &patched); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if patched.MainImageID == nil || *patched.MainImageID != fileID {
+		t.Errorf("main_image_id: got %v, want %v", patched.MainImageID, fileID)
+	}
+}
+
+func TestSpecimensPatchMainImageIDRejectsForeignFile(t *testing.T) {
+	repo := newFakeSpecimenRepo()
+	h := newServerWithSpecimens(t, repo)
+	created := mustCreateMineral(t, h, "Q", map[string]any{})
+
+	// foreignFile is NOT registered as a photo on `created`; the
+	// PATCH must be rejected with 422 + invalid_main_image_id.
+	foreignFile := uuid.New()
+	body := map[string]any{"main_image_id": foreignFile.String()}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/specimens/"+created.ID.String(), jsonBody(t, body))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422 — body=%s", rec.Code, rec.Body.String())
+	}
+	var env envelopeBody
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	if env.Error.Code != "invalid_main_image_id" {
+		t.Errorf("code = %q, want invalid_main_image_id", env.Error.Code)
 	}
 }
 

@@ -180,6 +180,17 @@
     lightboxIndex = Math.max(0, Math.min(idx, visiblePhotos.length - 1));
   }
 
+  // openLightboxForPhoto resolves a photo to its position in
+  // visiblePhotos so the lightbox starts on the clicked image.
+  // Used by the hero + gallery thumbs after mi-m8q decoupled the
+  // hero slot from "visiblePhotos[0]" (the hero now floats to the
+  // designated main image).
+  function openLightboxForPhoto(p: Photo) {
+    const idx = visiblePhotos.findIndex((q) => q.id === p.id);
+    if (idx < 0) return;
+    openLightbox(idx);
+  }
+
   function closeLightbox() {
     lightboxIndex = null;
   }
@@ -463,6 +474,48 @@
     { value: 'uv', label: 'UV', count: kindCounts.uv },
     { value: 'other', label: 'Other', count: kindCounts.other },
   ]);
+
+  // Designated main image (mi-m8q). When the user has picked a
+  // photo, its file_id sits on the specimen; we resolve it to a
+  // Photo inside the *currently visible* set so kind-filtering
+  // doesn't surface a hidden photo as the hero. When no main is
+  // set, or the designated photo isn't in the visible set,
+  // heroPhoto falls back to the first-by-position photo — the
+  // pre-mi-m8q behaviour.
+  const mainPhoto = $derived.by<Photo | undefined>(() => {
+    const fid = specimen?.main_image_id ?? null;
+    if (!fid) return undefined;
+    return visiblePhotos.find((p) => p.file_id === fid);
+  });
+  const heroPhoto = $derived<Photo | undefined>(mainPhoto ?? visiblePhotos[0]);
+  const restPhotos = $derived(visiblePhotos.filter((p) => p !== heroPhoto));
+
+  // "Set as main" mutation. Optimistic: flip specimen.main_image_id
+  // immediately so the badge/button toggles before the server
+  // round-trip; roll back on failure.
+  let settingMain = $state(false);
+
+  async function setAsMain(fileID: string): Promise<void> {
+    if (!specimen || settingMain) return;
+    settingMain = true;
+    const prior = specimen.main_image_id;
+    specimen = { ...specimen, main_image_id: fileID };
+    try {
+      const { error, response } = await client.PATCH('/api/v1/specimens/{id}', {
+        params: { path: { id: specimen.id } },
+        body: { main_image_id: fileID },
+      });
+      if (error) {
+        // Roll back the optimistic change.
+        if (specimen) specimen = { ...specimen, main_image_id: prior };
+        toastError(errorMessage(error, response.status));
+        return;
+      }
+      toastSuccess('Main image updated');
+    } finally {
+      settingMain = false;
+    }
+  }
 </script>
 
 {#if loadState.kind === 'loading' || loadState.kind === 'idle'}
@@ -493,8 +546,6 @@
   {@const td = typeDataEntries(specimen)}
   {@const loc = localityEntries(specimen.locality)}
   {@const phys = physicalEntries(specimen)}
-  {@const heroPhoto = visiblePhotos[0]}
-  {@const restPhotos = visiblePhotos.slice(1)}
   {@const specimenId = specimen.id}
 
   <article class="space-y-8" data-testid="specimen-detail">
@@ -584,11 +635,13 @@
 
     {#if heroPhoto}
       {@const heroKind: PhotoKind = (heroPhoto.kind as PhotoKind | undefined) ?? 'visible'}
+      {@const heroIsMain =
+        specimen.main_image_id != null && heroPhoto.file_id === specimen.main_image_id}
       <div class="group relative">
         <button
           type="button"
           class="block w-full overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
-          onclick={() => openLightbox(0)}
+          onclick={() => openLightboxForPhoto(heroPhoto)}
           aria-label="Open photo viewer"
           data-testid="hero-photo"
         >
@@ -607,6 +660,25 @@
           >
             {PHOTO_KIND_LABELS[heroKind]}
           </span>
+        {/if}
+        {#if heroIsMain}
+          <span
+            class="pointer-events-none absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-amber-500/90 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow"
+            data-testid="hero-photo-main-badge"
+            aria-label="Main image"
+          >
+            ★ Main
+          </span>
+        {:else}
+          <button
+            type="button"
+            onclick={() => setAsMain(heroPhoto.file_id)}
+            disabled={settingMain}
+            data-testid="hero-photo-set-main"
+            class="absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-amber-500 focus-visible:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            ★ Set as main
+          </button>
         {/if}
         <button
           type="button"
@@ -630,15 +702,17 @@
 
       {#if restPhotos.length > 0}
         <ul class="flex flex-wrap gap-3" data-testid="photo-gallery">
-          {#each restPhotos as photo, i (photo.id)}
+          {#each restPhotos as photo (photo.id)}
             {@const thumbKind: PhotoKind = (photo.kind as PhotoKind | undefined) ?? 'visible'}
+            {@const isMain =
+              specimen.main_image_id != null && photo.file_id === specimen.main_image_id}
             <li class="contents">
               <div class="group relative">
                 <button
                   type="button"
                   class="block h-20 w-20 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] transition hover:border-[var(--color-accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
-                  onclick={() => openLightbox(i + 1)}
-                  aria-label={`View photo ${i + 2}`}
+                  onclick={() => openLightboxForPhoto(photo)}
+                  aria-label="View photo"
                   data-testid="gallery-thumb"
                 >
                   <img
@@ -656,6 +730,26 @@
                   >
                     {PHOTO_KIND_LABELS[thumbKind]}
                   </span>
+                {/if}
+                {#if isMain}
+                  <span
+                    class="pointer-events-none absolute right-1 bottom-1 rounded bg-amber-500/90 px-1 text-[9px] font-semibold uppercase leading-4 tracking-wide text-white shadow"
+                    data-testid="gallery-thumb-main-badge"
+                    aria-label="Main image"
+                  >
+                    ★ Main
+                  </span>
+                {:else}
+                  <button
+                    type="button"
+                    onclick={() => setAsMain(photo.file_id)}
+                    disabled={settingMain}
+                    aria-label="Set as main image"
+                    data-testid="gallery-thumb-set-main"
+                    class="absolute right-1 bottom-1 rounded-full bg-black/65 px-1.5 text-[10px] leading-5 text-white opacity-0 transition-opacity hover:bg-amber-500 focus-visible:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    ★
+                  </button>
                 {/if}
                 <button
                   type="button"

@@ -146,8 +146,14 @@ type Specimen struct {
 	MassG         *float64
 	Dimensions    *Dimensions
 	TypeData      []byte // raw JSON; service unmarshals into MineralData/RockData/MeteoriteData/FossilData
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// MainImageID is the optional file id (NOT photo id) of the
+	// photo the user has designated as this specimen's primary
+	// image (mi-m8q). NULL means fall back to the first photo by
+	// position. The DB enforces ON DELETE SET NULL against files(id),
+	// so deleting the underlying file reverts to the fallback.
+	MainImageID *uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // PhotoKind discriminates the lighting condition a photo was taken
@@ -338,6 +344,12 @@ type SpecimenRepo interface {
 	Update(ctx context.Context, tx Tx, s Specimen) error
 	Delete(ctx context.Context, tx Tx, id uuid.UUID) error
 	List(ctx context.Context, filter SpecimenFilter, page Page) ([]Specimen, Cursor, error)
+	// HasPhotoWithFile reports whether the specimen has any photo
+	// whose file_id matches fileID. The PATCH handler calls this
+	// before writing main_image_id (mi-m8q): the file must belong
+	// to a photo on this specimen, otherwise the request is
+	// rejected with 422.
+	HasPhotoWithFile(ctx context.Context, specimenID, fileID uuid.UUID) (bool, error)
 }
 
 // PhotoRepo is the consumer-side interface for photos persistence.

@@ -300,6 +300,77 @@ func TestIntegration_Specimen_DeleteMissingNotFound(t *testing.T) {
 	}
 }
 
+// Covers the mi-m8q schema contract: main_image_id round-trips,
+// HasPhotoWithFile honours the (specimen, file) tuple, and deleting
+// the underlying file row reverts the specimen to NULL gracefully
+// via the ON DELETE SET NULL clause on the FK.
+func TestIntegration_Specimen_MainImageIDRoundtripAndCascade(t *testing.T) {
+	pool := scopedDB(t)
+	repo := db.NewSpecimenPostgres(pool)
+	ctx := authedCtx()
+
+	s := mkSpecimen(domain.SpecimenMineral, "with-main-image")
+	if err := repo.Create(ctx, nil, s); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	fileID := domain.NewID()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO files (id, s3_key, content_type, byte_size, sha256, uploaded_by, uploaded_at)
+		VALUES ($1, $2, 'image/jpeg', 1024, 'deadbeef', $3, now())`,
+		fileID, "k/"+fileID.String(), auth.StubUser.ID); err != nil {
+		t.Fatalf("insert file: %v", err)
+	}
+	photoID := domain.NewID()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO photos (id, specimen_id, file_id, position, created_at)
+		VALUES ($1, $2, $3, 0, now())`,
+		photoID, s.ID, fileID); err != nil {
+		t.Fatalf("insert photo: %v", err)
+	}
+
+	// HasPhotoWithFile must return true for the registered tuple
+	// and false for an unrelated file id.
+	if ok, err := repo.HasPhotoWithFile(ctx, s.ID, fileID); err != nil || !ok {
+		t.Fatalf("HasPhotoWithFile (matching): ok=%v err=%v", ok, err)
+	}
+	if ok, err := repo.HasPhotoWithFile(ctx, s.ID, uuid.New()); err != nil || ok {
+		t.Fatalf("HasPhotoWithFile (unrelated): ok=%v err=%v", ok, err)
+	}
+
+	// Designate the photo's file as the specimen's main image and
+	// round-trip via Update + GetByID.
+	s.MainImageID = &fileID
+	s.UpdatedAt = time.Now().UTC()
+	if err := repo.Update(ctx, nil, s); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, err := repo.GetByID(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.MainImageID == nil || *got.MainImageID != fileID {
+		t.Fatalf("main_image_id after update: got %v, want %v", got.MainImageID, fileID)
+	}
+
+	// Drop the photo row then the file row — mirrors what the photo
+	// DELETE handler does. ON DELETE SET NULL on specimens.main_image_id
+	// must clear the column rather than blocking the delete.
+	if _, err := pool.Exec(ctx, `DELETE FROM photos WHERE id = $1`, photoID); err != nil {
+		t.Fatalf("delete photo: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM files WHERE id = $1`, fileID); err != nil {
+		t.Fatalf("delete file: %v", err)
+	}
+	got, err = repo.GetByID(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("get after cascade: %v", err)
+	}
+	if got.MainImageID != nil {
+		t.Errorf("main_image_id should be NULL after file delete, got %v", *got.MainImageID)
+	}
+}
+
 func TestIntegration_Specimen_ListFilters(t *testing.T) {
 	pool := scopedDB(t)
 	repo := db.NewSpecimenPostgres(pool)

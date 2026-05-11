@@ -51,6 +51,7 @@ function specimen(
     price_cents: null,
     source_notes: null,
     type_data: {},
+    main_image_id: null,
   };
 }
 

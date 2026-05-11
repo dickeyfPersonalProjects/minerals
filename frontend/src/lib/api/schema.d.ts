@@ -914,6 +914,8 @@ export interface components {
             locality?: components["schemas"]["Locality"];
             /** @description Omit to leave unchanged. */
             locality_text?: string;
+            /** @description File id of the photo to designate as the specimen's main image (mi-m8q). Must be the file_id of an existing photo on this specimen, or the request is rejected with 422. To revert to the first-by-position fallback, delete the underlying photo — ON DELETE SET NULL handles the cleanup. */
+            main_image_id?: string;
             /**
              * Format: double
              * @description Omit to leave unchanged.
@@ -1138,6 +1140,8 @@ export interface components {
             locality: components["schemas"]["Locality"];
             /** @description Free-form locality (primary display). */
             locality_text: string | null;
+            /** @description File id of the photo designated as this specimen's main image (mi-m8q). Null means fall back to the first photo by position. */
+            main_image_id: string | null;
             /**
              * Format: double
              * @description Mass in grams.

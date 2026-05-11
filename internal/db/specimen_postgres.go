@@ -32,7 +32,7 @@ func NewSpecimenPostgres(pool *pgxpool.Pool) *SpecimenPostgres {
 const specimenColumns = `id, type, catalog_number, name, description, visibility,
 		author_id, acquired_at, acquired_from, price_cents, source_notes,
 		locality_text, locality, mass_g::double precision, dimensions, type_data,
-		created_at, updated_at`
+		main_image_id, created_at, updated_at`
 
 // Create inserts a new specimen. Caller has already populated s.ID
 // (UUIDv7), CreatedAt, UpdatedAt; author_id is taken from auth ctx
@@ -59,18 +59,18 @@ func (r *SpecimenPostgres) Create(ctx context.Context, tx domain.Tx, s domain.Sp
 			id, type, catalog_number, name, description, visibility,
 			author_id, acquired_at, acquired_from, price_cents, source_notes,
 			locality_text, locality, mass_g, dimensions, type_data,
-			created_at, updated_at
+			main_image_id, created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10, $11,
 			$12, $13, $14, $15, $16,
-			$17, $18
+			$17, $18, $19
 		)`
 	_, err = exec.Exec(ctx, q,
 		s.ID, string(s.Type), s.CatalogNumber, s.Name, s.Description, string(s.Visibility),
 		user.ID, s.AcquiredAt, s.AcquiredFrom, s.PriceCents, s.SourceNotes,
 		s.LocalityText, locality, s.MassG, dimensions, typeData,
-		s.CreatedAt, s.UpdatedAt,
+		s.MainImageID, s.CreatedAt, s.UpdatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -131,13 +131,14 @@ func (r *SpecimenPostgres) Update(ctx context.Context, tx domain.Tx, s domain.Sp
 			mass_g         = $12,
 			dimensions     = $13,
 			type_data      = $14,
-			updated_at     = $15
-		 WHERE id = $1 AND type = $16`
+			main_image_id  = $15,
+			updated_at     = $16
+		 WHERE id = $1 AND type = $17`
 	tag, err := exec.Exec(ctx, q,
 		s.ID, s.CatalogNumber, s.Name, s.Description, string(s.Visibility),
 		s.AcquiredAt, s.AcquiredFrom, s.PriceCents, s.SourceNotes,
 		s.LocalityText, locality, s.MassG, dimensions, typeData,
-		s.UpdatedAt, string(s.Type),
+		s.MainImageID, s.UpdatedAt, string(s.Type),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -396,7 +397,7 @@ func scanSpecimen(s rowScanner) (domain.Specimen, error) {
 		&sp.ID, &typeStr, &sp.CatalogNumber, &sp.Name, &sp.Description, &visStr,
 		&sp.AuthorID, &sp.AcquiredAt, &sp.AcquiredFrom, &sp.PriceCents, &sp.SourceNotes,
 		&sp.LocalityText, &locality, &sp.MassG, &dimensions, &typeData,
-		&sp.CreatedAt, &sp.UpdatedAt,
+		&sp.MainImageID, &sp.CreatedAt, &sp.UpdatedAt,
 	); err != nil {
 		return domain.Specimen{}, err
 	}
@@ -434,7 +435,7 @@ func scanSpecimenRanked(rs pgx.Rows) (domain.Specimen, float32, error) {
 		&sp.ID, &typeStr, &sp.CatalogNumber, &sp.Name, &sp.Description, &visStr,
 		&sp.AuthorID, &sp.AcquiredAt, &sp.AcquiredFrom, &sp.PriceCents, &sp.SourceNotes,
 		&sp.LocalityText, &locality, &sp.MassG, &dimensions, &typeData,
-		&sp.CreatedAt, &sp.UpdatedAt, &rank,
+		&sp.MainImageID, &sp.CreatedAt, &sp.UpdatedAt, &rank,
 	); err != nil {
 		return domain.Specimen{}, 0, err
 	}
@@ -478,6 +479,22 @@ func (r *SpecimenPostgres) execer(tx domain.Tx) domain.Tx {
 		return tx
 	}
 	return r.pool
+}
+
+// HasPhotoWithFile reports whether the specimen has a photo row
+// whose file_id matches fileID. Used by the API to validate
+// main_image_id before writing it on the specimen (mi-m8q).
+func (r *SpecimenPostgres) HasPhotoWithFile(
+	ctx context.Context, specimenID, fileID uuid.UUID,
+) (bool, error) {
+	const q = `SELECT EXISTS (
+		SELECT 1 FROM photos WHERE specimen_id = $1 AND file_id = $2
+	)`
+	var ok bool
+	if err := r.pool.QueryRow(ctx, q, specimenID, fileID).Scan(&ok); err != nil {
+		return false, fmt.Errorf("specimen repo: has photo with file: %w", err)
+	}
+	return ok, nil
 }
 
 // IsRecentUUIDv7 reports whether id is a UUIDv7 whose embedded

@@ -106,6 +106,9 @@ func (specStubSpecimenRepo) Delete(context.Context, domain.Tx, uuid.UUID) error 
 func (specStubSpecimenRepo) List(context.Context, domain.SpecimenFilter, domain.Page) ([]domain.Specimen, domain.Cursor, error) {
 	return nil, "", nil
 }
+func (specStubSpecimenRepo) HasPhotoWithFile(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
+	return false, nil
+}
 
 // specStubJournalRepo is the never-called stand-in so the spec
 // advertises /api/v1/journal and /api/v1/specimens/{id}/journal
