@@ -104,6 +104,17 @@ jobs:
         # actions/setup-go@v5 default).
         run: gotestsum --junitfile junit.xml -- -race -shuffle=on ./...
 
+      # Fuzz smoke (mi-h8j, CONTRACT §17). Main-only — keeps PR latency
+      # low while still catching regressions in the untrusted-input
+      # parsers before a release. `go test -fuzz` is single-package, so
+      # we invoke it once per harness rather than the multi-package
+      # form. Failing seeds (if any) are surfaced via the fuzz output;
+      # corpora are not persisted between runs.
+      - name: fuzz-smoke
+        run: |
+          go test -run='^$' -fuzz=FuzzRender -fuzztime=30s ./internal/markdown
+          go test -run='^$' -fuzz=FuzzParseExif -fuzztime=30s ./internal/storage/exif
+
       - name: Upload junit.xml
         if: always()
         uses: actions/upload-artifact@v4

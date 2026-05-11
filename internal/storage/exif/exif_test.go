@@ -17,7 +17,7 @@ import (
 // makeJPEGWithExif constructs a minimal JPEG with an APP1/Exif segment
 // carrying the supplied raw EXIF blob. The image content is a 2×2
 // grayscale block — fixtures stay tiny, well under 1 KB.
-func makeJPEGWithExif(t *testing.T, rawExif []byte) []byte {
+func makeJPEGWithExif(t testing.TB, rawExif []byte) []byte {
 	t.Helper()
 
 	var imgBuf bytes.Buffer
@@ -55,7 +55,7 @@ func makeJPEGWithExif(t *testing.T, rawExif []byte) []byte {
 
 // buildExifBlob constructs an EXIF blob with the provided IFD0 + Exif
 // + GPS tags. tags is keyed by (ifdPath -> tagId -> value).
-func buildExifBlob(t *testing.T, ifd0 map[uint16]any, exifSub map[uint16]any, includeGPS bool) []byte {
+func buildExifBlob(t testing.TB, ifd0 map[uint16]any, exifSub map[uint16]any, includeGPS bool) []byte {
 	t.Helper()
 
 	im, err := exifcommon.NewIfdMappingWithStandard()
@@ -344,4 +344,62 @@ func TestStripWebPMetadata_DropsExifChunk(t *testing.T) {
 	if bytes.Contains(out, []byte("EXIF")) {
 		t.Errorf("EXIF chunk should have been dropped from WebP")
 	}
+}
+
+// FuzzParseExif drives arbitrary bytes through the JPEG path of the
+// EXIF filter (Filter + ExtractDateTimeOriginal). The parser handles
+// untrusted upload bytes per CONTRACT.md §17 — the primary goal of
+// this harness is to surface panics, infinite loops, or unbounded
+// allocations from malformed JPEGs and EXIF blobs.
+//
+// Seed corpus mirrors the fixtures the unit tests construct: a JPEG
+// with allowlisted root + Exif tags, a JPEG with a GPS sub-IFD, and
+// a JPEG carrying only the bare minimum EXIF segment.
+func FuzzParseExif(f *testing.F) {
+	// Seed 1: allowlisted root + Exif tags only.
+	raw1 := buildExifBlob(f,
+		map[uint16]any{
+			0x010F: "Acme",
+			0x0110: "TestCam",
+			0x0132: "2026:05:07 12:00:00",
+		},
+		map[uint16]any{
+			0x9003: "2026:05:07 12:00:00",
+			0x920A: []exifcommon.Rational{{Numerator: 50, Denominator: 1}},
+		},
+		false,
+	)
+	f.Add(makeJPEGWithExif(f, raw1))
+
+	// Seed 2: includes a GPS IFD (which Filter must drop).
+	raw2 := buildExifBlob(f,
+		map[uint16]any{
+			0x010F: "Acme",
+			0x0110: "TestCam",
+		},
+		map[uint16]any{
+			0x9003: "2026:05:07 12:00:00",
+		},
+		true,
+	)
+	f.Add(makeJPEGWithExif(f, raw2))
+
+	// Seed 3: minimal EXIF (single tag, no Exif sub-IFD).
+	raw3 := buildExifBlob(f,
+		map[uint16]any{0x010F: "Acme"},
+		nil,
+		false,
+	)
+	f.Add(makeJPEGWithExif(f, raw3))
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		// Filter must not panic on arbitrary input. Errors are fine —
+		// the JPEG walker rejects malformed segments. We discard the
+		// returned bytes; the goal is panic discovery.
+		_, _ = Filter(data, ContentTypeJPEG)
+
+		// ExtractDateTimeOriginal walks the same parser path with a
+		// different exit; exercise both to widen coverage.
+		_ = ExtractDateTimeOriginal(data, ContentTypeJPEG)
+	})
 }
