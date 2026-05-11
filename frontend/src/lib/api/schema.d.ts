@@ -204,6 +204,98 @@ export interface paths {
         patch: operations["patch-photo"];
         trace?: never;
     };
+    "/api/v1/qr-sheet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the current user's QR sheet
+         * @description Returns the active QR sticker sheet for the authenticated user, including the ordered list of specimens and the calculated page count for the chosen template. 404 when the user has no active sheet.
+         */
+        get: operations["get-qr-sheet"];
+        put?: never;
+        /**
+         * Create the current user's QR sheet
+         * @description Creates an empty sheet with the supplied template. Returns 409 when the user already has an active sheet — use PATCH to change template, DELETE + POST to reset.
+         */
+        post: operations["create-qr-sheet"];
+        /**
+         * Delete the current user's QR sheet
+         * @description Discards the active sheet and every specimen on it. Returns 404 when the user has no active sheet.
+         */
+        delete: operations["delete-qr-sheet"];
+        options?: never;
+        head?: never;
+        /**
+         * Update the current user's QR sheet template
+         * @description Switches the template on the active sheet. Specimen membership is preserved; only the page-count calculation changes. Returns 404 when the user has no active sheet.
+         */
+        patch: operations["patch-qr-sheet"];
+        trace?: never;
+    };
+    "/api/v1/qr-sheet/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate a print-ready PDF of the current user's QR sheet
+         * @description Renders the user's active sheet as a multi-page PDF sized for the chosen Avery template. Each specimen becomes one QR-coded label whose payload is the specimen's absolute URL on this server. Response is `application/pdf` with `Content-Disposition: attachment; filename="qr-sheet.pdf"`. Returns 404 when the user has no sheet and 400 when the sheet is empty.
+         */
+        post: operations["generate-qr-sheet-pdf"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/qr-sheet/specimens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Append a specimen to the current user's QR sheet
+         * @description Appends the supplied specimen at the next free position. Idempotent — re-adding a specimen already on the sheet succeeds without changing its position. Returns 404 when the user has no sheet, or when specimen_id doesn't exist.
+         */
+        post: operations["add-qr-sheet-specimen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/qr-sheet/specimens/{specimen_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a specimen from the current user's QR sheet
+         * @description Removes the specimen and repacks remaining positions so they stay contiguous. Returns 404 when the user has no sheet, or when the specimen isn't on it.
+         */
+        delete: operations["remove-qr-sheet-specimen"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/specimens": {
         parameters: {
             query?: never;
@@ -389,6 +481,16 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AddQRSheetSpecimenBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/AddQRSheetSpecimenBody.json
+             */
+            readonly $schema?: string;
+            /** @description UUID of the specimen to append to the sheet. */
+            specimen_id: string;
+        };
         ApiError: {
             /**
              * Format: uri
@@ -485,6 +587,16 @@ export interface components {
             data: components["schemas"]["MineralData"];
             /** @description Canonical mineral name; must be unique across all sources. */
             name: string;
+        };
+        CreateQRSheetBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/CreateQRSheetBody.json
+             */
+            readonly $schema?: string;
+            /** @description Avery-style template identifier; see GET /api/v1/qr-sheet for the supported vocabulary. */
+            template: string;
         };
         CreateSpecimenBody: {
             /**
@@ -768,6 +880,16 @@ export interface components {
              */
             taken_at?: string;
         };
+        PatchQRSheetBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/PatchQRSheetBody.json
+             */
+            readonly $schema?: string;
+            /** @description New template identifier. */
+            template: string;
+        };
         PatchSpecimenBody: {
             /**
              * Format: uri
@@ -881,6 +1003,53 @@ export interface components {
             readonly $schema?: string;
             /** @description Ordered list of collector UUIDs. Array index becomes the chain position (1-indexed). Pass an empty array to clear the chain. */
             collector_ids: string[] | null;
+        };
+        QRSheetSpecimenView: {
+            /**
+             * Format: date-time
+             * @description RFC 3339 timestamp the specimen was added to the sheet.
+             */
+            added_at: string;
+            /** @description Display name of the specimen. */
+            name: string;
+            /**
+             * Format: int64
+             * @description 1-indexed position on the sheet.
+             */
+            position: number;
+            /** @description UUID of the specimen. */
+            specimen_id: string;
+            /** @description Path to the specimen's first photo thumbnail; null when the specimen has no photos. */
+            thumbnail_url: string | null;
+        };
+        QRSheetView: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/QRSheetView.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: date-time
+             * @description RFC 3339 creation timestamp.
+             */
+            created_at: string;
+            /** @description UUIDv7 primary key of the sheet. */
+            id: string;
+            /**
+             * Format: int64
+             * @description Number of pages needed to print every specimen at this template's capacity. 0 when the sheet is empty.
+             */
+            page_count: number;
+            /** @description Specimens on the sheet in position-ascending order. */
+            specimens: components["schemas"]["QRSheetSpecimenView"][] | null;
+            /** @description Avery-style template identifier (e.g. 'avery-5160'). */
+            template: string;
+            /**
+             * Format: date-time
+             * @description RFC 3339 last-update timestamp.
+             */
+            updated_at: string;
         };
         ReadyzBody: {
             /**
@@ -2125,6 +2294,426 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PhotoView"];
                 };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "get-qr-sheet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QRSheetView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "create-qr-sheet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateQRSheetBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QRSheetView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "delete-qr-sheet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "patch-qr-sheet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchQRSheetBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QRSheetView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "generate-qr-sheet-pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "add-qr-sheet-specimen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddQRSheetSpecimenBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QRSheetView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "remove-qr-sheet-specimen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description UUID of the specimen to remove from the sheet. */
+                specimen_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Bad Request */
             400: {
