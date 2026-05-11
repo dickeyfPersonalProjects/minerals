@@ -528,9 +528,9 @@ export interface components {
              * @description Specimen kind. Immutable after creation.
              * @enum {string}
              */
-            type: "mineral" | "rock" | "meteorite";
+            type: "mineral" | "rock" | "meteorite" | "fossil";
             /** @description Type-specific fields; shape selected by the type field. */
-            type_data?: components["schemas"]["MineralData"] | components["schemas"]["RockData"] | components["schemas"]["MeteoriteData"];
+            type_data?: components["schemas"]["MineralData"] | components["schemas"]["RockData"] | components["schemas"]["MeteoriteData"] | components["schemas"]["FossilData"];
             /**
              * @description Sharing visibility; defaults to private.
              * @enum {string}
@@ -551,6 +551,17 @@ export interface components {
             IsSet: boolean;
             /** Format: int64 */
             Size: number;
+        };
+        FossilData: {
+            completeness?: string;
+            formation?: string;
+            geologic_period?: string;
+            locality?: string;
+            prep_notes?: string;
+            prepared?: boolean;
+            preservation_type?: string;
+            taxon?: string;
+            taxonomic_group?: string;
         };
         JournalFileListBody: {
             /**
@@ -794,9 +805,9 @@ export interface components {
              * @description Sending a value other than the stored type is rejected with 409 (immutable per design §2).
              * @enum {string}
              */
-            type?: "mineral" | "rock" | "meteorite";
+            type?: "mineral" | "rock" | "meteorite" | "fossil";
             /** @description Top-level merge: present keys overwrite, explicit null clears, omitted keys preserved. */
-            type_data?: components["schemas"]["MineralData"] | components["schemas"]["RockData"] | components["schemas"]["MeteoriteData"];
+            type_data?: components["schemas"]["MineralData"] | components["schemas"]["RockData"] | components["schemas"]["MeteoriteData"] | components["schemas"]["FossilData"];
             /**
              * @description Omit to leave unchanged.
              * @enum {string}
@@ -966,9 +977,9 @@ export interface components {
              * @description Specimen kind discriminator (immutable after creation).
              * @enum {string}
              */
-            type: "mineral" | "rock" | "meteorite";
+            type: "mineral" | "rock" | "meteorite" | "fossil";
             /** @description Type-specific fields; shape governed by the parent type field. */
-            type_data: components["schemas"]["MineralData"] | components["schemas"]["RockData"] | components["schemas"]["MeteoriteData"];
+            type_data: components["schemas"]["MineralData"] | components["schemas"]["RockData"] | components["schemas"]["MeteoriteData"] | components["schemas"]["FossilData"];
             /**
              * Format: date-time
              * @description RFC 3339 last-update timestamp.
@@ -2160,7 +2171,7 @@ export interface operations {
                 /** @description Opaque pagination cursor returned by the previous page (CONTRACT.md §10.3). */
                 cursor?: string;
                 /** @description Filter by specimen type. */
-                type?: "mineral" | "rock" | "meteorite";
+                type?: "mineral" | "rock" | "meteorite" | "fossil";
                 /** @description Filter by visibility. */
                 visibility?: "private" | "unlisted" | "public";
                 /** @description true returns rows with a catalog_number set; false returns rows without. Omit to disable the filter. */

@@ -68,6 +68,28 @@ func TestRockData_Validate(t *testing.T) {
 	}
 }
 
+func TestFossilData_Validate(t *testing.T) {
+	// Every FossilData field is free-form in v1; Validate accepts
+	// any combination, including a fully populated struct.
+	if err := (FossilData{}).Validate(); err != nil {
+		t.Errorf("empty FossilData.Validate(): %v", err)
+	}
+	full := FossilData{
+		Taxon:            ptr("Tyrannosaurus rex"),
+		TaxonomicGroup:   ptr("Dinosauria"),
+		GeologicPeriod:   ptr("Cretaceous"),
+		Formation:        ptr("Hell Creek Formation"),
+		Locality:         ptr("Montana, USA"),
+		PreservationType: ptr("Permineralized"),
+		Completeness:     ptr("Partial"),
+		Prepared:         ptr(true),
+		PrepNotes:        ptr("Air-abrasion only"),
+	}
+	if err := full.Validate(); err != nil {
+		t.Errorf("full FossilData.Validate(): %v", err)
+	}
+}
+
 func TestMeteoriteData_Validate(t *testing.T) {
 	if err := (MeteoriteData{}).Validate(); err != nil {
 		t.Errorf("empty MeteoriteData.Validate(): %v", err)

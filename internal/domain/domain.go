@@ -23,6 +23,7 @@ const (
 	SpecimenMineral   SpecimenType = "mineral"
 	SpecimenRock      SpecimenType = "rock"
 	SpecimenMeteorite SpecimenType = "meteorite"
+	SpecimenFossil    SpecimenType = "fossil"
 )
 
 // Visibility controls who can read a specimen. v1 enforces only the
@@ -144,7 +145,7 @@ type Specimen struct {
 	Locality      *Locality
 	MassG         *float64
 	Dimensions    *Dimensions
-	TypeData      []byte // raw JSON; service unmarshals into MineralData/RockData/MeteoriteData
+	TypeData      []byte // raw JSON; service unmarshals into MineralData/RockData/MeteoriteData/FossilData
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -234,6 +235,21 @@ type MeteoriteData struct {
 	MetbullRef        *string    `json:"metbull_ref,omitempty"`
 }
 
+// FossilData is the typed shape stored in specimens.type_data when
+// type='fossil'. All fields are optional; the zero value of each
+// field is omitted from the JSONB payload via omitempty.
+type FossilData struct {
+	Taxon            *string `json:"taxon,omitempty"`             // e.g. "Tyrannosaurus rex"
+	TaxonomicGroup   *string `json:"taxonomic_group,omitempty"`   // e.g. "Dinosauria"
+	GeologicPeriod   *string `json:"geologic_period,omitempty"`   // e.g. "Cretaceous"
+	Formation        *string `json:"formation,omitempty"`         // e.g. "Hell Creek Formation"
+	Locality         *string `json:"locality,omitempty"`          // stratigraphic context (complements specimen locality)
+	PreservationType *string `json:"preservation_type,omitempty"` // e.g. "Cast", "Mold", "Permineralized", "Compression"
+	Completeness     *string `json:"completeness,omitempty"`      // e.g. "Complete", "Partial", "Fragment"
+	Prepared         *bool   `json:"prepared,omitempty"`          // whether prep work has been done
+	PrepNotes        *string `json:"prep_notes,omitempty"`        // free-form prep description
+}
+
 // validRockTypes enumerates the v1 RockData.RockType vocabulary
 // (per design §2's "Type-specific data shapes").
 var validRockTypes = map[string]struct{}{
@@ -281,6 +297,13 @@ func (m MeteoriteData) Validate() error {
 	}
 	return nil
 }
+
+// Validate checks FossilData invariants. All fields are free-form
+// strings in v1 (no closed vocabulary for taxon, period, formation,
+// etc.) so there is nothing to enforce beyond JSON-schema shape; the
+// method exists for parity with the other type-data structs and to
+// give the API layer a single dispatch surface.
+func (FossilData) Validate() error { return nil }
 
 // SpecimenRepo is the consumer-side interface for specimens persistence.
 type SpecimenRepo interface {

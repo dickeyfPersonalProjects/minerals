@@ -21,7 +21,7 @@ This is the source of truth for the project roadmap.
 - [x] Collector/provenance tracking — normalized `collectors` + `specimen_collectors` join (#56)
 - [x] Mindat-backed mineral species lookup/autocomplete (#56)
 - [x] Editable markdown description per specimen
-- [ ] **Fossil specimen type** `(mi-6o8)`
+- [x] **Fossil specimen type** `(mi-6o8)`
 - [ ] **Photo-kind metadata** (visible / UV / other) `(mi-5b6)`
 
 ### Photos

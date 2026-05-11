@@ -54,6 +54,7 @@
     mineral: 'bg-[var(--color-mineral)] text-[var(--color-accent-fg)]',
     rock: 'bg-[var(--color-rock)] text-[var(--color-accent-fg)]',
     meteorite: 'bg-[var(--color-meteorite)] text-[var(--color-accent-fg)]',
+    fossil: 'bg-[var(--color-fossil)] text-[var(--color-accent-fg)]',
   };
 
   const truncate = (s: string | null | undefined, max: number): string => {

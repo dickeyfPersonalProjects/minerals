@@ -22,6 +22,7 @@
   type MineralData = components['schemas']['MineralData'];
   type RockData = components['schemas']['RockData'];
   type MeteoriteData = components['schemas']['MeteoriteData'];
+  type FossilData = components['schemas']['FossilData'];
   type CollectorLink = components['schemas']['SpecimenCollectorLinkView'];
 
   interface Props {
@@ -317,6 +318,15 @@
     metbull_ref: 'Met. Bulletin ref',
     official_name: 'Official name',
     total_known_weight_g: 'Total known weight (g)',
+    taxon: 'Taxon',
+    taxonomic_group: 'Taxonomic group',
+    geologic_period: 'Geologic period',
+    formation: 'Formation',
+    locality: 'Stratigraphic locality',
+    preservation_type: 'Preservation type',
+    completeness: 'Completeness',
+    prepared: 'Prep work done',
+    prep_notes: 'Prep notes',
   };
 
   function titleCase(key: string): string {
@@ -326,7 +336,7 @@
   type TypeDatum = { key: string; label: string; value: string };
 
   function typeDataEntries(s: Specimen): TypeDatum[] {
-    const td = (s.type_data ?? {}) as Partial<MineralData & RockData & MeteoriteData> &
+    const td = (s.type_data ?? {}) as Partial<MineralData & RockData & MeteoriteData & FossilData> &
       Record<string, unknown>;
     const out: TypeDatum[] = [];
     for (const [key, raw] of Object.entries(td)) {
@@ -399,6 +409,7 @@
     mineral: 'bg-[var(--color-mineral)] text-[var(--color-accent-fg)]',
     rock: 'bg-[var(--color-rock)] text-[var(--color-accent-fg)]',
     meteorite: 'bg-[var(--color-meteorite)] text-[var(--color-accent-fg)]',
+    fossil: 'bg-[var(--color-fossil)] text-[var(--color-accent-fg)]',
   };
 
   const lightboxPhotos = $derived(
