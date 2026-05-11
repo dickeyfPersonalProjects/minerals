@@ -25,6 +25,7 @@
     "eslint": "^9.17.0",
     "eslint-config-prettier": "^9.1.2",
     "eslint-plugin-svelte": "^2.46.1",
+    "fast-check": "^3.23.2",
     "globals": "^15.14.0",
     "jsdom": "^25.0.1",
     "openapi-typescript": "^7.13.0",
@@ -37,7 +38,8 @@
     "typescript-eslint": "^8.18.2",
     "vite": "^6.0.6",
     "vitest": "^3.2.4",
-    "vitest-axe": "^0.1.0"
+    "vitest-axe": "^0.1.0",
+    "zod-fast-check": "^0.10.1"
   },
   "dependencies": {
     "@felte/validator-zod": "^1.0.18",
