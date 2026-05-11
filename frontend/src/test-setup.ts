@@ -1,4 +1,18 @@
 import '@testing-library/jest-dom/vitest';
+import { expect } from 'vitest';
+import * as axeMatchers from 'vitest-axe/matchers';
+import type { AxeMatchers } from 'vitest-axe/matchers';
+
+// vitest-axe v0.1 only augments the legacy `Vi` namespace; vitest 3.x
+// resolves matchers through `declare module 'vitest'`. Re-augment here.
+declare module 'vitest' {
+  /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, @typescript-eslint/no-empty-object-type */
+  interface Assertion<T = any> extends AxeMatchers {}
+  interface AsymmetricMatchersContaining extends AxeMatchers {}
+  /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, @typescript-eslint/no-empty-object-type */
+}
+
+expect.extend(axeMatchers);
 
 // jsdom does not implement Element.animate, which Svelte 5's
 // transition runtime calls under the hood. Stub it so components
