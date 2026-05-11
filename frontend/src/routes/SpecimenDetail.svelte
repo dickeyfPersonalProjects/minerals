@@ -319,6 +319,8 @@
     luster: 'Luster',
     fluorescence: 'Fluorescence',
     radioactive: 'Radioactive',
+    magnetic: 'Magnetic',
+    reacts_to_acid: 'Reacts to acid',
     mindat_id: 'mindat ID',
     rock_type: 'Rock type',
     composition: 'Composition',

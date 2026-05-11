@@ -64,6 +64,8 @@ export const mineralDataSchema = z.object({
   m_luster: z.string().max(100, 'Too long'),
   m_fluorescence: z.string().max(200, 'Too long'),
   m_radioactive: z.boolean(),
+  m_magnetic: z.boolean(),
+  m_reacts_to_acid: z.boolean(),
   m_mindat_id: z.string().max(50, 'Too long'),
 });
 
@@ -174,6 +176,8 @@ export function emptyFormValues(type: SpecimenType = 'mineral'): SpecimenFormVal
     m_luster: '',
     m_fluorescence: '',
     m_radioactive: false,
+    m_magnetic: false,
+    m_reacts_to_acid: false,
     m_mindat_id: '',
     r_rock_type: '',
     r_composition: '',
@@ -215,6 +219,8 @@ export function resetTypeDataDefaults(
     m_luster: empty.m_luster,
     m_fluorescence: empty.m_fluorescence,
     m_radioactive: empty.m_radioactive,
+    m_magnetic: empty.m_magnetic,
+    m_reacts_to_acid: empty.m_reacts_to_acid,
     m_mindat_id: empty.m_mindat_id,
     r_rock_type: empty.r_rock_type,
     r_composition: empty.r_composition,
@@ -273,6 +279,8 @@ export function specimenToFormValues(s: SpecimenView): SpecimenFormValues {
     v.m_luster = td.luster ?? '';
     v.m_fluorescence = td.fluorescence ?? '';
     v.m_radioactive = Boolean(td.radioactive);
+    v.m_magnetic = Boolean(td.magnetic);
+    v.m_reacts_to_acid = Boolean(td.reacts_to_acid);
     v.m_mindat_id = td.mindat_id ?? '';
   } else if (s.type === 'rock') {
     const td = (s.type_data ?? {}) as RockData;
@@ -480,6 +488,8 @@ function buildTypeData(
     if (v.m_luster.trim()) out.luster = v.m_luster.trim();
     if (v.m_fluorescence.trim()) out.fluorescence = v.m_fluorescence.trim();
     if (v.m_radioactive) out.radioactive = true;
+    if (v.m_magnetic) out.magnetic = true;
+    if (v.m_reacts_to_acid) out.reacts_to_acid = true;
     if (v.m_mindat_id.trim()) out.mindat_id = v.m_mindat_id.trim();
     return Object.keys(out).length === 0 ? null : out;
   }
@@ -557,6 +567,8 @@ function typeDataEqual(
       (aa.luster ?? '') === (bb.luster ?? '') &&
       (aa.fluorescence ?? '') === (bb.fluorescence ?? '') &&
       Boolean(aa.radioactive) === Boolean(bb.radioactive) &&
+      Boolean(aa.magnetic) === Boolean(bb.magnetic) &&
+      Boolean(aa.reacts_to_acid) === Boolean(bb.reacts_to_acid) &&
       (aa.mindat_id ?? '') === (bb.mindat_id ?? '')
     );
   }

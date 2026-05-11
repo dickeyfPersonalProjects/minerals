@@ -124,6 +124,8 @@
       m_luster: d.luster ?? '',
       m_fluorescence: d.fluorescence ?? '',
       m_radioactive: Boolean(d.radioactive),
+      m_magnetic: Boolean(d.magnetic),
+      m_reacts_to_acid: Boolean(d.reacts_to_acid),
       m_mindat_id: d.mindat_id ?? '',
       m_mineral_species: (d.mineral_species ?? []).join(', '),
     };
@@ -671,6 +673,24 @@
           class="text-[var(--color-accent)]"
         />
         Radioactive
+      </label>
+      <label class="flex items-center gap-2 text-sm text-[var(--color-text)]">
+        <input
+          type="checkbox"
+          name="m_magnetic"
+          checked={$data.m_magnetic}
+          class="text-[var(--color-accent)]"
+        />
+        Magnetic
+      </label>
+      <label class="flex items-center gap-2 text-sm text-[var(--color-text)]">
+        <input
+          type="checkbox"
+          name="m_reacts_to_acid"
+          checked={$data.m_reacts_to_acid}
+          class="text-[var(--color-accent)]"
+        />
+        Reacts to acid
       </label>
       {#if mineralAttribution}
         <p class="text-xs italic text-[var(--color-text-muted)]" data-testid="mineral-attribution">

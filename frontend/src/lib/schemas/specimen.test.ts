@@ -56,6 +56,8 @@ describe('emptyFormValues', () => {
     expect(v.type).toBe('mineral');
     expect(v.visibility).toBe('private');
     expect(v.m_radioactive).toBe(false);
+    expect(v.m_magnetic).toBe(false);
+    expect(v.m_reacts_to_acid).toBe(false);
   });
 
   it('honors the requested type', () => {
@@ -414,6 +416,33 @@ describe('formToPatchBody', () => {
     expect(td?.mineral_species).toEqual(['sphalerite', 'galena']);
   });
 
+  it('emits type_data with magnetic=true / reacts_to_acid=true when toggled on', () => {
+    // Both new boolean observable properties (mi-sag) follow the same
+    // only-truthy-emit pattern as `radioactive`.
+    const v: SpecimenFormValues = {
+      ...emptyFormValues('mineral'),
+      name: 'X',
+      m_magnetic: true,
+      m_reacts_to_acid: true,
+    };
+    const td = formToCreateBody(v).type_data as components['schemas']['MineralData'];
+    expect(td).toEqual({ magnetic: true, reacts_to_acid: true });
+  });
+
+  it('omits magnetic/reacts_to_acid when false (only-truthy emit)', () => {
+    const v: SpecimenFormValues = {
+      ...emptyFormValues('mineral'),
+      name: 'X',
+      m_chemical_formula: 'PbS',
+      m_magnetic: false,
+      m_reacts_to_acid: false,
+    };
+    const td = formToCreateBody(v).type_data as components['schemas']['MineralData'];
+    expect(td).toEqual({ chemical_formula: 'PbS' });
+    expect(td.magnetic).toBeUndefined();
+    expect(td.reacts_to_acid).toBeUndefined();
+  });
+
   it('emits type_data with radioactive=true when toggling false → true', () => {
     const initial = mineralView({
       type_data: {
@@ -549,6 +578,27 @@ describe('specimenToFormValues', () => {
     expect(v.m_mineral_species).toBe('galena, sphalerite');
     expect(v.m_mohs_hardness).toBe('2.5');
     expect(v.m_radioactive).toBe(true);
+  });
+
+  it('hydrates magnetic and reacts_to_acid from mineral type_data', () => {
+    const v = specimenToFormValues(
+      mineralView({
+        type_data: {
+          magnetic: true,
+          reacts_to_acid: true,
+        } as components['schemas']['MineralData'],
+      }),
+    );
+    expect(v.m_magnetic).toBe(true);
+    expect(v.m_reacts_to_acid).toBe(true);
+  });
+
+  it('coerces missing magnetic/reacts_to_acid to false', () => {
+    // No magnetic / reacts_to_acid keys on the wire → form defaults to false
+    // (not undefined), matching the boolean schema.
+    const v = specimenToFormValues(mineralView({ type_data: {} }));
+    expect(v.m_magnetic).toBe(false);
+    expect(v.m_reacts_to_acid).toBe(false);
   });
 
   it('hydrates rock type_data, validating rock_type enum', () => {

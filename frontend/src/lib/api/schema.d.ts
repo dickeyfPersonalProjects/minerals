@@ -782,11 +782,13 @@ export interface components {
             crystal_system?: string;
             fluorescence?: string;
             luster?: string;
+            magnetic?: boolean;
             mindat_id?: string;
             mineral_species?: string[] | null;
             /** Format: double */
             mohs_hardness?: number;
             radioactive?: boolean;
+            reacts_to_acid?: boolean;
         };
         MineralSpeciesListBody: {
             /**
