@@ -107,3 +107,26 @@ func TestMeteoriteData_Validate(t *testing.T) {
 		t.Errorf("TotalKnownWeightG<0: got %v", err)
 	}
 }
+
+func TestQRSheetTemplateCapacity(t *testing.T) {
+	cases := []struct {
+		template QRSheetTemplate
+		wantCap  int
+		wantOK   bool
+	}{
+		{"avery-5160", 30, true},
+		{"avery-5163", 10, true},
+		{"avery-5164", 6, true},
+		{"avery-22806", 12, true},
+		{"avery-l7160", 21, true},
+		{"avery-9999", 0, false},
+		{"", 0, false},
+	}
+	for _, c := range cases {
+		gotCap, gotOK := QRSheetTemplateCapacity(c.template)
+		if gotCap != c.wantCap || gotOK != c.wantOK {
+			t.Errorf("QRSheetTemplateCapacity(%q) = (%d, %v), want (%d, %v)",
+				c.template, gotCap, gotOK, c.wantCap, c.wantOK)
+		}
+	}
+}
