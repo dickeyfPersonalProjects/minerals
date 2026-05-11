@@ -102,13 +102,13 @@ func (f *fakePhotoRepo) ListBySpecimen(_ context.Context, specimenID uuid.UUID, 
 func (f *fakePhotoRepo) MaxPosition(_ context.Context, _ domain.Tx, specimenID uuid.UUID) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	max := 0
+	maxPos := 0
 	for _, p := range f.rows {
-		if p.SpecimenID == specimenID && p.Position > max {
-			max = p.Position
+		if p.SpecimenID == specimenID && p.Position > maxPos {
+			maxPos = p.Position
 		}
 	}
-	return max, nil
+	return maxPos, nil
 }
 
 // fakeFileRepo is an in-memory FileRepo.
@@ -204,7 +204,7 @@ func (s *fakeStorage) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-func nullTxRunner(ctx context.Context, fn func(tx domain.Tx) error) error {
+func nullTxRunner(_ context.Context, fn func(tx domain.Tx) error) error {
 	return fn(nil)
 }
 

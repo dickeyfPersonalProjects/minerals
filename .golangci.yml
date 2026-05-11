@@ -6,8 +6,12 @@ linters:
   enable:
     - bodyclose
     - errorlint
+    - gocritic
     - gosec
+    - misspell
     - noctx
+    - prealloc
+    - revive
     - sloglint
   exclusions:
     paths:
@@ -23,6 +27,40 @@ linters:
     sloglint:
       kv-only: true
       no-mixed-args: true
+    revive:
+      # revive overrides its default rule set when ANY rule is configured,
+      # so we re-list the defaults explicitly and opt out of
+      # package-comments. Several files in internal/api/ carry per-file
+      # design notes attached to their `package api` declaration —
+      # documenting the feature shipped in each file (journal,
+      # mineral_species, specimen_collectors). That's more useful than a
+      # single "Package api ..." sentence and the rule's churn-for-style
+      # cost isn't worth losing those notes.
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: empty-block
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: exported
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: package-comments
+          disabled: true
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: unused-parameter
+        - name: var-declaration
+        - name: var-naming
 formatters:
   enable:
     - goimports

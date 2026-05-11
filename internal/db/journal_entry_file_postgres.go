@@ -118,11 +118,11 @@ func (r *JournalEntryFilePostgres) Delete(ctx context.Context, tx domain.Tx, fil
 func (r *JournalEntryFilePostgres) MaxPosition(ctx context.Context, tx domain.Tx, entryID uuid.UUID) (int, error) {
 	exec := r.execer(tx)
 	const q = `SELECT COALESCE(MAX(position), 0) FROM journal_entry_files WHERE entry_id = $1`
-	var max int
-	if err := exec.QueryRow(ctx, q, entryID).Scan(&max); err != nil {
+	var maxPos int
+	if err := exec.QueryRow(ctx, q, entryID).Scan(&maxPos); err != nil {
 		return 0, fmt.Errorf("journal entry file repo: max position: %w", err)
 	}
-	return max, nil
+	return maxPos, nil
 }
 
 func scanJournalEntryFile(s rowScanner) (domain.JournalEntryFile, error) {

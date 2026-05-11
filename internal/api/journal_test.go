@@ -76,7 +76,7 @@ func (f *fakeJournalRepo) Delete(_ context.Context, _ domain.Tx, id uuid.UUID) e
 	return nil
 }
 
-func (f *fakeJournalRepo) ListBySpecimen(_ context.Context, specimenID uuid.UUID, page domain.Page) ([]domain.JournalEntry, domain.Cursor, error) {
+func (f *fakeJournalRepo) ListBySpecimen(_ context.Context, specimenID uuid.UUID, _ domain.Page) ([]domain.JournalEntry, domain.Cursor, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := []domain.JournalEntry{}

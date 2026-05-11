@@ -175,7 +175,7 @@ func nextMigrationNumber(dir string) (int, error) {
 		}
 		return 0, fmt.Errorf("read dir: %w", err)
 	}
-	max := 0
+	maxN := 0
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -186,11 +186,11 @@ func nextMigrationNumber(dir string) (int, error) {
 		}
 		var n int
 		_, _ = fmt.Sscanf(m[1], "%d", &n)
-		if n > max {
-			max = n
+		if n > maxN {
+			maxN = n
 		}
 	}
-	return max + 1, nil
+	return maxN + 1, nil
 }
 
 func firstOr(args []string, def string) string {

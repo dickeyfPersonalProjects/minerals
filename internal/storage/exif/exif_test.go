@@ -392,7 +392,7 @@ func FuzzParseExif(f *testing.F) {
 	)
 	f.Add(makeJPEGWithExif(f, raw3))
 
-	f.Fuzz(func(t *testing.T, data []byte) {
+	f.Fuzz(func(_ *testing.T, data []byte) {
 		// Filter must not panic on arbitrary input. Errors are fine —
 		// the JPEG walker rejects malformed segments. We discard the
 		// returned bytes; the goal is panic discovery.

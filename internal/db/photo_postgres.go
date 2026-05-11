@@ -157,11 +157,11 @@ func (r *PhotoPostgres) ListBySpecimen(
 func (r *PhotoPostgres) MaxPosition(ctx context.Context, tx domain.Tx, specimenID uuid.UUID) (int, error) {
 	exec := r.execer(tx)
 	const q = `SELECT COALESCE(MAX(position), 0) FROM photos WHERE specimen_id = $1`
-	var max int
-	if err := exec.QueryRow(ctx, q, specimenID).Scan(&max); err != nil {
+	var maxPos int
+	if err := exec.QueryRow(ctx, q, specimenID).Scan(&maxPos); err != nil {
 		return 0, fmt.Errorf("photo repo: max position: %w", err)
 	}
-	return max, nil
+	return maxPos, nil
 }
 
 func scanPhoto(s rowScanner) (domain.Photo, error) {

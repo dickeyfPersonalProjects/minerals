@@ -167,11 +167,11 @@ func TestApiV1NotFoundReturnsEnvelope(t *testing.T) {
 
 type fakePinger struct{ err error }
 
-func (f fakePinger) Ping(ctx context.Context) error { return f.err }
+func (f fakePinger) Ping(_ context.Context) error { return f.err }
 
 type fakeBucket struct{ err error }
 
-func (f fakeBucket) HeadBucket(ctx context.Context) error { return f.err }
+func (f fakeBucket) HeadBucket(_ context.Context) error { return f.err }
 
 func TestReadyzAllChecksOK(t *testing.T) {
 	h := New(Deps{
