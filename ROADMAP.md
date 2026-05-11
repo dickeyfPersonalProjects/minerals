@@ -164,6 +164,13 @@ Separate from the collection. Tracks field trips the user has logged. Each trip 
 
 ---
 
+## Licensing
+
+**PolyForm Noncommercial 1.0.0** — free for noncommercial use; all commercial rights reserved.
+See `LICENSE` at the repo root. Required Notice: Copyright (c) 2026 Francois Dickey — https://github.com/dickeyfPersonalProjects/minerals
+
+---
+
 ## Deferred / out of scope (recorded decisions)
 
 - **CodeQL** — license is GitHub's own terms (not OSI); deferred until license posture is resolved (§3.13)
