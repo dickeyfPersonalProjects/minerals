@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -166,6 +167,33 @@ func (specStubMineralSpeciesRepo) FindByMindatID(context.Context, string) (domai
 	return domain.MineralSpecies{}, domain.ErrMineralSpeciesNotFound
 }
 
+// specStubQRSheetRepo is a never-called stand-in so the
+// type-derived OpenAPI spec advertises the qr-sheet routes during
+// codegen (mi-c78.1 / mi-c78.2).
+type specStubQRSheetRepo struct{}
+
+func (specStubQRSheetRepo) GetByUser(context.Context, uuid.UUID) (domain.QRSheet, error) {
+	return domain.QRSheet{}, domain.ErrQRSheetNotFound
+}
+func (specStubQRSheetRepo) Create(context.Context, domain.Tx, domain.QRSheet) error {
+	return domain.ErrQRSheetNotFound
+}
+func (specStubQRSheetRepo) UpdateTemplate(context.Context, domain.Tx, uuid.UUID, domain.QRSheetTemplate, time.Time) error {
+	return domain.ErrQRSheetNotFound
+}
+func (specStubQRSheetRepo) Delete(context.Context, domain.Tx, uuid.UUID) error {
+	return domain.ErrQRSheetNotFound
+}
+func (specStubQRSheetRepo) AddSpecimen(context.Context, domain.Tx, uuid.UUID, uuid.UUID, time.Time) error {
+	return domain.ErrQRSheetNotFound
+}
+func (specStubQRSheetRepo) RemoveSpecimen(context.Context, domain.Tx, uuid.UUID, uuid.UUID) error {
+	return domain.ErrQRSheetNotFound
+}
+func (specStubQRSheetRepo) ListSpecimens(context.Context, uuid.UUID) ([]domain.QRSheetEntry, error) {
+	return nil, nil
+}
+
 // specStubSpecimenCollectorRepo is a never-called stand-in so the
 // type-derived OpenAPI spec advertises the chain routes during
 // codegen (mi-zv3 / C-3).
@@ -210,6 +238,7 @@ func runOpenAPI(args []string) error {
 		MineralSpecies: &api.MineralSpeciesServiceDeps{
 			Repo: specStubMineralSpeciesRepo{},
 		},
+		QRSheets: specStubQRSheetRepo{},
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        specStubJournalRepo{},
 			Attachments:    specStubJournalAttachmentRepo{},

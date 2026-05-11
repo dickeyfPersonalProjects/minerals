@@ -15,14 +15,17 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	"github.com/google/uuid"
 
 	"github.com/dickeyfPersonalProjects/minerals/internal/auth"
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
+	"github.com/dickeyfPersonalProjects/minerals/internal/pdf"
 )
 
 // QRSheetSpecimenView is one specimen row in the GET response. The
@@ -93,6 +96,15 @@ type removeQRSheetSpecimenInput struct {
 }
 
 type removeQRSheetSpecimenOutput struct{}
+
+// generateQRSheetPDFOutput streams an application/pdf binary body
+// back to the client. The body callback is the documented huma
+// escape hatch for non-JSON responses (used in this package by the
+// /docs and /healthz handlers); huma will still emit an OpenAPI
+// operation for the endpoint via the registered Operation metadata.
+type generateQRSheetPDFOutput struct {
+	Body func(huma.Context)
+}
 
 // QRSheetService wires huma operations against a domain.QRSheetRepo
 // and the specimen repo (needed to surface ErrSpecimenNotFound up
@@ -176,6 +188,22 @@ func registerQRSheetOperations(api huma.API, repo domain.QRSheetRepo) {
 		Errors:        []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound},
 		Middlewares:   mws,
 	}, s.removeSpecimen)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "generate-qr-sheet-pdf",
+		Method:      http.MethodPost,
+		Path:        "/api/v1/qr-sheet/pdf",
+		Summary:     "Generate a print-ready PDF of the current user's QR sheet",
+		Description: "Renders the user's active sheet as a multi-page PDF sized for the chosen Avery template. Each specimen becomes one QR-coded label whose payload is the specimen's absolute URL on this server. Response is `application/pdf` with `Content-Disposition: attachment; filename=\"qr-sheet.pdf\"`. Returns 404 when the user has no sheet and 400 when the sheet is empty.",
+		Tags:        []string{"qr-sheets"},
+		Errors: []int{
+			http.StatusBadRequest,
+			http.StatusUnauthorized,
+			http.StatusNotFound,
+			http.StatusInternalServerError,
+		},
+		Middlewares: append(huma.Middlewares{qrSheetBaseURLMiddleware}, mws...),
+	}, s.generatePDF)
 }
 
 func (s *QRSheetService) get(ctx context.Context, _ *struct{}) (*qrSheetOutput, error) {
@@ -276,6 +304,107 @@ func (s *QRSheetService) removeSpecimen(
 		return nil, mapQRSheetError(err)
 	}
 	return &removeQRSheetSpecimenOutput{}, nil
+}
+
+// generatePDF builds a PDF of the user's active sheet and streams
+// it back as application/pdf. 404 when no sheet, 400 when the sheet
+// has no specimens. The QR payload for each label is the specimen's
+// absolute URL on this server (scheme + host derived from the
+// request via qrSheetBaseURLMiddleware).
+func (s *QRSheetService) generatePDF(
+	ctx context.Context, _ *struct{},
+) (*generateQRSheetPDFOutput, error) {
+	user := auth.FromContext(ctx)
+	sheet, err := s.repo.GetByUser(ctx, user.ID)
+	if err != nil {
+		return nil, mapQRSheetError(err)
+	}
+	entries, err := s.repo.ListSpecimens(ctx, sheet.ID)
+	if err != nil {
+		return nil, newAPIError(http.StatusInternalServerError, "internal_error",
+			"internal server error", nil)
+	}
+	if len(entries) == 0 {
+		return nil, newAPIError(http.StatusBadRequest, "qr_sheet_empty",
+			"qr sheet has no specimens; add specimens before generating a pdf",
+			map[string]any{"constraint": "non_empty_sheet"})
+	}
+
+	template, ok := pdf.TemplateByName(string(sheet.Template))
+	if !ok {
+		// Stored template is not in the v1 vocabulary — the API layer
+		// validates on write, so this can only fire if the DB has been
+		// hand-edited or a template was removed from the code. 500
+		// signals an internal mismatch rather than a client error.
+		return nil, newAPIError(http.StatusInternalServerError, "qr_template_unknown",
+			"qr sheet template is not renderable", nil)
+	}
+
+	base := baseURLFromContext(ctx)
+	urls := make([]string, 0, len(entries))
+	for _, e := range entries {
+		urls = append(urls, base+"/specimens/"+e.SpecimenID.String())
+	}
+
+	body, err := pdf.Generate(template, urls)
+	if err != nil {
+		return nil, newAPIError(http.StatusInternalServerError, "pdf_render_failed",
+			"failed to render qr sheet pdf", nil)
+	}
+
+	return &generateQRSheetPDFOutput{
+		Body: func(c huma.Context) {
+			c.SetHeader("Content-Type", "application/pdf")
+			c.SetHeader("Content-Disposition", `attachment; filename="qr-sheet.pdf"`)
+			c.SetHeader("Content-Length", fmt.Sprintf("%d", len(body)))
+			c.SetHeader("Cache-Control", "private, no-store")
+			_, _ = c.BodyWriter().Write(body)
+		},
+	}, nil
+}
+
+// baseURLCtxKey is the context-value key used by
+// qrSheetBaseURLMiddleware to thread the request's scheme+host to
+// handlers. Defining a private type prevents accidental collision
+// with other packages' context values (Go std-lib convention).
+type baseURLCtxKey struct{}
+
+// qrSheetBaseURLMiddleware extracts the scheme+host pair from the
+// incoming request and stashes it in the handler's ctx so the QR
+// payloads embed an absolute URL pointing back at this server. v1
+// runs single-host so Host (or the proxy-set X-Forwarded-* pair) is
+// authoritative; later, when public sharing ships, this can be
+// replaced with a configured PUBLIC_BASE_URL.
+func qrSheetBaseURLMiddleware(ctx huma.Context, next func(huma.Context)) {
+	r, _ := humago.Unwrap(ctx)
+	next(huma.WithContext(ctx, context.WithValue(
+		ctx.Context(), baseURLCtxKey{}, requestBaseURL(r))))
+}
+
+func baseURLFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(baseURLCtxKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// requestBaseURL builds "scheme://host" from r. Honours
+// X-Forwarded-Proto / X-Forwarded-Host when present so deployments
+// fronted by a TLS-terminating proxy still emit https links. Falls
+// back to r.TLS for direct exposure.
+func requestBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if p := r.Header.Get("X-Forwarded-Proto"); p != "" {
+		scheme = p
+	}
+	host := r.Host
+	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
+		host = h
+	}
+	return scheme + "://" + host
 }
 
 // loadView reads the user's sheet + its specimens and renders the
