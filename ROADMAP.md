@@ -30,7 +30,7 @@ This is the source of truth for the project roadmap.
 - [x] EXIF filtering allowlist (keeps photographic metadata, strips GPS/XMP/IPTC)
 - [x] Synchronous display (1600px) + thumbnail (400px) variant generation on upload
 - [x] Image crop editor — destructive, replaces original, irreversibility warning (#69)
-- [ ] **Image rotate controls** (+90°/−90° buttons + free-form slider) `(mi-uov)`
+- [x] Image rotate controls (+90°/−90° buttons + free-form slider) `(mi-uov)` (#73)
 
 ### Observation journal
 - [x] Append-only journal entries per specimen (body markdown, editable post-creation)
@@ -42,7 +42,7 @@ This is the source of truth for the project roadmap.
 
 ### QR code & label printing
 - [ ] **QR preview page + single-specimen print** `(mi-c78.3)`
-- [ ] **QR sheet backend API** (sheet persistence, add/remove specimens) `(mi-c78.1)`
+- [x] **QR sheet backend API** (sheet persistence, add/remove specimens) `(mi-c78.1)`
 - [ ] **QR sheet PDF generation** (server-side, all 5 Avery templates) `(mi-c78.2)`
 - [ ] **QR sheet builder UI** (specimen grid add/remove, navbar indicator, template switcher) `(mi-c78.4)`
 
@@ -75,7 +75,7 @@ This is the source of truth for the project roadmap.
 - [x] Fuzz harnesses for markdown sanitizer + EXIF parser `(mi-h8j)`
 - [x] a11y tests (vitest-axe) on largest forms `(mi-k9t)`
 - [x] Property-based tests for specimen schema marshalling (#80)
-- [ ] **`lefthook` pre-commit/pre-push hooks** `(mi-cyb)`
+- [x] **`lefthook` pre-commit/pre-push hooks** `(mi-cyb)`
 - [ ] **Test coverage audit + gap analysis** `(mi-5si)` *(blocked: waiting on quality wave)*
 
 ---
