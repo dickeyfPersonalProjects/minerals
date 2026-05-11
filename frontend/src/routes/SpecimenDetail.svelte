@@ -611,11 +611,11 @@
         <button
           type="button"
           onclick={() => requestCropPhoto(heroPhoto.id)}
-          aria-label="Crop photo"
+          aria-label="Crop / Rotate photo"
           data-testid="hero-photo-crop"
           class="absolute right-12 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
         >
-          Crop
+          Crop / Rotate
         </button>
         <button
           type="button"

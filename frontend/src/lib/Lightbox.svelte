@@ -97,10 +97,10 @@
           type="button"
           class="rounded-md bg-white/15 px-3 py-1.5 text-sm font-medium text-white hover:bg-white/25"
           onclick={() => onCrop(target.id)}
-          aria-label="Crop photo"
+          aria-label="Crop / Rotate photo"
           data-testid="lightbox-crop"
         >
-          Crop
+          Crop / Rotate
         </button>
       {/if}
       {#if onDelete}
