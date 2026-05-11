@@ -23,14 +23,18 @@ This is the source of truth for the project roadmap.
 - [x] Editable markdown description per specimen
 - [x] **Fossil specimen type** `(mi-6o8)`
 - [x] **Photo-kind metadata** (visible / UV / other) `(mi-5b6)`
+- [ ] **Structured UV fluorescence** (SW/MW/LW per-wavelength color selectors; validated 15-color enum from Henkel/FMS) `(mi-qas)`
+- [ ] **Magnetic + Reacts to Acid boolean properties** (tri-state null/true/false, same pattern as Radioactive) `(mi-sag)`
 
 ### Photos
 - [x] Multiple photos per specimen with position ordering
+- [ ] **Designate main specimen image** (`main_image_id` nullable FK on `specimens`; NULL = first by position) `(mi-m8q)`
 - [x] Go-proxied upload (browser → Go → MinIO) — S3 never exposed to client
 - [x] EXIF filtering allowlist (keeps photographic metadata, strips GPS/XMP/IPTC)
 - [x] Synchronous display (1600px) + thumbnail (400px) variant generation on upload
 - [x] Image crop editor — destructive, replaces original, irreversibility warning (#69)
 - [x] Image rotate controls (+90°/−90° buttons + free-form slider) `(mi-uov)` (#73)
+- [ ] **Rename "Crop" button to "Crop / Rotate"** (dialog does both since mi-uov) `(mi-lg3)`
 - [ ] **Specimen detail — adaptive image aspect ratio** (no cropping; container matches photo's natural ratio) `(mi-bg6)`
 - [ ] **Specimen list grid — letterbox/pillarbox in square card** (object-fit: contain + black fill) `(mi-467)`
 
