@@ -787,7 +787,7 @@
           onclick={() => requestEditKind(heroPhoto.id)}
           aria-label="Edit photo type"
           data-testid="hero-photo-edit-kind"
-          class="absolute right-32 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
+          class="absolute right-44 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
         >
           Edit type
         </button>
