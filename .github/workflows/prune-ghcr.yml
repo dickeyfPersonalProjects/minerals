@@ -71,9 +71,18 @@ jobs:
 
           # Strict less-than: never delete the prod version itself, nor
           # anything built after the prod image was created (those are the
-          # candidates for the next promotion).
+          # candidates for the next promotion). Also preserve any version
+          # carrying a `v<digit>...` semver release tag (e.g. `v1.0.0`) —
+          # release images must be kept indefinitely.
           jq -rs --arg cutoff "${prod_created_at}" '
-            map(select(.created_at < $cutoff))
+            map(
+              select(.created_at < $cutoff)
+              | select(
+                  ((.metadata.container.tags // [])
+                   | map(test("^v[0-9]"))
+                   | any) | not
+                )
+            )
             | .[]
             | [.id, .created_at, ((.metadata.container.tags // []) | join(","))]
             | @tsv
