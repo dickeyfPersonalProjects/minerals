@@ -255,7 +255,7 @@
         data-testid="qr-sheet-add"
         class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
       >
-        + Add to sheet
+        + Add to QR code sheet
       </button>
     {/if}
   </div>

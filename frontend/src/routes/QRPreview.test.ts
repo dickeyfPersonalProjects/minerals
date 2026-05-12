@@ -173,7 +173,7 @@ describe('QRPreview route — single mode', () => {
     expect(err).toHaveTextContent('no such specimen');
   });
 
-  it('"Add to sheet" appends to an existing sheet', async () => {
+  it('"Add to QR code sheet" appends to an existing sheet', async () => {
     setHash(`#/specimens/qr?specimen=${SPECIMEN_ID}`);
     mockGet.mockImplementation(async (path: string) => {
       if (path === '/api/v1/specimens/{id}') {
@@ -201,7 +201,7 @@ describe('QRPreview route — single mode', () => {
     });
     render(QRPreview);
     const btn = await screen.findByTestId('qr-add-to-sheet');
-    expect(btn).toHaveTextContent('Add to sheet');
+    expect(btn).toHaveTextContent('Add to QR code sheet');
     await fireEvent.click(btn);
     await waitFor(() => {
       expect(mockPost).toHaveBeenCalledWith(

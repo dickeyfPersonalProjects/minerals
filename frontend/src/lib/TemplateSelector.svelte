@@ -2,7 +2,7 @@
   // Template selector dialog (mi-c78.4).
   //
   // Shown when the user needs to pick a sticker-sheet template:
-  //   1. They click "+ Add to sheet" on a specimen card and have no
+  //   1. They click "+ Add to QR code sheet" on a specimen card and have no
   //      sheet yet.
   //   2. They click "Add more specimens" from the single QR preview
   //      and have no sheet yet.

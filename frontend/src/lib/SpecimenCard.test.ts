@@ -130,11 +130,11 @@ describe('SpecimenCard', () => {
       return { ...sp, id: SPECIMEN_ID };
     }
 
-    it('shows "+ Add to sheet" when the specimen is not on the sheet', () => {
+    it('shows "+ Add to QR code sheet" when the specimen is not on the sheet', () => {
       mockGet.mockResolvedValue(listOk([]));
       setNoSheet();
       render(SpecimenCard, { specimen: specimenWithId() });
-      expect(screen.getByTestId('qr-sheet-add')).toHaveTextContent('Add to sheet');
+      expect(screen.getByTestId('qr-sheet-add')).toHaveTextContent('Add to QR code sheet');
       expect(screen.queryByTestId('qr-sheet-badge')).not.toBeInTheDocument();
     });
 
@@ -159,7 +159,7 @@ describe('SpecimenCard', () => {
       expect(screen.queryByTestId('qr-sheet-add')).not.toBeInTheDocument();
     });
 
-    it('clicking "+ Add to sheet" with an existing sheet POSTs the specimen and skips the dialog', async () => {
+    it('clicking "+ Add to QR code sheet" with an existing sheet POSTs the specimen and skips the dialog', async () => {
       mockGet.mockResolvedValue(listOk([]));
       setSheet(sheetView());
       mockPost.mockResolvedValueOnce({
@@ -188,7 +188,7 @@ describe('SpecimenCard', () => {
       expect(screen.queryByTestId('template-selector')).not.toBeInTheDocument();
     });
 
-    it('clicking "+ Add to sheet" with no sheet opens the template selector', async () => {
+    it('clicking "+ Add to QR code sheet" with no sheet opens the template selector', async () => {
       mockGet.mockResolvedValue(listOk([]));
       setNoSheet();
       render(SpecimenCard, { specimen: specimenWithId() });
