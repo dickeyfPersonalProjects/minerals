@@ -82,7 +82,7 @@ This is the source of truth for the project roadmap.
 - [x] a11y tests (vitest-axe) on largest forms `(mi-k9t)`
 - [x] Property-based tests for specimen schema marshalling (#80)
 - [x] **`lefthook` pre-commit/pre-push hooks** `(mi-cyb)`
-- [ ] **Test coverage audit + gap analysis** `(mi-5si)` *(blocked: waiting on quality wave)*
+- [x] **Test coverage audit + gap analysis** `(mi-5si)`
 
 ---
 
