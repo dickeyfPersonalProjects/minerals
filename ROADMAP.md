@@ -96,6 +96,14 @@ This is the source of truth for the project roadmap.
 - [ ] One-time migration: backfill stub `author_id` to real overseer UUID
 - [ ] Per-row authorization (visibility-based reads, ownership-based writes)
 - [ ] CSRF mitigation (decided alongside auth model)
+- [ ] **Keycloak example in `docs/deploy/`** — Keycloak CR using the Keycloak operator CRD (reference deployment for the minerals stack)
+- [ ] **Keycloak Terraform module** — configures the Keycloak identity provider for the minerals app; includes full documentation on setup and usage
+
+### Knowledge base
+- [ ] User-editable markdown wiki — per-collection knowledge base where users can write and organize notes (pages, hierarchy TBD)
+
+### Testing
+- [ ] End-to-end system tests that run against staging on every merge to main
 
 ### Public sharing
 - [ ] Visibility UX — expose `private | unlisted | public` control in specimen UI (column already exists)
