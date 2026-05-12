@@ -118,7 +118,7 @@ describe('Lightbox', () => {
   it('renders the kind label in the lightbox metadata', async () => {
     render(Lightbox, {
       photos: [
-        { id: 'p1', alt: 'first', kind: 'uv' as const },
+        { id: 'p1', alt: 'first', kind: 'uv_lw' as const },
         { id: 'p2', alt: 'second', kind: 'visible' as const },
       ],
       startIndex: 0,
@@ -126,8 +126,8 @@ describe('Lightbox', () => {
     });
 
     const kind = screen.getByTestId('lightbox-kind');
-    expect(kind).toHaveTextContent('UV');
-    expect(kind).toHaveAttribute('data-kind', 'uv');
+    expect(kind).toHaveTextContent('UV LW');
+    expect(kind).toHaveAttribute('data-kind', 'uv_lw');
 
     await fireEvent.keyDown(window, { key: 'ArrowRight' });
     await waitFor(() => {

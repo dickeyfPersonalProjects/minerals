@@ -159,16 +159,20 @@ type Specimen struct {
 }
 
 // PhotoKind discriminates the lighting condition a photo was taken
-// under (mi-5b6). The vocabulary is closed: 'visible' (ordinary
-// daylight / studio), 'uv' (UV-A fluorescence), 'other' (anything
-// else — IR, polarised, etc.). Existing rows default to 'visible'.
+// under (mi-5b6, hq-6lrd). The vocabulary is closed: 'visible'
+// (ordinary daylight / studio), three wavelength-specific UV
+// variants — 'uv_sw' (shortwave, 254 nm), 'uv_mw' (midwave,
+// ~312 nm), 'uv_lw' (longwave, ~365 nm) — and 'other' (anything
+// else: IR, polarised, etc.). Existing rows default to 'visible'.
 type PhotoKind string
 
 // Allowed PhotoKind values, matching the photo_kind enum in the
-// photos table (migration 0004).
+// photos table (migrations 0005 + 0007).
 const (
 	PhotoKindVisible PhotoKind = "visible"
-	PhotoKindUV      PhotoKind = "uv"
+	PhotoKindUVSW    PhotoKind = "uv_sw"
+	PhotoKindUVMW    PhotoKind = "uv_mw"
+	PhotoKindUVLW    PhotoKind = "uv_lw"
 	PhotoKindOther   PhotoKind = "other"
 )
 
@@ -177,7 +181,7 @@ const (
 // PhotoKindVisible explicitly when no kind is supplied.
 func (k PhotoKind) IsValid() bool {
 	switch k {
-	case PhotoKindVisible, PhotoKindUV, PhotoKindOther:
+	case PhotoKindVisible, PhotoKindUVSW, PhotoKindUVMW, PhotoKindUVLW, PhotoKindOther:
 		return true
 	}
 	return false

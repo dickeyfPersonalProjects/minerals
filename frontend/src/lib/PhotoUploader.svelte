@@ -73,10 +73,12 @@
   }
   const { specimenId, onUploaded }: Props = $props();
 
-  // Photo kind applied to the next batch of uploads (mi-5b6). The
-  // selector is sticky for the session so capturing a series of UV
-  // shots doesn't require re-selecting on every drop.
-  type Kind = 'visible' | 'uv' | 'other';
+  // Photo kind applied to the next batch of uploads (mi-5b6,
+  // hq-6lrd). The selector is sticky for the session so capturing
+  // a series of UV shots doesn't require re-selecting on every drop.
+  // 'other' is intentionally excluded from the picker — see the
+  // matching note in SpecimenDetail's "Edit type" modal.
+  type Kind = 'visible' | 'uv_sw' | 'uv_mw' | 'uv_lw';
   let kind: Kind = $state('visible');
 
   let items: UploadItem[] = $state([]);
@@ -265,7 +267,7 @@
       data-testid="photo-kind-selector"
     >
       <legend class="sr-only">Photo kind</legend>
-      {#each [{ value: 'visible', label: 'Visible' }, { value: 'uv', label: 'UV' }, { value: 'other', label: 'Other' }] as opt (opt.value)}
+      {#each [{ value: 'visible', label: 'Visible' }, { value: 'uv_sw', label: 'UV SW' }, { value: 'uv_mw', label: 'UV MW' }, { value: 'uv_lw', label: 'UV LW' }] as opt (opt.value)}
         <label class="inline-flex cursor-pointer items-center gap-1.5">
           <input
             type="radio"

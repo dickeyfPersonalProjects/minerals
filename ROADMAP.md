@@ -23,6 +23,7 @@ This is the source of truth for the project roadmap.
 - [x] Editable markdown description per specimen
 - [x] **Fossil specimen type** `(mi-6o8)`
 - [x] **Photo-kind metadata** (visible / UV / other) `(mi-5b6)`
+- [x] **Per-photo UV wavelength** (split 'uv' into UV SW / MW / LW; "Edit type" button on hero photo) `(hq-6lrd)`
 - [x] **Structured UV fluorescence** (SW/MW/LW per-wavelength color selectors; validated 15-color enum from Henkel/FMS) `(mi-qas)` (#109)
 - [x] **Magnetic + Reacts to Acid boolean properties** (tri-state null/true/false, same pattern as Radioactive) `(mi-sag)` (#108)
 

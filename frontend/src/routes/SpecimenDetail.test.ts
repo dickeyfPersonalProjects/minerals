@@ -61,7 +61,7 @@ function specimen(seed: SpecimenSeed = {}) {
 type PhotoSeed = {
   id: string;
   position?: number;
-  kind?: 'visible' | 'uv' | 'other';
+  kind?: 'visible' | 'uv_sw' | 'uv_mw' | 'uv_lw' | 'other';
   file_id?: string;
 };
 
@@ -344,7 +344,7 @@ describe('SpecimenDetail route', () => {
     setupFetch({
       photos: [
         photo({ id: 'pppppppp-0000-0000-0000-000000000001', position: 1, kind: 'visible' }),
-        photo({ id: 'pppppppp-0000-0000-0000-000000000002', position: 2, kind: 'uv' }),
+        photo({ id: 'pppppppp-0000-0000-0000-000000000002', position: 2, kind: 'uv_lw' }),
         photo({ id: 'pppppppp-0000-0000-0000-000000000003', position: 3, kind: 'other' }),
       ],
     });
@@ -357,19 +357,19 @@ describe('SpecimenDetail route', () => {
     expect(screen.queryByTestId('hero-photo-kind-badge')).toBeNull();
     const badges = screen.getAllByTestId('gallery-thumb-kind-badge');
     expect(badges).toHaveLength(2);
-    expect(badges.map((b) => b.getAttribute('data-kind'))).toEqual(['uv', 'other']);
+    expect(badges.map((b) => b.getAttribute('data-kind'))).toEqual(['uv_lw', 'other']);
 
-    // Filter to UV only — gallery shrinks to the one UV photo
+    // Filter to UV LW only — gallery shrinks to the one UV LW photo
     // (which becomes the hero), and other-kind thumbs disappear.
-    await fireEvent.click(screen.getByTestId('photo-kind-filter-uv'));
+    await fireEvent.click(screen.getByTestId('photo-kind-filter-uv_lw'));
     await waitFor(() => {
       const thumbs = screen.queryAllByTestId('gallery-thumb');
       expect(thumbs).toHaveLength(0);
     });
-    // The new hero is the UV photo, and since it's no longer
+    // The new hero is the UV LW photo, and since it's no longer
     // 'visible' the hero badge appears.
     const heroBadge = screen.getByTestId('hero-photo-kind-badge');
-    expect(heroBadge).toHaveAttribute('data-kind', 'uv');
+    expect(heroBadge).toHaveAttribute('data-kind', 'uv_lw');
   });
 
   it('opens and closes the lightbox when the hero photo is clicked', async () => {
@@ -768,6 +768,71 @@ describe('SpecimenDetail route', () => {
       expect(path).toBe('/api/v1/specimens/{id}');
       expect(opts.params.path.id).toBe(SPECIMEN_ID);
       expect(opts.body).toEqual({ main_image_id: FILE_B });
+    });
+  });
+
+  // hq-6lrd: "Edit type" button on the hero photo opens a picker
+  // for the four lighting conditions (Visible / UV SW / UV MW / UV LW).
+  describe('edit photo type flow', () => {
+    const PHOTO_ID = 'pppppppp-0000-0000-0000-00000000aaaa';
+
+    it('opens a picker with the current kind marked, with Visible/UV SW/MW/LW options', async () => {
+      setupFetch({ photos: [photo({ id: PHOTO_ID, position: 1, kind: 'uv_sw' })] });
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+
+      await fireEvent.click(await screen.findByTestId('hero-photo-edit-kind'));
+
+      expect(screen.getByTestId('edit-kind-modal')).toBeInTheDocument();
+      for (const k of ['visible', 'uv_sw', 'uv_mw', 'uv_lw']) {
+        expect(screen.getByTestId(`edit-kind-option-${k}`)).toBeInTheDocument();
+      }
+      expect(screen.getByTestId('edit-kind-option-uv_sw')).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByTestId('edit-kind-option-visible')).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+    });
+
+    it('PATCHes the photo kind and closes the modal on selection', async () => {
+      setupFetch({ photos: [photo({ id: PHOTO_ID, position: 1, kind: 'visible' })] });
+      mockPatch.mockResolvedValueOnce({
+        data: { ...photo({ id: PHOTO_ID, position: 1, kind: 'uv_mw' }) },
+        error: undefined,
+        response: new Response(null, { status: 200 }),
+      });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('hero-photo-edit-kind'));
+      await fireEvent.click(screen.getByTestId('edit-kind-option-uv_mw'));
+
+      await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
+      const [path, opts] = mockPatch.mock.calls[0]!;
+      expect(path).toBe('/api/v1/photos/{id}');
+      expect(opts.params.path.id).toBe(PHOTO_ID);
+      expect(opts.body).toEqual({ kind: 'uv_mw' });
+      await waitFor(() => expect(screen.queryByTestId('edit-kind-modal')).toBeNull());
+    });
+
+    it('closes without a PATCH when the user picks the current kind', async () => {
+      setupFetch({ photos: [photo({ id: PHOTO_ID, position: 1, kind: 'uv_lw' })] });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('hero-photo-edit-kind'));
+      await fireEvent.click(screen.getByTestId('edit-kind-option-uv_lw'));
+
+      expect(mockPatch).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByTestId('edit-kind-modal')).toBeNull());
+    });
+
+    it('Cancel closes the modal without mutating', async () => {
+      setupFetch({ photos: [photo({ id: PHOTO_ID, position: 1, kind: 'visible' })] });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('hero-photo-edit-kind'));
+      await fireEvent.click(screen.getByTestId('edit-kind-cancel'));
+
+      expect(mockPatch).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByTestId('edit-kind-modal')).toBeNull());
     });
   });
 });

@@ -43,6 +43,11 @@
   let loadState: LoadState = $state({ kind: 'idle' });
   let lightboxIndex: number | null = $state(null);
   let cropTarget: Photo | null = $state(null);
+  // "Edit type" modal target (hq-6lrd) — null when closed. The
+  // separate `savingKind` guard prevents a double-submit from
+  // racing the optimistic update.
+  let editKindTarget: Photo | null = $state(null);
+  let savingKind = $state(false);
   let journalCreating = $state(false);
   let editingEntryId: string | null = $state(null);
   let editingChain = $state(false);
@@ -211,6 +216,44 @@
   async function handleCropApplied() {
     if (!specimen) return;
     await refetchPhotos(specimen.id);
+  }
+
+  function requestEditKind(id: string) {
+    const target = photos.find((p) => p.id === id);
+    if (!target) return;
+    // Close the lightbox so the picker is the only overlay.
+    lightboxIndex = null;
+    editKindTarget = target;
+  }
+
+  function closeEditKind() {
+    if (!savingKind) editKindTarget = null;
+  }
+
+  async function applyEditKind(kind: PhotoKind): Promise<void> {
+    const target = editKindTarget;
+    if (!target || !specimen || savingKind) return;
+    const current: PhotoKind = (target.kind as PhotoKind | undefined) ?? 'visible';
+    if (kind === current) {
+      editKindTarget = null;
+      return;
+    }
+    savingKind = true;
+    try {
+      const { error, response } = await client.PATCH('/api/v1/photos/{id}', {
+        params: { path: { id: target.id } },
+        body: { kind },
+      });
+      if (error) {
+        toastError(errorMessage(error, response.status));
+        return;
+      }
+      toastSuccess('Photo type updated');
+      editKindTarget = null;
+      await refetchPhotos(specimen.id);
+    } finally {
+      savingKind = false;
+    }
   }
 
   function requestDeletePhoto(id: string) {
@@ -467,15 +510,22 @@
     fossil: 'bg-[var(--color-fossil)] text-[var(--color-accent-fg)]',
   };
 
-  // Photo-kind UI metadata (mi-5b6). Mirrors the backend enum;
-  // 'visible' badges are suppressed because that's the v1 default
-  // and would clutter the gallery.
+  // Photo-kind UI metadata (mi-5b6, hq-6lrd). Mirrors the backend
+  // enum; 'visible' badges are suppressed because that's the v1
+  // default and would clutter the gallery.
   type PhotoKind = NonNullable<Photo['kind']>;
   const PHOTO_KIND_LABELS: Record<PhotoKind, string> = {
     visible: 'Visible',
-    uv: 'UV',
+    uv_sw: 'UV SW',
+    uv_mw: 'UV MW',
+    uv_lw: 'UV LW',
     other: 'Other',
   };
+  // Editable kinds offered by the "Edit type" modal (hq-6lrd). The
+  // backend keeps 'other' for legacy / IR / polarised photos, but
+  // the picker only exposes the four mineralogically meaningful
+  // lighting conditions the bead asks for.
+  const EDITABLE_PHOTO_KINDS: PhotoKind[] = ['visible', 'uv_sw', 'uv_mw', 'uv_lw'];
   // Filter chip state; 'all' shows the whole gallery, anything else
   // narrows to a single kind. Resets when navigating to a new
   // specimen via the load $effect.
@@ -489,7 +539,13 @@
   // Counts per kind drive the filter chip labels and visibility
   // (we hide chips for kinds with zero photos to avoid noise).
   const kindCounts = $derived.by(() => {
-    const counts: Record<PhotoKind, number> = { visible: 0, uv: 0, other: 0 };
+    const counts: Record<PhotoKind, number> = {
+      visible: 0,
+      uv_sw: 0,
+      uv_mw: 0,
+      uv_lw: 0,
+      other: 0,
+    };
     for (const p of photos) {
       const k: PhotoKind = (p.kind as PhotoKind) ?? 'visible';
       counts[k] = (counts[k] ?? 0) + 1;
@@ -515,7 +571,9 @@
   const kindFilterOptions = $derived<{ value: 'all' | PhotoKind; label: string; count: number }[]>([
     { value: 'all', label: 'All', count: photos.length },
     { value: 'visible', label: 'Visible', count: kindCounts.visible },
-    { value: 'uv', label: 'UV', count: kindCounts.uv },
+    { value: 'uv_sw', label: 'UV SW', count: kindCounts.uv_sw },
+    { value: 'uv_mw', label: 'UV MW', count: kindCounts.uv_mw },
+    { value: 'uv_lw', label: 'UV LW', count: kindCounts.uv_lw },
     { value: 'other', label: 'Other', count: kindCounts.other },
   ]);
 
@@ -724,6 +782,15 @@
             ★ Set as main
           </button>
         {/if}
+        <button
+          type="button"
+          onclick={() => requestEditKind(heroPhoto.id)}
+          aria-label="Edit photo type"
+          data-testid="hero-photo-edit-kind"
+          class="absolute right-32 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
+        >
+          Edit type
+        </button>
         <button
           type="button"
           onclick={() => requestCropPhoto(heroPhoto.id)}
@@ -1086,6 +1153,73 @@
       onClose={closeCrop}
       onApplied={handleCropApplied}
     />
+  {/if}
+
+  {#if editKindTarget}
+    {@const currentKind: PhotoKind =
+      (editKindTarget.kind as PhotoKind | undefined) ?? 'visible'}
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="edit-kind-title"
+      data-testid="edit-kind-modal"
+      onclick={(e) => {
+        if (e.target === e.currentTarget) closeEditKind();
+      }}
+      onkeydown={(e) => {
+        if (e.key === 'Escape') closeEditKind();
+      }}
+      tabindex="-1"
+    >
+      <div
+        class="w-full max-w-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
+      >
+        <h2 id="edit-kind-title" class="font-serif text-lg font-semibold text-[var(--color-text)]">
+          Photo type
+        </h2>
+        <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+          Lighting condition this photo was taken under.
+        </p>
+        <ul class="mt-4 space-y-2">
+          {#each EDITABLE_PHOTO_KINDS as kind (kind)}
+            {@const isCurrent = kind === currentKind}
+            <li>
+              <button
+                type="button"
+                onclick={() => applyEditKind(kind)}
+                disabled={savingKind}
+                data-testid={`edit-kind-option-${kind}`}
+                aria-pressed={isCurrent}
+                class="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60 {isCurrent
+                  ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)] text-[var(--color-text)]'
+                  : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:border-[var(--color-accent)]'}"
+              >
+                <span>{PHOTO_KIND_LABELS[kind]}</span>
+                {#if isCurrent}
+                  <span
+                    class="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-accent)]"
+                  >
+                    Current
+                  </span>
+                {/if}
+              </button>
+            </li>
+          {/each}
+        </ul>
+        <div class="mt-5 flex justify-end">
+          <button
+            type="button"
+            onclick={closeEditKind}
+            disabled={savingKind}
+            data-testid="edit-kind-cancel"
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   {/if}
 
   {#if deleteTarget && deleteDialogProps}

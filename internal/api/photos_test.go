@@ -371,7 +371,7 @@ func TestPhotoUpload_KindDefaultsToVisible(t *testing.T) {
 }
 
 func TestPhotoUpload_KindRoundtrip(t *testing.T) {
-	for _, kind := range []string{"visible", "uv", "other"} {
+	for _, kind := range []string{"visible", "uv_sw", "uv_mw", "uv_lw", "other"} {
 		t.Run(kind, func(t *testing.T) {
 			h, photos, _, _ := newPhotoServer(t)
 			specimenID := uuid.New()
@@ -782,7 +782,7 @@ func TestPhotoPatch_UpdatesKind(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch,
 		"/api/v1/photos/"+photoID.String(),
-		strings.NewReader(`{"kind": "uv"}`))
+		strings.NewReader(`{"kind": "uv_lw"}`))
 	req.Header.Set("Content-Type", "application/json")
 	h.ServeHTTP(rec, req)
 
@@ -793,11 +793,11 @@ func TestPhotoPatch_UpdatesKind(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if view.Kind != "uv" {
-		t.Errorf("response kind = %q, want uv", view.Kind)
+	if view.Kind != "uv_lw" {
+		t.Errorf("response kind = %q, want uv_lw", view.Kind)
 	}
-	if got := photos.rows[photoID].Kind; got != domain.PhotoKindUV {
-		t.Errorf("stored kind = %q, want uv", got)
+	if got := photos.rows[photoID].Kind; got != domain.PhotoKindUVLW {
+		t.Errorf("stored kind = %q, want uv_lw", got)
 	}
 }
 
