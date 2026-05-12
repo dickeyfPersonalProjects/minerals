@@ -139,10 +139,10 @@ func TestIntegration_PhotoCreate_FKViolationMapsToNotFound(t *testing.T) {
 	}
 }
 
-// TestIntegration_PhotoKindRoundtrip exercises the migration-0004
-// photo_kind enum: Create with each allowed value round-trips through
-// GetByID; Update changes the value; the empty zero-value falls back
-// to 'visible' (matches the column default and the Create defaulting).
+// TestIntegration_PhotoKindRoundtrip exercises the photo_kind enum
+// (migrations 0005 + 0007): Create with each allowed value round-trips
+// through GetByID; Update changes the value; the empty zero-value falls
+// back to 'visible' (matches the column default and the Create defaulting).
 func TestIntegration_PhotoKindRoundtrip(t *testing.T) {
 	pool := scopedDB(t)
 	ctx := authedCtx()
@@ -160,7 +160,9 @@ func TestIntegration_PhotoKindRoundtrip(t *testing.T) {
 
 	for _, kind := range []domain.PhotoKind{
 		domain.PhotoKindVisible,
-		domain.PhotoKindUV,
+		domain.PhotoKindUVSW,
+		domain.PhotoKindUVMW,
+		domain.PhotoKindUVLW,
 		domain.PhotoKindOther,
 	} {
 		fid := domain.NewID()
@@ -211,8 +213,8 @@ func TestIntegration_PhotoKindRoundtrip(t *testing.T) {
 		t.Errorf("default kind = %q, want visible", got.Kind)
 	}
 
-	// Update flips it to UV.
-	got.Kind = domain.PhotoKindUV
+	// Update flips it to UV LW.
+	got.Kind = domain.PhotoKindUVLW
 	if err := photos.Update(ctx, nil, got); err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -220,8 +222,8 @@ func TestIntegration_PhotoKindRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-get: %v", err)
 	}
-	if after.Kind != domain.PhotoKindUV {
-		t.Errorf("after update kind = %q, want uv", after.Kind)
+	if after.Kind != domain.PhotoKindUVLW {
+		t.Errorf("after update kind = %q, want uv_lw", after.Kind)
 	}
 }
 

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
 
-  type LightboxPhotoKind = 'visible' | 'uv' | 'other';
+  type LightboxPhotoKind = 'visible' | 'uv_sw' | 'uv_mw' | 'uv_lw' | 'other';
   interface Props {
     photos: { id: string; alt: string; kind?: LightboxPhotoKind }[];
     startIndex: number;
@@ -11,11 +11,13 @@
   }
 
   // Mirror of SpecimenDetail's PHOTO_KIND_LABELS — the lightbox is
-  // standalone enough that duplicating three strings beats threading
+  // standalone enough that duplicating these strings beats threading
   // a label map through props.
   const KIND_LABELS: Record<LightboxPhotoKind, string> = {
     visible: 'Visible',
-    uv: 'UV',
+    uv_sw: 'UV SW',
+    uv_mw: 'UV MW',
+    uv_lw: 'UV LW',
     other: 'Other',
   };
 

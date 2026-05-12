@@ -119,7 +119,7 @@ describe('PhotoUploader', () => {
 
     render(PhotoUploader, { specimenId: SPECIMEN_ID, onUploaded });
 
-    await fireEvent.click(screen.getByTestId('photo-kind-uv'));
+    await fireEvent.click(screen.getByTestId('photo-kind-uv_lw'));
 
     const input = screen.getByTestId('photo-file-input') as HTMLInputElement;
     await fireEvent.change(input, { target: { files: [jpeg('uv.jpg', 1024)] } });
@@ -127,7 +127,7 @@ describe('PhotoUploader', () => {
     await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
     const opts = mockPost.mock.calls[0]![1];
     const fd = opts.bodySerializer(opts.body) as FormData;
-    expect(fd.get('kind')).toBe('uv');
+    expect(fd.get('kind')).toBe('uv_lw');
   });
 
   it('rejects disallowed types client-side without calling the API', async () => {

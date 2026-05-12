@@ -872,7 +872,7 @@ export interface components {
              * @description New photo kind; omit to leave unchanged.
              * @enum {string}
              */
-            kind?: "visible" | "uv" | "other";
+            kind?: "visible" | "uv_sw" | "uv_mw" | "uv_lw" | "other";
             /**
              * Format: int64
              * @description New manual ordering position; omit to leave unchanged.
@@ -981,10 +981,10 @@ export interface components {
             /** @description UUIDv7 primary key. */
             id: string;
             /**
-             * @description Lighting condition the photo was taken under: visible, uv, or other.
+             * @description Lighting condition the photo was taken under: visible, uv_sw (shortwave UV), uv_mw (midwave UV), uv_lw (longwave UV), or other.
              * @enum {string}
              */
-            kind: "visible" | "uv" | "other";
+            kind: "visible" | "uv_sw" | "uv_mw" | "uv_lw" | "other";
             /**
              * Format: int64
              * @description Manual ordering; 1-indexed within the specimen's photos.
@@ -3505,7 +3505,7 @@ export interface operations {
                      * @description The image file to upload.
                      */
                     file: string;
-                    /** @description Optional photo kind: visible, uv, or other. Defaults to visible. */
+                    /** @description Optional photo kind: visible, uv_sw, uv_mw, uv_lw, or other. Defaults to visible. */
                     kind?: string;
                     /** @description Optional ISO 8601 timestamp; defaults to EXIF DateTimeOriginal when present. */
                     taken_at?: string;
