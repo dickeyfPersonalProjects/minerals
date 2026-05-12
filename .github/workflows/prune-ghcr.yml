@@ -1,0 +1,128 @@
+name: Prune GHCR images
+
+# Deletes container images from ghcr.io that are older than the version
+# currently tagged `:prod`. Called automatically by `Main build & publish`
+# after a successful image push (mi-8ba), and also runnable manually with
+# a default-true dry_run for inspection.
+
+on:
+  workflow_call:
+    inputs:
+      dry_run:
+        description: 'List candidates without deleting'
+        required: false
+        default: false
+        type: boolean
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'List candidates without deleting'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  packages: write
+
+env:
+  PACKAGE_OWNER: dickeyfpersonalprojects
+  PACKAGE_NAME: minerals
+  # GHCR REST API path segment: `users` for personal accounts, `orgs` for
+  # organizations. The current package is owned by a personal account.
+  OWNER_TYPE: users
+
+jobs:
+  prune:
+    name: Delete images older than :prod
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prune older versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          api_path="/${OWNER_TYPE}/${PACKAGE_OWNER}/packages/container/${PACKAGE_NAME}/versions"
+
+          # `gh api --paginate ... --jq '.[]'` emits one version object per
+          # line across all pages, which jq -s can re-slurp into an array.
+          gh api --paginate "${api_path}" --jq '.[]' > versions.ndjson
+
+          total=$(wc -l < versions.ndjson | tr -d ' ')
+          echo "Fetched ${total} version(s) from GHCR."
+
+          prod_created_at=$(jq -rs '
+            map(select((.metadata.container.tags // []) | index("prod")))
+            | (.[0].created_at // "")
+          ' versions.ndjson)
+
+          if [ -z "${prod_created_at}" ]; then
+            echo "::warning::No version tagged :prod found — skipping prune."
+            {
+              echo "## Prune GHCR images"
+              echo ""
+              echo ":warning: No :prod tag — nothing to prune."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "Prod image created at: ${prod_created_at}"
+
+          # Strict less-than: never delete the prod version itself, nor
+          # anything built after the prod image was created (those are the
+          # candidates for the next promotion).
+          jq -rs --arg cutoff "${prod_created_at}" '
+            map(select(.created_at < $cutoff))
+            | .[]
+            | [.id, .created_at, ((.metadata.container.tags // []) | join(","))]
+            | @tsv
+          ' versions.ndjson > to_delete.tsv
+
+          candidate_count=$(wc -l < to_delete.tsv | tr -d ' ')
+          echo "Found ${candidate_count} version(s) older than :prod."
+
+          {
+            echo "## Prune GHCR images"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Package | \`${OWNER_TYPE}/${PACKAGE_OWNER}/${PACKAGE_NAME}\` |"
+            echo "| :prod created_at | \`${prod_created_at}\` |"
+            echo "| Total versions | ${total} |"
+            echo "| Candidates (older than :prod) | ${candidate_count} |"
+            echo "| Dry run | \`${DRY_RUN}\` |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${candidate_count}" = "0" ]; then
+            echo "Nothing to delete."
+            exit 0
+          fi
+
+          {
+            echo "### Versions affected"
+            echo ""
+            echo "| ID | created_at | tags |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          deleted=0
+          while IFS=$'\t' read -r id created tags; do
+            [ -z "${id}" ] && continue
+            tag_display="${tags:-<untagged>}"
+            if [ "${DRY_RUN}" = "true" ]; then
+              echo "[dry-run] would delete version ${id} (created ${created}, tags=${tag_display})"
+            else
+              echo "Deleting version ${id} (created ${created}, tags=${tag_display})"
+              gh api --method DELETE "${api_path}/${id}"
+              deleted=$((deleted + 1))
+            fi
+            echo "| \`${id}\` | \`${created}\` | \`${tag_display}\` |" >> "$GITHUB_STEP_SUMMARY"
+          done < to_delete.tsv
+
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "Dry run — no versions were deleted."
+          else
+            echo "Deleted ${deleted} version(s)."
+          fi

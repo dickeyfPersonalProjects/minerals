@@ -377,3 +377,14 @@ jobs:
         env:
           SHORT_SHA: ${{ steps.sha.outputs.short }}
         run: docker buildx imagetools inspect "${IMAGE_NAME}:sha-${SHORT_SHA}"
+
+  # After a successful push, prune GHCR versions older than the current
+  # :prod image (mi-8ba). Skipped when no :prod tag exists yet.
+  prune:
+    name: Prune older GHCR images
+    needs: [detect, merge]
+    if: needs.detect.outputs.present == 'true'
+    uses: ./.github/workflows/prune-ghcr.yml
+    permissions:
+      packages: write
+    secrets: inherit
