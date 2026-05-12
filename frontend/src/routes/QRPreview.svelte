@@ -101,7 +101,7 @@
       return;
     }
     view = { kind: 'single', specimen: data };
-    // Probe sheet existence so the "Add to sheet" button shows
+    // Probe sheet existence so the "Add to QR code sheet" button shows
     // its accurate label. Errors are swallowed by the store; the
     // button degrades to the "start a sheet" copy on failure.
     void refreshQrSheet();
@@ -381,7 +381,7 @@
           data-testid="qr-add-to-sheet"
           class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-50"
         >
-          {hasSheet ? 'Add to sheet' : 'Start a sheet with this specimen'}
+          {hasSheet ? 'Add to QR code sheet' : 'Start a sheet with this specimen'}
         </button>
         <a
           href="/specimens/qr"
