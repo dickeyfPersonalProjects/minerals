@@ -222,8 +222,59 @@ The module switches modes automatically based on whether
   For local dev that's `http://localhost:8080`; for cluster envs that's
   `https://auth.${env_domain}` after the operator + ingress are up.
 - `terraform` ≥ 1.5.0.
-- For OIDC-auth mode: a service-account client already created in the
-  `master` realm with `realm-admin` on the minerals realm.
+- For OIDC-auth mode: a `terraform-admin` service-account client
+  provisioned in the `master` realm with the `admin` role assigned to
+  its service account. See [Terraform Authentication](#terraform-authentication)
+  below for the click-through.
+
+### Terraform Authentication
+
+Two options, switched automatically based on whether `keycloak_client_id`
+is set in `terraform.tfvars`.
+
+#### Option 1: OIDC Client Credentials (Recommended)
+
+For CI/CD and shared environments. Requires one-time manual setup in
+Keycloak.
+
+1. Log in to Keycloak Admin Console.
+2. Select the **master** realm.
+3. Go to **Clients → Create client**:
+   - Client ID: `terraform-admin`
+   - Client type: OpenID Connect → **Next**
+4. Capability config:
+   - Client authentication: **ON**
+   - Service accounts roles: **ON** → **Next** → **Save**
+5. Open the **Credentials** tab → copy the **Client secret**.
+6. Open the **Service account roles** tab → **Assign role**:
+   - Filter by: **Realm roles**
+   - Assign the `admin` role (description: `${role_admin}`).
+
+Then configure `terraform.tfvars`:
+
+```hcl
+keycloak_url           = "http://localhost:8080"
+keycloak_client_id     = "terraform-admin"
+keycloak_client_secret = "your-client-secret-here"
+```
+
+No admin password ends up in Terraform state with this mode, which is
+why it's preferred for staging and prod.
+
+#### Option 2: Username/Password (Local dev only)
+
+Uses the master-realm admin credentials directly. Suitable for local
+development only — the admin password lands in Terraform state.
+
+Configure `terraform.tfvars`:
+
+```hcl
+keycloak_url            = "http://localhost:8080"
+keycloak_client_id      = "admin-cli"
+keycloak_client_secret  = ""   # leave empty to use password auth
+keycloak_admin_user     = "admin"
+keycloak_admin_password = "admin"
+```
 
 ### Local dev (Mode: master credentials)
 
