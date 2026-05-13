@@ -128,11 +128,11 @@ clusters/<cluster>/keycloak/
 │   ├── keycloak-cr.yaml        ← merge patch: hostname + http + ingress
 │   ├── keycloak-db-host.yaml   ← merge patch: spec.db.host
 │   └── database-cluster.yaml   ← merge patch: spec.cluster.name
-└── kustomization.yaml          ← also pulls minerals repo's docs/deploy/example/keycloak via remote ref
+└── kustomization.yaml          ← also pulls minerals repo's kustomize/base/keycloak via remote ref
 ```
 
 The kustomization uses a remote base pointing at this repo's
-`docs/deploy/example/keycloak`:
+`kustomize/base/keycloak`:
 
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -142,7 +142,7 @@ resources:
   - namespace.yaml
   - certificate.yaml
   - keycloak-db.yaml
-  - https://github.com/dickeyfPersonalProjects/minerals//docs/deploy/example/keycloak?ref=main
+  - https://github.com/dickeyfPersonalProjects/minerals//kustomize/base/keycloak?ref=main
 patches:
   - path: patches/keycloak-cr.yaml
     target: {kind: Keycloak, name: keycloak}
