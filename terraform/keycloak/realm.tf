@@ -1,7 +1,7 @@
 resource "keycloak_realm" "minerals" {
   realm        = var.realm_name
   enabled      = true
-  display_name = "Minerals"
+  display_name = var.realm_display_name
 
   registration_allowed           = var.registration_allowed
   registration_email_as_username = true
