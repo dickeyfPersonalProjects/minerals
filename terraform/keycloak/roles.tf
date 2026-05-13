@@ -1,17 +1,23 @@
+resource "keycloak_role" "user" {
+  realm_id    = keycloak_realm.minerals.id
+  name        = "user"
+  description = "Authenticated end-user of the Minerals app."
+}
+
 resource "keycloak_role" "admin" {
   realm_id    = keycloak_realm.minerals.id
   name        = "admin"
   description = "Full administrative access to the Minerals app."
 }
 
-resource "keycloak_role" "collector" {
+resource "keycloak_role" "devops_viewer" {
   realm_id    = keycloak_realm.minerals.id
-  name        = "collector"
-  description = "Authenticated user who can manage their own mineral collection."
+  name        = "devops-viewer"
+  description = "Read-only access to operational tooling. devops-admin inherits this via Casbin (not Keycloak composite roles)."
 }
 
-resource "keycloak_role" "viewer" {
+resource "keycloak_role" "devops_admin" {
   realm_id    = keycloak_realm.minerals.id
-  name        = "viewer"
-  description = "Read-only access to public collection data."
+  name        = "devops-admin"
+  description = "Full operational access. Inherits devops-viewer via Casbin (not Keycloak composite roles)."
 }
