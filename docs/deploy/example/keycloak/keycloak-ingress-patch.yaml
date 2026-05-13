@@ -17,16 +17,15 @@ apiVersion: k8s.keycloak.org/v2alpha1
 kind: Keycloak
 metadata:
   name: keycloak
-  namespace: keycloak
 spec:
+  db:
+    host: minerals-pg-rw.<namespace>.svc.cluster.local
   hostname:
     hostname: auth.example.com
   http:
-    tlsSecret: keycloak-tls
+    httpEnabled: true
   ingress:
     enabled: true
     annotations:
-      # Whatever the cluster's ingress controller expects. Example for
-      # ingress-nginx terminating TLS at Keycloak rather than at the
-      # ingress:
-      nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+      example: value
+    tlsSecret: auth-web-crt
