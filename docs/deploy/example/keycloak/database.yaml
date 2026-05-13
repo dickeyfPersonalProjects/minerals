@@ -1,0 +1,16 @@
+# CNPG Database CR that provisions the `keycloak` database inside the
+# env's Postgres cluster.
+#
+# The `spec.cluster.name` value is a placeholder — gitops overlays must
+# patch it to match the actual CNPG Cluster name in the target
+# environment (e.g. `<env>-pg`). The `owner` field must match the role
+# referenced by the `keycloak-db` SealedSecret's `username` key.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: keycloak
+spec:
+  name: keycloak
+  owner: keycloak
+  cluster:
+    name: example-pg
