@@ -1,0 +1,24 @@
+# Env-agnostic base for a Keycloak deployment.
+#
+# This kustomization only includes the two resources that are identical
+# across environments: the CNPG Database CR and the Keycloak CR (minus
+# its env-specific http/ingress/hostname blocks).
+#
+# Each environment's overlay is expected to add:
+#   - SealedSecret named `keycloak-db` with `username` + `password` keys
+#     (consumed by the db.usernameSecret / db.passwordSecret refs in
+#     keycloak.yaml).
+#   - Certificate resource for the public auth hostname (the resulting
+#     Secret is referenced from the strategic merge patch below as
+#     `ingress.tlsSecret`).
+#   - Strategic merge patch on the Keycloak CR adding the env-specific
+#     `http`, `ingress`, and `hostname` blocks (target IP, tlsSecret
+#     name, public hostname).
+#   - A patch on database.yaml setting `spec.cluster.name` and on
+#     keycloak.yaml setting `spec.db.host` to match the env's CNPG
+#     cluster.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - database.yaml
+  - keycloak.yaml

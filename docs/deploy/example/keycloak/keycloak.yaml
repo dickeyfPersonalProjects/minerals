@@ -1,0 +1,40 @@
+# Env-agnostic base for the Keycloak custom resource.
+#
+# Only the fields that are the same across every environment live here:
+#   - instances / features — operational defaults
+#   - db — references the CNPG cluster + the `keycloak-db` Secret (the
+#     username + password keys); gitops provides the Secret as a
+#     SealedSecret per env.
+#   - proxy: xforwarded — Keycloak sits behind an ingress controller in
+#     every env, so it must trust X-Forwarded-* headers.
+#
+# Intentionally absent (gitops overlays add these via strategic merge
+# patch per environment):
+#   - http       — TLS termination / cert wiring is env-specific
+#   - ingress    — annotations, target IP, tlsSecret name vary per env
+#   - hostname   — the public DNS name is env-specific
+#
+# The db.host and db.database values below are placeholders. Real
+# overlays should patch db.host to match the env's CNPG cluster service
+# name (e.g. `<env>-pg-rw.<env>.svc.cluster.local`).
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: keycloak
+spec:
+  instances: 1
+  features:
+    enabled:
+    - quick-theme
+  db:
+    vendor: postgres
+    host: example-pg-rw.example.svc.cluster.local
+    database: keycloak
+    usernameSecret:
+      name: keycloak-db
+      key: username
+    passwordSecret:
+      name: keycloak-db
+      key: password
+  proxy:
+    headers: xforwarded
