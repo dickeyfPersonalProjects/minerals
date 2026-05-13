@@ -41,6 +41,12 @@ variable "realm_name" {
   default     = "minerals"
 }
 
+variable "realm_display_name" {
+  description = "Display name shown on the Keycloak login page"
+  type        = string
+  default     = "Minerals"
+}
+
 variable "registration_allowed" {
   description = "Whether self-registration is permitted on the realm login page."
   type        = bool

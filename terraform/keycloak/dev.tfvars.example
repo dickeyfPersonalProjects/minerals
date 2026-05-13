@@ -6,4 +6,5 @@ keycloak_admin_user     = "admin"
 keycloak_admin_password = "admin"
 env_domain              = "localhost"
 realm_name              = "minerals"
+realm_display_name      = "Minerals"
 registration_allowed    = true
