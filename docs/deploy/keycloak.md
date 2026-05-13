@@ -11,36 +11,58 @@ It pairs with:
 - [`encrypt.md`](./encrypt.md) — kubeseal workflow for the
   `keycloak-db` SealedSecret.
 - [`secrets.md`](./secrets.md) — Secret inventory (note: the
-  `keycloak-db` Secret is not in that inventory yet because Keycloak
-  is consumed by the *cluster*, not by the minerals app pod; it lives
-  in the Keycloak namespace, not `mineral-<env>`).
+  `keycloak-db` Secret is not in that inventory yet because it lives
+  in Keycloak's own namespace per env, not `mineral-<env>`).
 
-> Keycloak runs once per cluster (not once per minerals env). The
-> minerals app talks to it via its public auth hostname. The bits in
-> this repo are intentionally cluster-scoped, not minerals-namespace-scoped.
+> Keycloak runs **once per environment**, each instance in its own
+> namespace (e.g. one Keycloak in staging's `keycloak` namespace,
+> another in prod's). The base manifests in this repo describe the
+> shape that's the same across every env; the per-env overlay
+> supplies hostname, TLS, ingress, DB host, and DB credentials.
 
 ---
 
 ## What the minerals repo provides
 
-Two artifacts, deliberately split:
+Three artifacts, deliberately split:
 
-### 1. Env-agnostic base manifests — [`example/keycloak/`](./example/keycloak/)
+### 1. Env-agnostic base manifests — [`kustomize/base/keycloak/`](../../kustomize/base/keycloak/)
 
 The shape every env needs, with the env-specific fields deliberately
-absent:
+absent. This base is **never deployed directly** — it is always
+consumed via a per-env overlay (see §2).
 
 | File | What it declares |
 |---|---|
-| [`keycloak.yaml`](./example/keycloak/keycloak.yaml) | `Keycloak` CR (`k8s.keycloak.org/v2alpha1`) — single instance, `quick-theme` feature, `proxy.headers: xforwarded`, DB ref to the `keycloak-db` Secret (`username` + `password` keys). **Omits** `http`, `ingress`, `hostname` — those are env-specific. |
-| [`database.yaml`](./example/keycloak/database.yaml) | CNPG `Database` CR that provisions the `keycloak` database inside the env's existing Postgres cluster. `spec.cluster.name` is a placeholder. |
-| [`kustomization.yaml`](./example/keycloak/kustomization.yaml) | Aggregates the two resources. The header comments enumerate what every overlay must add. |
+| [`keycloak.yaml`](../../kustomize/base/keycloak/keycloak.yaml) | `Keycloak` CR (`k8s.keycloak.org/v2alpha1`) — single instance, `quick-theme` feature, `proxy.headers: xforwarded`, DB ref to the `keycloak-db` Secret (`username` + `password` keys). **Omits** `http`, `ingress`, `hostname` — those are env-specific. The `db.host` is a placeholder; overlays patch it. |
+| [`database.yaml`](../../kustomize/base/keycloak/database.yaml) | CNPG `Database` CR that provisions the `keycloak` database inside the env's existing Postgres cluster. `spec.cluster.name` is a placeholder; overlays patch it. |
+| [`kustomization.yaml`](../../kustomize/base/keycloak/kustomization.yaml) | Aggregates the two resources. The header comments enumerate what every overlay must add. |
 
 The base is **operator-input only**: it assumes the Keycloak operator
 (`k8s.keycloak.org`) and CloudNativePG are already installed in the
 cluster. It does not install operators.
 
-### 2. Terraform module — [`terraform/keycloak/`](../../terraform/keycloak/)
+### 2. Per-env overlay example — [`docs/deploy/example/keycloak/`](./example/keycloak/)
+
+A worked example of what a GitOps operator adds **per environment**,
+on top of the base in §1. This directory is *not* env-agnostic — it
+is a template that gets copied (and the literals replaced) once per
+target cluster.
+
+| File | What it declares |
+|---|---|
+| [`certificate.yaml`](./example/keycloak/certificate.yaml) | cert-manager `Certificate` for the env's public auth hostname (e.g. `auth.<env-domain>`). Produces the TLS Secret referenced from the ingress patch. |
+| [`keycloak-db-secret.yaml`](./example/keycloak/keycloak-db-secret.yaml) | `SealedSecret` named `keycloak-db` with `username` + `password` keys. Encrypted to the target cluster's sealed-secrets controller; each env needs its own sealing pass. |
+| [`keycloak-ingress-patch.yaml`](./example/keycloak/keycloak-ingress-patch.yaml) | Strategic merge patch on the Keycloak CR. Injects the env-specific `spec.hostname`, `spec.http`, `spec.ingress`, and `spec.db.host` blocks the base omits. |
+| [`kustomization.yaml`](./example/keycloak/kustomization.yaml) | Pulls the base from `../../../../kustomize/base/keycloak`, layers in the two resources above, and applies the merge patch. Sets `namespace: keycloak`. |
+
+This overlay is intentionally *not* aggregated by the
+top-level [`example/kustomization.yaml`](./example/kustomization.yaml)
+that ties together the per-minerals-env `staging/` + `prod/`
+overlays. Keycloak's lifecycle is independent of the minerals app
+deployment — it can be brought up and configured separately.
+
+### 3. Terraform module — [`terraform/keycloak/`](../../terraform/keycloak/)
 
 Configures the realm itself after the operator brings Keycloak up. The
 module owns:
@@ -66,94 +88,115 @@ clients, roles). Either can be re-applied without the other.
 
 ## What gitops must add per environment
 
-The base intentionally omits four things. Each env's overlay supplies
-them.
+The base intentionally omits everything env-specific. The example
+overlay at [`docs/deploy/example/keycloak/`](./example/keycloak/)
+shows the complete shape; this section walks through what each piece
+does and how they fit together.
 
 ### 1. `SealedSecret` for `keycloak-db`
 
 Two keys — `username` and `password`. Consumed by `spec.db.usernameSecret`
-and `spec.db.passwordSecret` on the Keycloak CR. The `owner` field on
-the CNPG `Database` resource must match this `username`.
+and `spec.db.passwordSecret` on the Keycloak CR in the base. The
+`owner` field on the CNPG `Database` resource (`keycloak` by default)
+must match this `username`, otherwise the operator provisions a role
+the Keycloak CR can't authenticate as.
 
 Follow [`encrypt.md`](./encrypt.md) for the kubeseal mechanics.
 Plaintext input goes in `.sec/keycloak-db.yaml`; only the encrypted
 output is committed. Ciphertext is bound to the Keycloak namespace, so
-each cluster needs its own pass.
+each env needs its own sealing pass. See
+[`example/keycloak/keycloak-db-secret.yaml`](./example/keycloak/keycloak-db-secret.yaml)
+for the manifest shape.
 
 ### 2. `Certificate` for `auth.${env_domain}`
 
 A cert-manager `Certificate` that issues a TLS cert for the public auth
 hostname. The resulting Secret is then referenced from the Keycloak CR
-patch's `ingress.tlsSecret`. The pattern matches
-[`example/staging/certificate.yaml`](./example/staging/certificate.yaml)
-exactly — only the `dnsNames` and `secretName` differ.
+patch's `ingress.tlsSecret`. See
+[`example/keycloak/certificate.yaml`](./example/keycloak/certificate.yaml)
+— only the `dnsNames`, `secretName`, `namespace`, and ClusterIssuer
+name differ per env.
 
 ### 3. Strategic merge patch on the Keycloak CR
 
-Adds the three env-specific blocks the base omits:
+A single strategic merge patch supplies every env-specific block the
+base omits — `spec.hostname`, `spec.http`, `spec.ingress`, plus
+`spec.db.host`. Kustomize merges this on top of the base's `Keycloak`
+CR by matching `kind: Keycloak` + `name: keycloak`.
+
+See [`example/keycloak/keycloak-ingress-patch.yaml`](./example/keycloak/keycloak-ingress-patch.yaml)
+for the full shape. The relevant fields:
 
 ```yaml
 apiVersion: k8s.keycloak.org/v2alpha1
 kind: Keycloak
 metadata:
-  name: keycloak
+  name: keycloak           # must match the base's CR name
 spec:
+  db:
+    host: <env>-pg-rw.<env>.svc.cluster.local   # CNPG RW service
   hostname:
-    hostname: auth.example.com
+    hostname: auth.<env-domain>
   http:
-    tlsSecret: keycloak-tls   # name of the cert-manager-issued Secret
+    httpEnabled: true
   ingress:
     enabled: true
+    tlsSecret: <secretName from certificate.yaml>
     annotations:
-      # whatever the cluster's ingress controller expects, e.g.
+      # cluster ingress controller specifics, e.g.
       # nginx.ingress.kubernetes.io/backend-protocol: HTTPS
 ```
 
-…plus a patch on `database.yaml` setting `spec.cluster.name` to the
-real CNPG cluster name (e.g. `prod-pg`), and a patch on `keycloak.yaml`
-setting `spec.db.host` to that cluster's RW service
-(e.g. `prod-pg-rw.prod.svc.cluster.local`).
+The example does not patch the `Database` CR's `spec.cluster.name` —
+the base ships a placeholder (`example-pg`). A real overlay should
+add a second patch (or amend this one) targeting
+`kind: Database, name: keycloak` to point at the env's actual CNPG
+`Cluster` name.
 
-### 4. Example overlay directory structure
+### 4. Overlay kustomization
 
-A workable shape for the fleet-infra GitOps repo:
+The example's [`kustomization.yaml`](./example/keycloak/kustomization.yaml)
+pulls the base via a relative path that works inside this repo:
+
+```yaml
+resources:
+  - ../../../../kustomize/base/keycloak
+  - keycloak-db-secret.yaml
+  - certificate.yaml
+patches:
+  - path: keycloak-ingress-patch.yaml
+    target: {kind: Keycloak, name: keycloak}
+```
+
+In a real fleet-infra checkout, replace the relative path with a
+remote ref pointing at this repo:
+
+```yaml
+resources:
+  - https://github.com/dickeyfPersonalProjects/minerals//kustomize/base/keycloak?ref=<tag>
+  - keycloak-db-secret.yaml
+  - certificate.yaml
+```
+
+Pin `?ref=` to a tag (not `main`) once the base manifests stabilize,
+so GitOps doesn't track upstream drift.
+
+A workable directory layout for the fleet-infra repo:
 
 ```
 clusters/<cluster>/keycloak/
-├── kustomization.yaml          ← lists the resources below, in lifecycle order
-├── namespace.yaml              ← `keycloak` (or whatever you name it)
-├── certificate.yaml            ← cert-manager Certificate for auth.<domain>
-├── keycloak-db.yaml            ← SealedSecret (username + password)
-├── patches/
-│   ├── keycloak-cr.yaml        ← merge patch: hostname + http + ingress
-│   ├── keycloak-db-host.yaml   ← merge patch: spec.db.host
-│   └── database-cluster.yaml   ← merge patch: spec.cluster.name
-└── kustomization.yaml          ← also pulls minerals repo's kustomize/base/keycloak via remote ref
+├── kustomization.yaml             ← remote base ref + resources + patch
+├── namespace.yaml                 ← `keycloak` (created here, not by base)
+├── certificate.yaml               ← cert-manager Certificate for auth.<domain>
+├── keycloak-db-secret.yaml        ← SealedSecret (username + password)
+└── keycloak-ingress-patch.yaml    ← merge patch: hostname/http/ingress/db.host
 ```
 
-The kustomization uses a remote base pointing at this repo's
-`kustomize/base/keycloak`:
-
-```yaml
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-namespace: keycloak
-resources:
-  - namespace.yaml
-  - certificate.yaml
-  - keycloak-db.yaml
-  - https://github.com/dickeyfPersonalProjects/minerals//kustomize/base/keycloak?ref=main
-patches:
-  - path: patches/keycloak-cr.yaml
-    target: {kind: Keycloak, name: keycloak}
-  - path: patches/keycloak-db-host.yaml
-    target: {kind: Keycloak, name: keycloak}
-  - path: patches/database-cluster.yaml
-    target: {kind: Database, name: keycloak}
-```
-
-Pin `?ref=` to a tag (not `main`) once the base manifests stabilize, so
-GitOps doesn't track upstream drift.
+The example in this repo omits a `namespace.yaml` because the
+overlay's `namespace: keycloak` directive only sets the namespace
+*field* on the rendered resources — it doesn't create the namespace.
+Add a `Namespace` resource (or rely on the env's namespace bootstrap
+flow) before applying.
 
 ---
 
