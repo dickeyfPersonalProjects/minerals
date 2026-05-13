@@ -93,6 +93,30 @@ services:
       minio:
         condition: service_healthy
 
+  # Optional Keycloak instance for auth development (mi-pgl). Opt-in via
+  # the `keycloak` profile so `docker compose up -d` (no args) does NOT
+  # start it — both Keycloak and the `app` service bind host port 8080,
+  # so they cannot run simultaneously. Use one of:
+  #
+  #   docker compose --profile keycloak up -d keycloak     # Keycloak alone
+  #   docker compose up -d postgres minio                  # Mode B deps, then
+  #     docker compose --profile keycloak up -d keycloak   # add Keycloak
+  #
+  # `start-dev` uses an in-memory H2 DB — fine for local dev, no separate
+  # Postgres needed. Listens on http://localhost:8080 with admin/admin —
+  # the endpoint a future `terraform/keycloak/` dev tfvars will target.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    container_name: minerals-keycloak
+    profiles:
+      - keycloak
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+
 # The minerals-dev bucket is auto-created by the Go binary on dev
 # startup (see cmd/minerals/serve.go and internal/storage.EnsureBucket
 # per CONTRACT §3, §12). No mc-init sidecar needed.
