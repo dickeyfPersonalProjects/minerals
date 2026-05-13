@@ -2873,6 +2873,153 @@ A polecat MUST NOT add any of the above as a "cheap
 improvement." Each is a coordinated change that affects the
 threat model.
 
+## v2 — RBAC design (Keycloak + Casbin)
+
+This subsection documents the authorization model that ships with v2
+real auth. Polecats MUST NOT implement any of this in v1.
+
+### Identity source
+
+The Keycloak OIDC provider issues a JWT on successful login. The Go
+`auth.Auth` middleware validates the token signature against the Keycloak
+JWKS endpoint and populates an extended `User` struct:
+
+```go
+type User struct {
+    ID    uuid.UUID  // mapped from JWT `sub`
+    Email string     // mapped from JWT `email`
+    Roles []string   // mapped from JWT realm roles claim
+}
+```
+
+Requests with no valid JWT populate `User` with `Roles: []string{"anonymous"}`.
+`RequireUser` still guards protected routes. Public routes run `Auth`
+only — anonymous users are allowed through and the handler uses the
+`anonymous` role for permission checks.
+
+### Permission string format
+
+```
+<resource>:<operations>:<instance>
+```
+
+- **resource** — one of: `specimens`, `photos`, `journal`, `collectors`,
+  `qr-sheets`, `devops`, `users`
+- **operations** — comma-separated: `view`, `create`, `edit`, `delete`.
+  `*` means all operations. Sharing a resource is implied by ownership
+  (`edit:own`) — there is no separate `share` operation.
+- **instance** — `*` (all), `own` (rows where `author_id = user.ID`),
+  `shared` (rows explicitly shared with the user via the `shares` table),
+  or a specific UUID. Omitting instance implies `*`.
+
+### Roles and permissions
+
+| Role | Permissions |
+|------|-------------|
+| `anonymous` | `specimens:view:public`, `specimens:view:unlisted`, `photos:view:public`, `photos:view:unlisted` |
+| `user` | `specimens:*:own`, `photos:*:own`, `journal:*:own`, `collectors:*:own`, `qr-sheets:*:own`, `specimens:view:shared`, `photos:view:shared` |
+| `devops-viewer` | `devops:view:*` |
+| `devops-admin` | `devops:view:*`, `devops:edit:*` |
+| `admin` | `*:*:*`, `users:*:*` |
+
+Every authenticated user is assigned the `user` role by Keycloak in
+addition to any other roles. `devops-admin` inherits `devops-viewer`
+via Casbin role inheritance — not Keycloak composite roles.
+
+The Keycloak realm defines exactly four roles (see `terraform/keycloak/roles.tf`):
+`user`, `devops-viewer`, `devops-admin`, `admin`.
+
+### Visibility tiers
+
+Every user-created resource carries a `visibility` column:
+
+| Value | Appears in lists | Direct URL | Who can access |
+|-------|-----------------|------------|----------------|
+| `public` | ✓ | ✓ | Anyone, including anonymous |
+| `unlisted` | ✗ | ✓ | Anyone with the link — the URL is the access control |
+| `private` | ✗ | ✗ | Owner + explicitly shared users only |
+
+`unlisted` is a **discoverability control, not a security boundary.**
+The resource is not returned in list or search results, but no credential
+is required to fetch it by ID. Do not rely on `unlisted` for privacy.
+
+### Hybrid enforcement strategy
+
+Two layers work together. Polecats MUST NOT collapse them into one.
+
+**Layer 1 — DB-level scoping (list queries)**
+
+List endpoints filter at the SQL level. `unlisted` and `private`
+resources are excluded from lists unless the user owns them or has an
+explicit share:
+
+```sql
+WHERE (
+    author_id = $userID                        -- own (any visibility)
+    OR visibility = 'public'                   -- public: anyone
+    OR id IN (                                 -- explicitly shared
+        SELECT resource_id FROM shares
+        WHERE resource_type = $type AND shared_with = $userID
+    )
+)
+```
+
+For anonymous requests, omit the `author_id` and `shares` clauses —
+only `public` resources appear in anonymous lists.
+
+**Layer 2 — Casbin per-resource check (point lookups and writes)**
+
+After fetching the resource, the handler evaluates access in order:
+
+1. `visibility = 'public'` or `'unlisted'` → permit `view`; writes
+   fall through to Casbin (only owner/admin may edit or delete).
+2. `visibility = 'private'` → Casbin enforcer checks `own` or `shared`.
+
+```go
+switch resource.Visibility {
+case "public", "unlisted":
+    if action == "view" { return permit }
+    // writes fall through to Casbin
+}
+allowed, err := enforcer.Enforce(user.ID.String(), resource, action)
+```
+
+Do not use Casbin for list queries. Do not use raw SQL visibility
+filters for point lookups. The split is intentional and MUST be
+maintained.
+
+### Enforcement library
+
+Use `github.com/casbin/casbin/v2` with the Postgres adapter. Policies
+are stored in the DB alongside application data.
+
+Register a custom matcher function `isSharedWith(resourceType, resourceID,
+userID)` that resolves the `:shared` instance by querying the `shares`
+table:
+
+```go
+enforcer.AddFunction("isSharedWith", func(args ...interface{}) (interface{}, error) {
+    // SELECT 1 FROM shares
+    // WHERE resource_type=$1 AND resource_id=$2 AND shared_with=$3
+})
+```
+
+### `shares` table
+
+```sql
+CREATE TABLE shares (
+    id            UUID PRIMARY KEY,
+    resource_type TEXT        NOT NULL,  -- e.g. 'specimens'
+    resource_id   UUID        NOT NULL,
+    shared_by     UUID        NOT NULL REFERENCES users(id),
+    shared_with   UUID        NOT NULL REFERENCES users(id),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+Shares are not cascade-deleted when the resource is deleted — a
+background job cleans orphaned shares after resource deletion.
+
 ## What this section is NOT
 
 This is the rule for **how user identity flows through the
