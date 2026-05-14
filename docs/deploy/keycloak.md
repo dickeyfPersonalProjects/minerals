@@ -48,7 +48,7 @@ cluster. It does not install operators.
 Worked examples of what a GitOps operator adds **per environment**,
 on top of the base in §1. The two overlays mirror each other and
 only differ in hostname, namespace, and DB host. Each gets copied
-(and the literals replaced) into the target fleet-infra repo.
+(and the literals replaced) into the target gitops repository.
 
 | File | What it declares |
 |---|---|
@@ -173,8 +173,8 @@ patches:
     target: {kind: Keycloak, name: keycloak}
 ```
 
-In a real fleet-infra checkout, replace the relative path with a
-remote ref pointing at this repo:
+In a real gitops repository checkout, replace the relative path with
+a remote ref pointing at this repo:
 
 ```yaml
 resources:
@@ -186,7 +186,7 @@ resources:
 Pin `?ref=` to a tag (not `main`) once the base manifests stabilize,
 so GitOps doesn't track upstream drift.
 
-A workable directory layout for the fleet-infra repo (one directory
+A workable directory layout for the gitops repository (one directory
 per environment, since each Keycloak instance is reconciled as its
 own Flux Kustomization independent of the app):
 

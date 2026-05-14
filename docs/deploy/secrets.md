@@ -56,7 +56,7 @@ prod-strictness rules.
 
 When standing up `mineral-<env>`, work through this checklist.
 Operator-sealed Secrets are produced once per env and committed to
-fleet-infra; auto-generated Secrets are created by their respective
+the gitops repository; auto-generated Secrets are created by their respective
 operators on first reconcile and never appear in any manifest.
 
 ### 1. Operator-sealed Secrets (kubeseal)
@@ -180,9 +180,9 @@ workflow. It composes with — does not replace — the
    placeholders, mirroring the existing stubs. If the new Secret is
    operator-generated (CNPG, cert-manager, etc.), no example file is
    needed — note the provenance in the inventory row.
-6. **Fleet-infra changes still need human approval.** Producing the
-   real ciphertext for a new operator-sealed Secret and committing it
-   to fleet-infra is a human-approved step, per
+6. **GitOps-repository changes still need human approval.** Producing
+   the real ciphertext for a new operator-sealed Secret and committing
+   it to the gitops repository is a human-approved step, per
    [`encrypt.md`](./encrypt.md) "Commit rules". Polecats and other
    automated agents stop at the example stub.
 
