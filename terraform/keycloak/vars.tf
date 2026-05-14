@@ -4,7 +4,7 @@ variable "env_domain" {
 }
 
 variable "keycloak_url_override" {
-  description = "Override Keycloak URL (e.g. http://localhost:8080 for local dev). Defaults to https://auth.{env_domain} if empty."
+  description = "Override Keycloak URL (e.g. http://localhost:8081 for local dev). Defaults to https://auth.{env_domain} if empty."
   type        = string
   default     = ""
 }

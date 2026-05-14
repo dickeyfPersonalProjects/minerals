@@ -93,18 +93,32 @@ services:
       minio:
         condition: service_healthy
 
-  # Optional Keycloak instance for auth development (mi-pgl). Opt-in via
-  # the `keycloak` profile so `docker compose up -d` (no args) does NOT
-  # start it — both Keycloak and the `app` service bind host port 8080,
-  # so they cannot run simultaneously. Use one of:
+  # Optional Keycloak instance for auth development (mi-pgl, mi-hye).
+  # Opt-in via the `keycloak` profile so `docker compose up -d` (no args)
+  # does NOT start it. Bound to host :8081 so it can run alongside the
+  # `app` service (host :8080) — OIDC dev needs both running together.
   #
-  #   docker compose --profile keycloak up -d keycloak     # Keycloak alone
-  #   docker compose up -d postgres minio                  # Mode B deps, then
-  #     docker compose --profile keycloak up -d keycloak   # add Keycloak
+  # Host port allocation (avoid collisions when adding new services):
+  #   5432 postgres   8080 app         9000 minio (s3)
+  #   8081 keycloak   9001 minio (console)
+  #
+  # Modes:
+  #
+  #   docker compose --profile keycloak up -d keycloak    # Keycloak alone
+  #   docker compose up -d                                # Full stack, then
+  #     docker compose --profile keycloak up -d keycloak  # add Keycloak
   #
   # `start-dev` uses an in-memory H2 DB — fine for local dev, no separate
-  # Postgres needed. Listens on http://localhost:8080 with admin/admin —
-  # the endpoint a future `terraform/keycloak/` dev tfvars will target.
+  # Postgres needed. Admin console: http://localhost:8081 (admin/admin).
+  # Realm endpoints (issuer, JWKS, etc.) are published at
+  # http://localhost:8081 via KC_HOSTNAME so tokens issued match the
+  # URL the SPA / terraform / curl reach Keycloak on.
+  #
+  # The bootstrap admin user is created on first start by
+  # KC_BOOTSTRAP_ADMIN_USERNAME / _PASSWORD. Hardcoded admin/admin is
+  # intentional — dev-only, never exposed beyond the host. The
+  # terraform-managed realm (`terraform/keycloak/dev.tfvars`) targets
+  # this instance unchanged.
   keycloak:
     image: quay.io/keycloak/keycloak:26.0.7
     container_name: minerals-keycloak
@@ -112,10 +126,11 @@ services:
       - keycloak
     command: start-dev
     environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://localhost:8081
     ports:
-      - "8080:8080"
+      - "8081:8080"
 
 # The minerals-dev bucket is auto-created by the Go binary on dev
 # startup (see cmd/minerals/serve.go and internal/storage.EnsureBucket
