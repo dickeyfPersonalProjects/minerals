@@ -11,14 +11,15 @@ It pairs with:
 - [`encrypt.md`](./encrypt.md) — kubeseal workflow for the
   `keycloak-db` SealedSecret.
 - [`secrets.md`](./secrets.md) — Secret inventory (note: the
-  `keycloak-db` Secret is not in that inventory yet because it lives
-  in Keycloak's own namespace per env, not `mineral-<env>`).
+  `keycloak-db` Secret is not in that inventory yet; it lives in
+  the env's `mineral-<env>` namespace alongside the other secrets).
 
-> Keycloak runs **once per environment**, each instance in its own
-> namespace (`keycloak-staging`, `keycloak-prod`) for security
-> isolation. The base manifests in this repo describe the shape
-> that's the same across every env; each per-env overlay supplies
-> hostname, TLS, ingress, DB host, and DB credentials.
+> Keycloak runs **once per environment**, deployed into the same
+> namespace as the minerals app (`mineral-staging`, `mineral-prod`)
+> so it shares the env's CNPG cluster and lifecycle boundary. The
+> base manifests in this repo describe the shape that's the same
+> across every env; each per-env overlay supplies hostname, TLS,
+> ingress, DB host, and DB credentials.
 
 ---
 
@@ -184,23 +185,22 @@ Pin `?ref=` to a tag (not `main`) once the base manifests stabilize,
 so GitOps doesn't track upstream drift.
 
 A workable directory layout for the fleet-infra repo (one directory
-per environment, since each Keycloak instance is isolated to its
-own namespace and lifecycle):
+per environment, since each Keycloak instance is reconciled as its
+own Flux Kustomization independent of the app):
 
 ```
 clusters/<cluster>/keycloak-<env>/
 ├── kustomization.yaml             ← remote base ref + resources + patch
-├── namespace.yaml                 ← `keycloak-<env>` (created here, not by base)
 ├── certificate.yaml               ← cert-manager Certificate for auth.<env-domain>
 ├── keycloak-db-secret.yaml        ← SealedSecret (username + password)
 └── keycloak-ingress-patch.yaml    ← merge patch: db.host/hostname/http/ingress
 ```
 
-The examples in this repo omit a `namespace.yaml` because the
-overlay's `namespace:` directive only sets the namespace *field* on
-the rendered resources — it doesn't create the namespace. Add a
-`Namespace` resource (or rely on the env's namespace bootstrap flow)
-before applying.
+The examples in this repo and the layout above omit a
+`namespace.yaml` because the target namespace (`mineral-<env>`) is
+already created by the minerals app overlay — Keycloak is deployed
+into the same namespace as the app, so the namespace exists by the
+time this overlay reconciles.
 
 ---
 

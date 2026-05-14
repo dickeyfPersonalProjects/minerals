@@ -11,7 +11,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: keycloak-tls
-  namespace: keycloak-prod
+  namespace: mineral-prod
 spec:
   dnsNames:
     - auth.example.com
