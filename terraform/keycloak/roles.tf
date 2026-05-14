@@ -1,15 +1,3 @@
-resource "keycloak_role" "user" {
-  realm_id    = keycloak_realm.minerals.id
-  name        = "user"
-  description = "Authenticated end-user of the Minerals app."
-}
-
-resource "keycloak_role" "admin" {
-  realm_id    = keycloak_realm.minerals.id
-  name        = "admin"
-  description = "Full administrative access to the Minerals app."
-}
-
 resource "keycloak_role" "devops_viewer" {
   realm_id    = keycloak_realm.minerals.id
   name        = "devops-viewer"
