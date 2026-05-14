@@ -7,8 +7,8 @@ metadata:
   namespace: mineral-prod
 spec:
   dnsNames:
-    - mineral.dickey.cloud
+    - www.example.com
   issuerRef:
     kind: ClusterIssuer
-    name: dickey-cloud-issuer
+    name: letsencrypt-prod
   secretName: web-crt
