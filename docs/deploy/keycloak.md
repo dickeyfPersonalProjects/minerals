@@ -225,7 +225,9 @@ The module switches modes automatically based on whether
 ### Prerequisites
 
 - Keycloak running and reachable at the URL the module will target.
-  For local dev that's `http://localhost:8080`; for cluster envs that's
+  For local dev that's `http://localhost:8081` (set by the
+  `docker-compose.yml` keycloak service — see [Local dev
+  quickstart](#local-dev-quickstart)); for cluster envs that's
   `https://auth.${env_domain}` after the operator + ingress are up.
 - `terraform` ≥ 1.5.0.
 - For OIDC-auth mode: a `terraform-admin` service-account client
@@ -285,7 +287,7 @@ Keycloak.
 Then configure `terraform.tfvars`:
 
 ```hcl
-keycloak_url           = "http://localhost:8080"
+keycloak_url           = "http://localhost:8081"
 keycloak_client_id     = "terraform-admin"
 keycloak_client_secret = "your-client-secret-here"
 ```
@@ -301,7 +303,7 @@ development only — the admin password lands in Terraform state.
 Configure `terraform.tfvars`:
 
 ```hcl
-keycloak_url            = "http://localhost:8080"
+keycloak_url            = "http://localhost:8081"
 keycloak_client_id      = "admin-cli"
 keycloak_client_secret  = ""   # leave empty to use password auth
 keycloak_admin_user     = "admin"
@@ -312,25 +314,24 @@ keycloak_admin_password = "admin"
 
 ```bash
 cd terraform/keycloak
-cp dev.tfvars.example dev.tfvars     # admin/admin against localhost:8080
 terraform init
 terraform apply -var-file=dev.tfvars
 ```
 
-The shipped `dev.tfvars.example` targets `http://localhost:8080` with
-the `admin`/`admin` credentials baked into the docker-compose service
-(see [Local dev quickstart](#local-dev-quickstart) below). It does not
-set OIDC IdP credentials, so only the local admin user can sign in.
+The committed `dev.tfvars` targets `http://localhost:8081` with the
+`admin`/`admin` credentials baked into the docker-compose service (see
+[Local dev quickstart](#local-dev-quickstart) below) and already wires
+the Vite SPA origin (`http://localhost:5173`) into
+`additional_redirect_uris` / `additional_web_origins`. It does not set
+SMTP or OIDC IdP credentials, so only the local admin user can sign in
+and `registration_allowed = false`.
 
 > **Heads-up on `frontend_url` in local dev.** With
 > `env_domain = "localhost"`, the module derives
 > `frontend_url = "https://www.localhost"`, which is not how you'll
-> actually run the SPA locally. Add your real dev SPA origin via
-> `additional_redirect_uris` and `additional_web_origins`, e.g.:
-> ```hcl
-> additional_redirect_uris = ["http://localhost:5173/*"]
-> additional_web_origins   = ["http://localhost:5173"]
-> ```
+> actually run the SPA locally. The committed `dev.tfvars` works
+> around this with the `additional_*` overrides; bump those if your
+> dev SPA origin differs.
 
 ### Staging / prod (Mode: OIDC service-account)
 
@@ -409,21 +410,19 @@ discussion.
 ## Local dev quickstart
 
 ```bash
-# 1. Start Keycloak alone (port 8080, admin/admin, in-memory H2).
+# 1. Start Keycloak alone (host port 8081, admin/admin, in-memory H2).
 docker compose --profile keycloak up -d keycloak
 
 # 2. Wait ~10s for it to come up, then verify:
-curl -fsS http://localhost:8080/realms/master >/dev/null && echo OK
+curl -fsS http://localhost:8081/realms/master >/dev/null && echo OK
 
-# 3. Configure the realm.
+# 3. Configure the realm. `dev.tfvars` ships committed and ready to use.
 cd terraform/keycloak
-cp dev.tfvars.example dev.tfvars       # already targets localhost:8080
-# (optional) edit dev.tfvars to add SPA redirect URIs — see warning above.
 terraform init
 terraform apply -var-file=dev.tfvars
 
 # 4. Sign in to the realm admin console at:
-#    http://localhost:8080/admin/master/console/#/minerals
+#    http://localhost:8081/admin/master/console/#/minerals
 #    Username: admin
 #    Password: $(terraform output -raw admin_password)
 ```
@@ -431,29 +430,28 @@ terraform apply -var-file=dev.tfvars
 ### Why `--profile keycloak`?
 
 `docker-compose.yml` gates the `keycloak` service behind the `keycloak`
-profile because the `app` service and Keycloak both bind host port
-8080 — they cannot run simultaneously. The two supported shapes are:
+profile so `docker compose up -d` (no args) doesn't start Keycloak —
+most dev work on the app doesn't need it. The two supported shapes are:
 
 ```bash
 # Keycloak alone (no app, no DB needed — start-dev uses in-memory H2):
 docker compose --profile keycloak up -d keycloak
 
-# Mode B (app deps only) + Keycloak:
-docker compose up -d postgres minio
+# Full stack (app on :8080) + Keycloak (on :8081):
+docker compose up -d
 docker compose --profile keycloak up -d keycloak
 ```
 
-`docker compose up -d` with no args (Mode A) starts the app on
-:8080 and does not start Keycloak. That's intentional — most dev work
-on the app doesn't need Keycloak running.
+Keycloak binds host `:8081` and the app binds host `:8080`, so they run
+side-by-side without conflict — required for OIDC dev where the SPA
+needs both running.
 
-### `dev.tfvars` is gitignored
+### `dev.tfvars` is committed
 
-The `dev.tfvars.example` file in the repo is the template. The actual
-`dev.tfvars` is gitignored (see `terraform/keycloak/.gitignore` if
-present, or the repo-root `.gitignore`) because individual developers
-may put real OIDC IdP credentials in it for testing Google/GitHub
-sign-in locally.
+The repo ships `dev.tfvars` committed and ready to use — no copy step,
+no edits required. If you want to test Google/GitHub IdPs locally with
+real credentials, set them via `-var` on the command line rather than
+editing the committed file.
 
 ---
 
