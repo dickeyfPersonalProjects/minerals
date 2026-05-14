@@ -1,0 +1,32 @@
+# Per-env GitOps overlay for the staging Keycloak instance.
+#
+# Layers the env-specific resources on top of the env-agnostic base at
+# `kustomize/base/keycloak/`:
+#
+#   - keycloak-db-secret.yaml      — SealedSecret with the DB creds.
+#   - certificate.yaml             — TLS cert for the public auth host.
+#   - keycloak-ingress-patch.yaml  — adds db.host / hostname / http /
+#                                    ingress on the Keycloak CR.
+#
+# Keycloak runs **once per environment** in its own namespace
+# (`keycloak-staging` here, `keycloak-prod` for prod) for security
+# isolation. This overlay is intentionally NOT aggregated by the
+# sibling ../kustomization.yaml — Keycloak's lifecycle is independent
+# of the minerals app deployment and is reconciled as its own Flux
+# Kustomization (or `kubectl apply -k`).
+#
+# The relative path to the base works inside this repo. In a real
+# fleet-infra checkout the base is usually pulled by remote ref —
+# see ../../../keycloak.md for the `?ref=<tag>` form.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: keycloak-staging
+resources:
+  - ../../../../../kustomize/base/keycloak
+  - keycloak-db-secret.yaml
+  - certificate.yaml
+patches:
+  - path: keycloak-ingress-patch.yaml
+    target:
+      kind: Keycloak
+      name: keycloak

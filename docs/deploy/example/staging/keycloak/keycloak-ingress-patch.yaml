@@ -1,31 +1,31 @@
-# Strategic merge patch on the Keycloak CR from
-# `kustomize/base/keycloak/keycloak.yaml`. Supplies the three blocks
+# Strategic merge patch on the staging Keycloak CR from
+# `kustomize/base/keycloak/keycloak.yaml`. Supplies the four blocks
 # the base deliberately omits:
 #
+#   - db.host           — the env's CNPG RW service hostname.
 #   - hostname.hostname — the public auth URL clients will see.
 #   - http.tlsSecret    — name of the cert-manager-issued Secret (must
 #                         match `secretName` in certificate.yaml).
 #   - ingress           — enables the operator-managed Ingress and lets
 #                         you bolt on cluster-specific annotations.
 #
-# This patch does NOT cover `spec.db.host`. The base ships a
-# placeholder host (`example-pg-rw.example.svc.cluster.local`); real
-# overlays should add a second patch setting it to the env's CNPG RW
-# service. Same goes for `spec.cluster.name` on the Database CR in
-# database.yaml. See ../../keycloak.md for the full overlay shape.
+# Pair this with a second patch on the `Database` CR setting
+# `spec.cluster.name` to the staging CNPG `Cluster` name (the base
+# ships a placeholder). See ../../../keycloak.md for the full overlay
+# shape.
 apiVersion: k8s.keycloak.org/v2alpha1
 kind: Keycloak
 metadata:
   name: keycloak
 spec:
   db:
-    host: minerals-pg-rw.<namespace>.svc.cluster.local
+    host: minerals-pg-rw.mineral-staging.svc.cluster.local
   hostname:
-    hostname: auth.example.com
+    hostname: auth.staging.example.com
   http:
     httpEnabled: true
+    tlsSecret: keycloak-tls
   ingress:
     enabled: true
     annotations:
       example: value
-    tlsSecret: auth-web-crt

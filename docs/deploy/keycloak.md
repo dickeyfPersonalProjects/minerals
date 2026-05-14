@@ -15,10 +15,10 @@ It pairs with:
   in Keycloak's own namespace per env, not `mineral-<env>`).
 
 > Keycloak runs **once per environment**, each instance in its own
-> namespace (e.g. one Keycloak in staging's `keycloak` namespace,
-> another in prod's). The base manifests in this repo describe the
-> shape that's the same across every env; the per-env overlay
-> supplies hostname, TLS, ingress, DB host, and DB credentials.
+> namespace (`keycloak-staging`, `keycloak-prod`) for security
+> isolation. The base manifests in this repo describe the shape
+> that's the same across every env; each per-env overlay supplies
+> hostname, TLS, ingress, DB host, and DB credentials.
 
 ---
 
@@ -42,25 +42,26 @@ The base is **operator-input only**: it assumes the Keycloak operator
 (`k8s.keycloak.org`) and CloudNativePG are already installed in the
 cluster. It does not install operators.
 
-### 2. Per-env overlay example — [`docs/deploy/example/keycloak/`](./example/keycloak/)
+### 2. Per-env overlay examples — [`example/prod/keycloak/`](./example/prod/keycloak/) and [`example/staging/keycloak/`](./example/staging/keycloak/)
 
-A worked example of what a GitOps operator adds **per environment**,
-on top of the base in §1. This directory is *not* env-agnostic — it
-is a template that gets copied (and the literals replaced) once per
-target cluster.
+Worked examples of what a GitOps operator adds **per environment**,
+on top of the base in §1. The two overlays mirror each other and
+only differ in hostname, namespace, and DB host. Each gets copied
+(and the literals replaced) into the target fleet-infra repo.
 
 | File | What it declares |
 |---|---|
-| [`certificate.yaml`](./example/keycloak/certificate.yaml) | cert-manager `Certificate` for the env's public auth hostname (e.g. `auth.<env-domain>`). Produces the TLS Secret referenced from the ingress patch. |
-| [`keycloak-db-secret.yaml`](./example/keycloak/keycloak-db-secret.yaml) | `SealedSecret` named `keycloak-db` with `username` + `password` keys. Encrypted to the target cluster's sealed-secrets controller; each env needs its own sealing pass. |
-| [`keycloak-ingress-patch.yaml`](./example/keycloak/keycloak-ingress-patch.yaml) | Strategic merge patch on the Keycloak CR. Injects the env-specific `spec.hostname`, `spec.http`, `spec.ingress`, and `spec.db.host` blocks the base omits. |
-| [`kustomization.yaml`](./example/keycloak/kustomization.yaml) | Pulls the base from `../../../../kustomize/base/keycloak`, layers in the two resources above, and applies the merge patch. Sets `namespace: keycloak`. |
+| `certificate.yaml` | cert-manager `Certificate` for the env's public auth hostname (`auth.example.com` for prod, `auth.staging.example.com` for staging). Produces the TLS Secret referenced from the ingress patch. |
+| `keycloak-db-secret.yaml` | `SealedSecret` named `keycloak-db` with `username` + `password` keys. Encrypted to the target cluster's sealed-secrets controller; each env needs its own sealing pass. |
+| `keycloak-ingress-patch.yaml` | Strategic merge patch on the Keycloak CR. Injects the env-specific `spec.db.host`, `spec.hostname`, `spec.http`, and `spec.ingress` blocks the base omits. |
+| `kustomization.yaml` | Pulls the base from `../../../../../kustomize/base/keycloak`, layers in the two resources above, and applies the merge patch. Sets the env-specific namespace. |
 
-This overlay is intentionally *not* aggregated by the
+These overlays are intentionally *not* aggregated by the
 top-level [`example/kustomization.yaml`](./example/kustomization.yaml)
-that ties together the per-minerals-env `staging/` + `prod/`
+that ties together the per-minerals-env `staging/` + `prod/` app
 overlays. Keycloak's lifecycle is independent of the minerals app
-deployment — it can be brought up and configured separately.
+deployment and is reconciled as its own Flux Kustomization (or
+`kubectl apply -k`).
 
 ### 3. Terraform module — [`terraform/keycloak/`](../../terraform/keycloak/)
 
@@ -89,9 +90,10 @@ clients, roles). Either can be re-applied without the other.
 ## What gitops must add per environment
 
 The base intentionally omits everything env-specific. The example
-overlay at [`docs/deploy/example/keycloak/`](./example/keycloak/)
-shows the complete shape; this section walks through what each piece
-does and how they fit together.
+overlays at [`example/prod/keycloak/`](./example/prod/keycloak/) and
+[`example/staging/keycloak/`](./example/staging/keycloak/) show the
+complete shape; this section walks through what each piece does and
+how they fit together.
 
 ### 1. `SealedSecret` for `keycloak-db`
 
@@ -105,17 +107,17 @@ Follow [`encrypt.md`](./encrypt.md) for the kubeseal mechanics.
 Plaintext input goes in `.sec/keycloak-db.yaml`; only the encrypted
 output is committed. Ciphertext is bound to the Keycloak namespace, so
 each env needs its own sealing pass. See
-[`example/keycloak/keycloak-db-secret.yaml`](./example/keycloak/keycloak-db-secret.yaml)
-for the manifest shape.
+[`example/prod/keycloak/keycloak-db-secret.yaml`](./example/prod/keycloak/keycloak-db-secret.yaml)
+(or the staging mirror) for the manifest shape.
 
 ### 2. `Certificate` for `auth.${env_domain}`
 
 A cert-manager `Certificate` that issues a TLS cert for the public auth
 hostname. The resulting Secret is then referenced from the Keycloak CR
-patch's `ingress.tlsSecret`. See
-[`example/keycloak/certificate.yaml`](./example/keycloak/certificate.yaml)
-— only the `dnsNames`, `secretName`, `namespace`, and ClusterIssuer
-name differ per env.
+patch's `http.tlsSecret`. See
+[`example/prod/keycloak/certificate.yaml`](./example/prod/keycloak/certificate.yaml)
+(and the staging mirror) — only the `dnsNames` and `namespace`
+differ per env.
 
 ### 3. Strategic merge patch on the Keycloak CR
 
@@ -124,8 +126,8 @@ base omits — `spec.hostname`, `spec.http`, `spec.ingress`, plus
 `spec.db.host`. Kustomize merges this on top of the base's `Keycloak`
 CR by matching `kind: Keycloak` + `name: keycloak`.
 
-See [`example/keycloak/keycloak-ingress-patch.yaml`](./example/keycloak/keycloak-ingress-patch.yaml)
-for the full shape. The relevant fields:
+See [`example/prod/keycloak/keycloak-ingress-patch.yaml`](./example/prod/keycloak/keycloak-ingress-patch.yaml)
+(and the staging mirror) for the full shape. The relevant fields:
 
 ```yaml
 apiVersion: k8s.keycloak.org/v2alpha1
@@ -134,14 +136,14 @@ metadata:
   name: keycloak           # must match the base's CR name
 spec:
   db:
-    host: <env>-pg-rw.<env>.svc.cluster.local   # CNPG RW service
+    host: minerals-pg-rw.mineral-<env>.svc.cluster.local   # CNPG RW service
   hostname:
     hostname: auth.<env-domain>
   http:
     httpEnabled: true
+    tlsSecret: <secretName from certificate.yaml>
   ingress:
     enabled: true
-    tlsSecret: <secretName from certificate.yaml>
     annotations:
       # cluster ingress controller specifics, e.g.
       # nginx.ingress.kubernetes.io/backend-protocol: HTTPS
@@ -155,12 +157,12 @@ add a second patch (or amend this one) targeting
 
 ### 4. Overlay kustomization
 
-The example's [`kustomization.yaml`](./example/keycloak/kustomization.yaml)
+Each example's [`kustomization.yaml`](./example/prod/keycloak/kustomization.yaml)
 pulls the base via a relative path that works inside this repo:
 
 ```yaml
 resources:
-  - ../../../../kustomize/base/keycloak
+  - ../../../../../kustomize/base/keycloak
   - keycloak-db-secret.yaml
   - certificate.yaml
 patches:
@@ -181,22 +183,24 @@ resources:
 Pin `?ref=` to a tag (not `main`) once the base manifests stabilize,
 so GitOps doesn't track upstream drift.
 
-A workable directory layout for the fleet-infra repo:
+A workable directory layout for the fleet-infra repo (one directory
+per environment, since each Keycloak instance is isolated to its
+own namespace and lifecycle):
 
 ```
-clusters/<cluster>/keycloak/
+clusters/<cluster>/keycloak-<env>/
 ├── kustomization.yaml             ← remote base ref + resources + patch
-├── namespace.yaml                 ← `keycloak` (created here, not by base)
-├── certificate.yaml               ← cert-manager Certificate for auth.<domain>
+├── namespace.yaml                 ← `keycloak-<env>` (created here, not by base)
+├── certificate.yaml               ← cert-manager Certificate for auth.<env-domain>
 ├── keycloak-db-secret.yaml        ← SealedSecret (username + password)
-└── keycloak-ingress-patch.yaml    ← merge patch: hostname/http/ingress/db.host
+└── keycloak-ingress-patch.yaml    ← merge patch: db.host/hostname/http/ingress
 ```
 
-The example in this repo omits a `namespace.yaml` because the
-overlay's `namespace: keycloak` directive only sets the namespace
-*field* on the rendered resources — it doesn't create the namespace.
-Add a `Namespace` resource (or rely on the env's namespace bootstrap
-flow) before applying.
+The examples in this repo omit a `namespace.yaml` because the
+overlay's `namespace:` directive only sets the namespace *field* on
+the rendered resources — it doesn't create the namespace. Add a
+`Namespace` resource (or rely on the env's namespace bootstrap flow)
+before applying.
 
 ---
 
