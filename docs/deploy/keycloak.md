@@ -227,7 +227,33 @@ The module switches modes automatically based on whether
   its service account. See [Terraform Authentication](#terraform-authentication)
   below for the click-through.
 
+### Retrieving the initial Keycloak admin credentials
+
+On first boot the Keycloak operator auto-generates a temporary master-realm
+admin user and stores its credentials in a Kubernetes secret named
+`keycloak-initial-admin`. Pull the username (usually `temp-admin`) and
+password with:
+
+```bash
+# Initial Keycloak username (usually: temp-admin)
+kubectl get secret -n mineral-prod keycloak-initial-admin -o json | jq -r '.data.username' | base64 -d
+
+# Initial Keycloak password
+kubectl get secret -n mineral-prod keycloak-initial-admin -o json | jq -r '.data.password' | base64 -d
+```
+
+Replace `mineral-prod` with the actual namespace for your environment. These
+credentials are intended for bootstrap only — rotate them (or replace this
+user) after initial setup.
+
 ### Terraform Authentication
+
+Before configuring either auth mode below, you need the master-realm admin
+username/password (Option 2) or a `terraform-admin` client secret (Option 1).
+For a fresh cluster, the initial admin credentials live in the
+`keycloak-initial-admin` Kubernetes secret — see
+[Retrieving the initial Keycloak admin credentials](#retrieving-the-initial-keycloak-admin-credentials)
+above.
 
 Two options, switched automatically based on whether `keycloak_client_id`
 is set in `terraform.tfvars`.
