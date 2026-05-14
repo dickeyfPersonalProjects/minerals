@@ -410,28 +410,45 @@ discussion.
 ## Local dev quickstart
 
 ```bash
-# 1. Start Keycloak alone (host port 8081, admin/admin, in-memory H2).
+# 1. Start Keycloak alone — host port :8081, admin/admin master creds,
+#    in-memory H2. Profile-gated; see "Why --profile keycloak?" below.
 docker compose --profile keycloak up -d keycloak
 
-# 2. Wait ~10s for it to come up, then verify:
-curl -fsS http://localhost:8081/realms/master >/dev/null && echo OK
+# 2. Apply the realm + seed the test users (idempotent; re-runnable):
+bash terraform/keycloak/dev-seed.sh
 
-# 3. Configure the realm. `dev.tfvars` ships committed and ready to use.
-cd terraform/keycloak
-terraform init
-terraform apply -var-file=dev.tfvars
-
-# 4. Sign in to the realm admin console at:
+# 3. Sign in to the realm admin console at:
 #    http://localhost:8081/admin/master/console/#/minerals
 #    Username: admin
-#    Password: $(terraform output -raw admin_password)
+#    Password: $(cd terraform/keycloak && terraform output -raw admin_password)
 ```
+
+`dev-seed.sh` runs `terraform init` + `terraform apply -var-file=dev.tfvars`
+under the hood and then provisions a known set of dev users via the
+Keycloak admin API. The committed `dev.tfvars` already wires
+`http://localhost:5173/*` into the `minerals-frontend` client's
+`additional_redirect_uris` / `additional_web_origins`, so the Vite SPA
+can complete the OIDC redirect with no manual editing.
+
+### Test users
+
+All test users share the password `MineralsDev123!` (set in
+`dev-seed.sh` as `DEV_PASSWORD`; override via the environment to use a
+different value).
+
+| Username | Realm role | Notes |
+|---|---|---|
+| `user1`, `user2`, `user3`, `user4`, `user5` | _(none)_ | Five generic end users. Authorized at the row level per [`CONTRACT.md`](../../CONTRACT.md) §13. |
+| `devops_viewer_user` | `devops-viewer` | Read-only operational access. |
+| `devops_admin_user` | `devops-admin` | Full operational access (inherits `devops-viewer` via Casbin, not Keycloak composite roles). |
 
 ### Why `--profile keycloak`?
 
-`docker-compose.yml` gates the `keycloak` service behind the `keycloak`
-profile so `docker compose up -d` (no args) doesn't start Keycloak —
-most dev work on the app doesn't need it. The two supported shapes are:
+Keycloak binds host `:8081` and the minerals app binds host `:8080`, so
+they happily run side-by-side — no port collision. The profile gate
+exists purely so the default `docker compose up -d` doesn't bring
+Keycloak up for the (common) cases where the work at hand doesn't need
+it. Bring it up explicitly when you do:
 
 ```bash
 # Keycloak alone (no app, no DB needed — start-dev uses in-memory H2):
@@ -441,10 +458,6 @@ docker compose --profile keycloak up -d keycloak
 docker compose up -d
 docker compose --profile keycloak up -d keycloak
 ```
-
-Keycloak binds host `:8081` and the app binds host `:8080`, so they run
-side-by-side without conflict — required for OIDC dev where the SPA
-needs both running.
 
 ### `dev.tfvars` is committed
 

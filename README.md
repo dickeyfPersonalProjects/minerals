@@ -61,6 +61,9 @@ cd frontend && npm run dev                 # Vite on :5173 (proxies to :8080)
 
 Open <http://localhost:5173>.
 
+For OIDC login flows (Keycloak on `:8081` + test users), see
+[docs/deploy/keycloak.md § Local dev quickstart](docs/deploy/keycloak.md#local-dev-quickstart).
+
 ### Tear-down
 
 ```bash
