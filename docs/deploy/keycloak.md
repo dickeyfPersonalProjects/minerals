@@ -278,7 +278,7 @@ Keycloak.
 5. Open the **Credentials** tab → copy the **Client secret**.
 6. Open the **Service account roles** tab → **Assign role**:
    - Filter by: **Realm roles**
-   - Assign the `admin` role (description: `${role_admin}`).
+   - Assign the `admin` role (description: `role_admin`).
 
 Then configure `terraform.tfvars`:
 
