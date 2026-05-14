@@ -75,7 +75,9 @@ module owns:
   `minerals-backend` (confidential, with a `view-users`
   realm-management role on its service account). Optional
   `minerals-test` password-grant client when `test_environment = true`.
-- **Roles** — `admin`, `collector`, `viewer`.
+- **Roles** — `devops-viewer`, `devops-admin` (devops/staff only;
+  normal users have no realm role and are authorized by per-row rules
+  in [`CONTRACT.md`](../../CONTRACT.md) §13).
 - **Admin user** — `admin@${env_domain}` with an auto-generated 24-char
   password and the `realm-admin` role scoped to the minerals realm
   (not master-realm admin).
@@ -486,8 +488,9 @@ Final names are decided by the auth bead. When that bead lands it must
 update [`CONFIG.md`](../../CONFIG.md) (settings inventory) and
 [`secrets.md`](./secrets.md) (Secret inventory) in the same PR.
 
-The realm exposes three roles — `admin`, `collector`, `viewer` — which
-the backend will map to the per-row authorization rules in
+The realm exposes two devops/staff roles — `devops-viewer` and
+`devops-admin`. Normal users have no realm role; the backend
+authorizes them via the per-row visibility/ownership rules in
 [`CONTRACT.md`](../../CONTRACT.md) §13. See
 [`docs/design/05-auth-slot.md`](../design/05-auth-slot.md) for the
 current stub and how it gets replaced.
