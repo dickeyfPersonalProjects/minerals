@@ -84,6 +84,8 @@ var (
 	ErrQRSheetConflict           = fmt.Errorf("qr sheet conflict")
 	ErrQRSheetSpecimenNotFound   = fmt.Errorf("qr sheet specimen not found")
 	ErrQRSheetTemplateInvalid    = fmt.Errorf("qr sheet template invalid")
+	ErrUserNotFound              = fmt.Errorf("user not found")
+	ErrUserConflict              = fmt.Errorf("user conflict")
 )
 
 // Page is the cursor-pagination request shape (per §10).
@@ -630,6 +632,55 @@ type QRSheetRepo interface {
 	// display name and lowest-positioned photo id, if any) ordered
 	// by position ascending.
 	ListSpecimens(ctx context.Context, sheetID uuid.UUID) ([]QRSheetEntry, error)
+}
+
+// UserStatus is the discriminator for the users.status column
+// (migration 0008). Values match the CHECK constraint there.
+type UserStatus string
+
+const (
+	// UserStatusPending is the first-login state — the row exists
+	// because a valid JWT arrived for an unknown sub, but the user
+	// has not yet completed profile setup. The auth middleware
+	// returns 403 + a redirect for API calls in this state.
+	UserStatusPending UserStatus = "pending"
+	// UserStatusActive is the post-setup steady state — every
+	// protected API endpoint is reachable.
+	UserStatusActive UserStatus = "active"
+	// UserStatusDeleted is the GDPR-erasure tombstone — the row
+	// stays so foreign keys don't orphan, but PII is scrubbed.
+	UserStatusDeleted UserStatus = "deleted"
+)
+
+// User mirrors the schema added in migration 0008_users (mi-tl2).
+// It maps the Keycloak `sub` claim to the application's row UUID
+// and carries the profile-completion state for the first-login
+// gate (mi-2hf).
+type User struct {
+	ID          uuid.UUID
+	KeycloakSub string
+	Email       string
+	DisplayName *string
+	Status      UserStatus
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// UserRepo is the consumer-side interface for the users table
+// (mi-tl2). Implementations live in internal/db.
+type UserRepo interface {
+	// GetBySub returns the user whose keycloak_sub matches, or
+	// ErrUserNotFound. The lookup is the hot-path read used by the
+	// auth resolver on every authenticated request.
+	GetBySub(ctx context.Context, sub string) (User, error)
+	// Create inserts a new user. The caller has populated ID
+	// (UUIDv7), KeycloakSub, Email, Status, CreatedAt, UpdatedAt.
+	// Returns ErrUserConflict on (keycloak_sub) unique violation.
+	Create(ctx context.Context, tx Tx, u User) error
+	// MarkActive sets display_name and flips status to 'active' on
+	// the row identified by id. Returns ErrUserNotFound if no row
+	// matched. The caller has already bumped updatedAt.
+	MarkActive(ctx context.Context, tx Tx, id uuid.UUID, displayName string, updatedAt time.Time) error
 }
 
 // SpecimenCollectorRepo is the consumer-side interface for the

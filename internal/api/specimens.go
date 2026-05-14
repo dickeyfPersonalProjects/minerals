@@ -238,12 +238,12 @@ type SpecimenService struct {
 	repo domain.SpecimenRepo
 }
 
-func registerSpecimenOperations(api huma.API, repo domain.SpecimenRepo) {
+func registerSpecimenOperations(api huma.API, authMW authMiddlewares, repo domain.SpecimenRepo) {
 	if repo == nil {
 		return
 	}
 	s := &SpecimenService{repo: repo}
-	mws := huma.Middlewares{humaAuth}
+	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
 		OperationID: "list-specimens",

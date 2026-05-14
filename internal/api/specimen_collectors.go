@@ -68,13 +68,13 @@ type SpecimenCollectorService struct {
 }
 
 func registerSpecimenCollectorOperations(
-	api huma.API, specimens domain.SpecimenRepo, links domain.SpecimenCollectorRepo,
+	api huma.API, authMW authMiddlewares, specimens domain.SpecimenRepo, links domain.SpecimenCollectorRepo,
 ) {
 	if specimens == nil || links == nil {
 		return
 	}
 	s := &SpecimenCollectorService{specimens: specimens, links: links}
-	mws := huma.Middlewares{humaAuth}
+	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
 		OperationID: "get-specimen-collectors",

@@ -126,12 +126,12 @@ type MineralSpeciesService struct {
 	mindat MindatLookup
 }
 
-func registerMineralSpeciesOperations(api huma.API, deps *MineralSpeciesServiceDeps) {
+func registerMineralSpeciesOperations(api huma.API, authMW authMiddlewares, deps *MineralSpeciesServiceDeps) {
 	if deps == nil || deps.Repo == nil {
 		return
 	}
 	s := &MineralSpeciesService{repo: deps.Repo, mindat: deps.Mindat}
-	mws := huma.Middlewares{humaAuth}
+	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
 		OperationID: "list-mineral-species",

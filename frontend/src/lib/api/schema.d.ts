@@ -204,6 +204,26 @@ export interface paths {
         patch: operations["patch-photo"];
         trace?: never;
     };
+    "/api/v1/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete first-login profile setup
+         * @description Persists the caller's display_name and flips their account from `pending` to `active`. After a successful call the first-login gate (mi-2hf) no longer redirects this user away from protected endpoints. This endpoint MUST be reachable while the caller is still pending — it is the only protected route that bypasses the gate.
+         */
+        post: operations["complete-profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/qr-sheet": {
         parameters: {
             query?: never;
@@ -1019,6 +1039,32 @@ export interface components {
              * @description When the photo was taken; defaulted from EXIF DateTimeOriginal when not provided.
              */
             taken_at: string | null;
+        };
+        ProfileBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/ProfileBody.json
+             */
+            readonly $schema?: string;
+            /** @description Display name as persisted. */
+            display_name: string;
+            /** @description Email from the JWT claim, persisted at first-login. */
+            email: string;
+            /** @description User row UUID. */
+            id: string;
+            /** @description Profile-setup-required flag; always false on a successful response. */
+            pending: boolean;
+        };
+        ProfileSetupInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/ProfileSetupInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description Public display name; required, 1–80 characters, trimmed. */
+            display_name: string;
         };
         PutSpecimenCollectorsBody: {
             /**
@@ -2339,6 +2385,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PhotoView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "complete-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileSetupInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileBody"];
                 };
             };
             /** @description Bad Request */

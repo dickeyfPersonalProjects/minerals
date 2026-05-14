@@ -114,12 +114,12 @@ type CollectorService struct {
 	repo domain.CollectorRepo
 }
 
-func registerCollectorOperations(api huma.API, repo domain.CollectorRepo) {
+func registerCollectorOperations(api huma.API, authMW authMiddlewares, repo domain.CollectorRepo) {
 	if repo == nil {
 		return
 	}
 	s := &CollectorService{repo: repo}
-	mws := huma.Middlewares{humaAuth}
+	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
 		OperationID: "list-collectors",

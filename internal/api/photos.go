@@ -122,7 +122,7 @@ type PhotoService struct {
 	deps PhotoServiceDeps
 }
 
-func registerPhotoOperations(api huma.API, mux *http.ServeMux, deps *PhotoServiceDeps) {
+func registerPhotoOperations(api huma.API, mux *http.ServeMux, authMW authMiddlewares, deps *PhotoServiceDeps) {
 	if deps == nil {
 		return
 	}
@@ -137,7 +137,7 @@ func registerPhotoOperations(api huma.API, mux *http.ServeMux, deps *PhotoServic
 	}
 
 	s := &PhotoService{deps: *deps}
-	mws := huma.Middlewares{humaAuth}
+	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
 		OperationID:   "upload-photo",
