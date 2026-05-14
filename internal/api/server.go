@@ -83,6 +83,20 @@ type Deps struct {
 	// QRSheets is wired in production (mi-c78.1) to expose the
 	// /api/v1/qr-sheet surface backing the printable label workflow.
 	QRSheets domain.QRSheetRepo
+	// RuntimeOIDC carries the PUBLIC_OIDC_* values the backend ships
+	// to the SPA via `/api/v1/runtime-config` (mi-5ew). All zero
+	// disables the OIDC block in the response, which signals to the
+	// SPA that login is unavailable in this environment.
+	RuntimeOIDC RuntimeOIDCConfig
+}
+
+// RuntimeOIDCConfig captures the SPA-facing OIDC settings the backend
+// surfaces through `/api/v1/runtime-config`. Backend-side JWT
+// verification uses separate, non-public env vars (mi-aw3).
+type RuntimeOIDCConfig struct {
+	IssuerURL   string
+	ClientID    string
+	RedirectURI string
 }
 
 // New returns an http.Handler with the v1 routes wired up. Callers
@@ -127,6 +141,9 @@ func New(deps Deps) http.Handler {
 	})
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "qr-sheets", Description: "Per-user QR sticker sheet builder (mi-c78.1). One active sheet per user.",
+	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "runtime-config", Description: "Browser-facing runtime config (PUBLIC_OIDC_*) served to the SPA at startup (mi-5ew).",
 	})
 
 	humaAPI := humago.New(mux, cfg)
@@ -199,6 +216,26 @@ type docsOutput struct {
 	Body func(huma.Context)
 }
 
+// runtimeOIDCBody is the OIDC block in the runtime-config response.
+// Field names are snake_case so the SPA's generated client matches
+// the rest of the API surface (per §10).
+type runtimeOIDCBody struct {
+	IssuerURL   string `json:"issuer_url"   doc:"Keycloak realm URL the SPA uses to discover the auth endpoint."`
+	ClientID    string `json:"client_id"    doc:"Public OIDC client_id for the PKCE flow."`
+	RedirectURI string `json:"redirect_uri" doc:"Absolute callback URL registered with Keycloak."`
+}
+
+// runtimeConfigBody is the shape returned by /api/v1/runtime-config.
+// `oidc` is omitted when the backend has no PUBLIC_OIDC_* values
+// configured; the SPA treats a missing block as "login disabled".
+type runtimeConfigBody struct {
+	OIDC *runtimeOIDCBody `json:"oidc,omitempty" doc:"OIDC client config; absent when login is not configured."`
+}
+
+type runtimeConfigOutput struct {
+	Body runtimeConfigBody
+}
+
 // registerSystemOperations registers the v1 system endpoints with
 // huma. After registration the operations appear in the spec served
 // at /api/v1/openapi.json.
@@ -246,6 +283,31 @@ func registerSystemOperations(api huma.API, deps Deps) {
 		Description: "Single-page Redoc viewer that loads the OpenAPI spec from /api/v1/openapi.json.",
 		Tags:        []string{"system"},
 	}, docsHandler)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "runtime-config",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/runtime-config",
+		Summary:     "Browser-facing runtime config",
+		Description: "Serves the PUBLIC_OIDC_* settings the SPA needs to drive the PKCE login flow (mi-5ew). " +
+			"The `oidc` block is omitted when login is not configured in this environment. " +
+			"Public endpoint — no auth required.",
+		Tags: []string{"runtime-config"},
+	}, makeRuntimeConfigHandler(deps.RuntimeOIDC))
+}
+
+func makeRuntimeConfigHandler(oidc RuntimeOIDCConfig) func(context.Context, *struct{}) (*runtimeConfigOutput, error) {
+	body := runtimeConfigBody{}
+	if oidc.IssuerURL != "" && oidc.ClientID != "" && oidc.RedirectURI != "" {
+		body.OIDC = &runtimeOIDCBody{
+			IssuerURL:   oidc.IssuerURL,
+			ClientID:    oidc.ClientID,
+			RedirectURI: oidc.RedirectURI,
+		}
+	}
+	return func(_ context.Context, _ *struct{}) (*runtimeConfigOutput, error) {
+		return &runtimeConfigOutput{Body: body}, nil
+	}
 }
 
 func makeReadyzHandler(deps Deps) func(context.Context, *struct{}) (*readyzOutput, error) {

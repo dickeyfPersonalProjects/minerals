@@ -25,9 +25,9 @@ setting" — updating this inventory is the first and mandatory step.
 | `MINDAT_API_KEY` | env | _(unset)_ | no | Mindat REST API token for mineral-species lookup (mi-dtg / F-1). When unset, mineral lookup falls back to DB-only mode (no Mindat fallthrough). | `internal/config/config.go` |
 | `OIDC_ISSUER_URL` | env | `http://localhost:8081/realms/minerals` | no | Keycloak realm URL used by the backend for JWT verification. Discovery (`{OIDC_ISSUER_URL}/.well-known/openid-configuration`) yields the JWKS endpoint. Consumed by `internal/oidc`. Documented; wired by mi-aw3. | _(pending mi-aw3)_ |
 | `OIDC_CLIENT_ID` | env | `minerals-frontend` | no | Expected `aud` claim on bearer tokens reaching the backend. Audience check only — no client secret on the backend (pure resource server, JWKS validation). Consumed by `internal/oidc`. Documented; wired by mi-aw3. | _(pending mi-aw3)_ |
-| `PUBLIC_OIDC_ISSUER_URL` | env | `http://localhost:8081/realms/minerals` | no | Keycloak realm URL exposed to the SPA at runtime by the backend (the SPA uses it to discover the authorization endpoint for the PKCE login flow). The `PUBLIC_` prefix marks "safe to send to the browser". Documented; wired by mi-aw3 / mi-5ew. | _(pending mi-aw3)_ |
-| `PUBLIC_OIDC_CLIENT_ID` | env | `minerals-frontend` | no | Public OIDC `client_id` the SPA uses for the auth-code-with-PKCE flow. Same value as `OIDC_CLIENT_ID` today (the backend's expected audience and the SPA's client id are the `minerals-frontend` Keycloak client). Documented; wired by mi-aw3 / mi-5ew. | _(pending mi-aw3)_ |
-| `PUBLIC_OIDC_REDIRECT_URI` | env | `http://localhost:5173/auth/callback` | no | Absolute URL the SPA hands Keycloak as the `redirect_uri` in the auth-code flow. Must match a `valid_redirect_uris` entry on the `minerals-frontend` Keycloak client (`terraform/keycloak/clients.tf`). Documented; wired by mi-aw3 / mi-5ew. | _(pending mi-aw3)_ |
+| `PUBLIC_OIDC_ISSUER_URL` | env | `http://localhost:8081/realms/minerals` | no | Keycloak realm URL exposed to the SPA via `/api/v1/runtime-config` (the SPA uses it to discover the authorization endpoint for the PKCE login flow). The `PUBLIC_` prefix marks "safe to send to the browser". Consumed by `internal/api` (mi-5ew). | `internal/config/config.go` |
+| `PUBLIC_OIDC_CLIENT_ID` | env | `minerals-frontend` | no | Public OIDC `client_id` the SPA uses for the auth-code-with-PKCE flow. Same value as `OIDC_CLIENT_ID` today (the backend's expected audience and the SPA's client id are the `minerals-frontend` Keycloak client). Served to the SPA via `/api/v1/runtime-config`. | `internal/config/config.go` |
+| `PUBLIC_OIDC_REDIRECT_URI` | env | `http://localhost:5173/auth/callback` | no | Absolute URL the SPA hands Keycloak as the `redirect_uri` in the auth-code flow. Must match a `valid_redirect_uris` entry on the `minerals-frontend` Keycloak client (`terraform/keycloak/clients.tf`). Served to the SPA via `/api/v1/runtime-config`. | `internal/config/config.go` |
 
 `Kind` legend: `env` = process environment variable. New kinds
 (`configmap` for non-env keys consumed directly, `flag` for runtime
@@ -38,10 +38,10 @@ The `PUBLIC_*` prefix is a convention, not a separate `Kind`. These
 are backend env vars like all the others — the prefix marks values
 the backend is allowed to ship to the SPA at runtime. The SPA itself
 never reads them directly; the backend's `envFrom` pulls them from
-`minerals-config` and serves them through a runtime config endpoint
-(mechanism decided in mi-aw3 / mi-5ew). The split between non-prefixed
-and `PUBLIC_*` is the trust boundary: anything without the prefix MUST
-NOT be exposed to the browser.
+`minerals-config` and serves the SPA-facing subset through the
+`/api/v1/runtime-config` endpoint (mi-5ew). The split between
+non-prefixed and `PUBLIC_*` is the trust boundary: anything without
+the prefix MUST NOT be exposed to the browser.
 
 **Prod routing.** In Kubernetes (`kustomize/base/`) the env vars split
 into two sources:

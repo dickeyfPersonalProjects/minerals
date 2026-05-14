@@ -17,6 +17,7 @@ vi.mock('svelte-spa-router', async () => {
 
 import Layout from './Layout.svelte';
 import { __resetQrSheetStore, setSheet, type QRSheetView } from './qrSheet';
+import { __resetOidcConfig } from './oidc/config';
 
 function sheet(over: Partial<QRSheetView> = {}): QRSheetView {
   return {
@@ -33,11 +34,13 @@ function sheet(over: Partial<QRSheetView> = {}): QRSheetView {
 beforeEach(() => {
   mockGet.mockReset();
   __resetQrSheetStore();
+  __resetOidcConfig();
 });
 
 afterEach(() => {
   cleanup();
   __resetQrSheetStore();
+  __resetOidcConfig();
 });
 
 describe('Layout — navbar', () => {
