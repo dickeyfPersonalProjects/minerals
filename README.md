@@ -85,17 +85,17 @@ into `$GOPATH/bin` if missing and wires up the hooks in `lefthook.yml`.
 
 Production deploys to Kubernetes via Flux GitOps. The repo ships a
 reusable `kustomize/base/` describing **what to run**; per-environment
-overlays in a separate fleet-infra GitOps repo describe **how it runs
-there** (namespace, hostname, image tag, secrets). Two environments
-are wired up today: `mineral-staging` and `mineral-prod`. Flux polls
-the GitOps repo, reconciles each overlay against the base, and pulls
+overlays in a separate gitops repository describe **how it runs
+there** (namespace, hostname, image tag, secrets). The example pattern
+uses two environments — `mineral-staging` and `mineral-prod`. Flux polls
+the gitops repository, reconciles each overlay against the base, and pulls
 container images from GHCR.
 
 ```mermaid
 flowchart LR
     GH[GitHub: this repo<br/>kustomize/base/]
     GHCR[GHCR image registry]
-    FleetRepo[Fleet-infra GitOps repo<br/>per-env overlays]
+    FleetRepo[GitOps repository<br/>per-env overlays]
     Flux[Flux:<br/>GitRepository + Kustomize controller]
 
     subgraph staging[mineral-staging namespace]

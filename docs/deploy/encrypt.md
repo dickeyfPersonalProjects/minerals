@@ -24,7 +24,8 @@ decrypt them, so a leaked GitOps repo doesn't leak credentials.
 > separates secret lifecycle from manifest lifecycle, supports rotation
 > without redeploying, and avoids permanently checking in ciphertext
 > tied to a specific cluster key. Use kubeseal when no such system is
-> in place; this fleet currently has none, hence kubeseal.
+> in place. This guide documents kubeseal as the fallback when no such
+> system is available.
 
 Plaintext Secrets in git are not allowed. Plaintext Secrets stored
 out-of-band (e.g. an operator's password manager, applied by hand) are
@@ -103,11 +104,11 @@ patch.
   the plaintext is not.
 - **Never commit `.sec/`.** It is gitignored, but check `git status`
   before staging anyway.
-- **Fleet-infra commits require human approval.** The fleet-infra
-  GitOps repo is reconciled directly into a live cluster — every
+- **GitOps-repository commits require human approval.** The gitops
+  repository is reconciled directly into a live cluster — every
   commit there changes production state. Polecats and other automated
-  agents must not push to fleet-infra; changes go through a human-
-  approved PR.
+  agents must not push to the gitops repository; changes go through a
+  human-approved PR.
 
 ## Rotating a SealedSecret
 

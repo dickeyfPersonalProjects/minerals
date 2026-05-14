@@ -3,7 +3,7 @@
 This guide documents the pattern for deploying the minerals app to a
 k3s cluster via Flux. It is paired with a complete, well-commented
 example overlay under [`example/`](./example/) that you can copy into
-your fleet-infra GitOps repo and adapt.
+your gitops repository and adapt.
 
 The example reflects the contract between this repo's `kustomize/base/`
 and a per-env GitOps overlay. The intent is that someone setting up a
@@ -25,7 +25,7 @@ Two repos, two responsibilities:
 | Concern                         | Lives in                                  |
 |---------------------------------|-------------------------------------------|
 | **What to run** (app, DB, MinIO, ConfigMap defaults, Service, resource sizing) | This repo: [`kustomize/base/`](../../kustomize/base) |
-| **How it runs in env X** (namespace, image tag, ENV-specific config patches, secrets, ingress, TLS) | Fleet-infra GitOps repo (mirrored by [`example/`](./example/)) |
+| **How it runs in env X** (namespace, image tag, ENV-specific config patches, secrets, ingress, TLS) | The operator's gitops repository (mirrored by [`example/`](./example/)) |
 
 The base does **not** declare a namespace, hostname, image tag, or
 secret values. Those are supplied per env by the overlay. Conversely,
@@ -122,10 +122,11 @@ docs/deploy/
         └── (same shape as staging)
 ```
 
-The example mirrors the layout of fleet-infra's
-`clusters/new-k3s/mineral/` directory. The flux-source/ subdirectory
-is a documentation grouping; in fleet-infra the `GitRepository` lives
-under `clusters/<cluster>/flux-system/` alongside other Flux sources.
+The example mirrors a typical gitops repository's
+`clusters/<cluster>/mineral/` directory. The flux-source/ subdirectory
+is a documentation grouping; in a real gitops repository the
+`GitRepository` lives under `clusters/<cluster>/flux-system/`
+alongside other Flux sources.
 
 ### Ordering inside an overlay
 
@@ -165,8 +166,8 @@ copy-paste-to-add-a-new-env safe.
 
 The base's `configmap.yaml` defaults `ENV: "prod"`. A reasonable
 shortcut is to omit the patch in the prod overlay since the default is
-already correct — that's what fleet-infra currently does, and it's the
-**one inconsistency this example deliberately fixes**.
+already correct — but this example deliberately keeps the patch
+explicit in both overlays.
 
 The example keeps the ENV patch present and explicit in *both*
 overlays. Two reasons:
@@ -186,14 +187,15 @@ that the overlay's behavior is obvious from the overlay itself.
 ## Bootstrapping a new environment
 
 1. Copy `example/staging/` to a new directory, e.g.
-   `clusters/<cluster>/mineral/dev/` in your fleet-infra repo.
+   `clusters/<cluster>/mineral/dev/` in your gitops repository.
 2. Edit the namespace, hostnames, Kustomization name, and image tag to
    match the new env.
 3. Generate fresh SealedSecrets for the new namespace — see
    [`encrypt.md`](./encrypt.md). The ciphertext is namespace-scoped, so
    you cannot reuse staging's.
 4. Add the new directory to the parent `kustomization.yaml`.
-5. Open a fleet-infra PR (commits there require human approval).
+5. Open a PR against the gitops repository (commits there require human
+   approval).
 6. After merge, the cluster's flux-system reconciles the new env on
    its next poll.
 
@@ -229,10 +231,10 @@ small:
   semantics for multi-replica are an unsolved v2 question. An HPA
   would race against the single-replica assumption. Add when v2 ships
   multi-replica with a defined consistency story.
-- **imagePullSecret** — `ghcr.io/dickeyfpersonalprojects/minerals` is
-  currently public, so anonymous pulls work. Add an `imagePullSecrets`
-  entry on the Deployment's PodSpec (and the Secret to back it) if the
-  repo is made private.
+- **imagePullSecret** — if the GHCR image repository is public,
+  anonymous pulls work and no pull secret is needed. Add an
+  `imagePullSecrets` entry on the Deployment's PodSpec (and the Secret
+  to back it) if the repo is private.
 
 ---
 
