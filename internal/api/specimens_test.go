@@ -426,6 +426,44 @@ func TestSpecimensPatchTypeDataNullClearsField(t *testing.T) {
 	}
 }
 
+// A user pasting HTML-flavored markup into the chemical_formula field
+// (e.g. via copy-paste from a Mindat page) must be normalized on the
+// way in so the column stays uniformly Unicode at rest (mi-c8v).
+func TestSpecimensCreateNormalizesHTMLChemicalFormula(t *testing.T) {
+	repo := newFakeSpecimenRepo()
+	h := newServerWithSpecimens(t, repo)
+
+	body := map[string]any{
+		"type": "mineral",
+		"name": "Curite",
+		"type_data": map[string]any{
+			"chemical_formula": "Pb(UO<sub>2</sub>)<sub>3</sub>O<sub>3</sub>(OH)<sub>2</sub> &middot; 3H<sub>2</sub>O",
+		},
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/specimens", jsonBody(t, body))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var created SpecimenView
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var td map[string]any
+	if err := json.Unmarshal(created.TypeData, &td); err != nil {
+		t.Fatalf("decode type_data: %v", err)
+	}
+	const want = "Pb(UO₂)₃O₃(OH)₂ · 3H₂O"
+	if got := td["chemical_formula"]; got != want {
+		t.Errorf("chemical_formula = %v, want %q", got, want)
+	}
+	if got, _ := td["chemical_formula"].(string); strings.ContainsAny(got, "<&") {
+		t.Errorf("stored value still contains HTML markup: %q", got)
+	}
+}
+
 func TestSpecimensPatchRejectsTypeChange(t *testing.T) {
 	repo := newFakeSpecimenRepo()
 	h := newServerWithSpecimens(t, repo)

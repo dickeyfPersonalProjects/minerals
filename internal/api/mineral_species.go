@@ -270,6 +270,13 @@ func (s *MineralSpeciesService) create(ctx context.Context, in *createMineralSpe
 		return nil, newAPIError(http.StatusBadRequest, "invalid_name",
 			"name is required", nil)
 	}
+	// Defensive normalization on the user-write boundary, mirroring
+	// the Mindat-ingest path so the column stays uniformly Unicode at
+	// rest (mi-c8v).
+	if in.Body.Data.ChemicalFormula != nil {
+		normalized := mindat.NormalizeChemicalFormula(*in.Body.Data.ChemicalFormula)
+		in.Body.Data.ChemicalFormula = &normalized
+	}
 	if err := in.Body.Data.Validate(); err != nil {
 		return nil, newAPIError(http.StatusBadRequest, "invalid_data",
 			err.Error(), nil)

@@ -199,6 +199,128 @@ func assertSchemaAbsent(ctx context.Context, t *testing.T, pool *pgxpool.Pool, s
 	}
 }
 
+// TestMigration0009_NormalizesChemicalFormula seeds HTML-flavored
+// chemical_formula values into specimens.type_data and
+// mineral_species.data BEFORE applying 0009, then verifies the
+// migration rewrote them into clean Unicode (mi-c8v). Also asserts the
+// post-migration acceptance criterion: no row in either column
+// contains '<' or a recognized HTML entity prefix.
+func TestMigration0009_NormalizesChemicalFormula(t *testing.T) {
+	rawDSN := os.Getenv("DATABASE_URL")
+	if rawDSN == "" {
+		t.Skip("DATABASE_URL not set; skipping migrations integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	schema := "mig0009_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+
+	adminPool, err := pgxpool.New(ctx, rawDSN)
+	if err != nil {
+		t.Fatalf("connect admin pool: %v", err)
+	}
+	if _, err := adminPool.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		adminPool.Close()
+		t.Fatalf("create schema: %v", err)
+	}
+	t.Cleanup(adminPool.Close)
+	t.Cleanup(func() {
+		clean, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if _, err := adminPool.Exec(clean, "DROP SCHEMA "+schema+" CASCADE"); err != nil {
+			t.Logf("cleanup: drop schema %s: %v", schema, err)
+		}
+	})
+
+	scopedDSN := dsnWithSearchPath(t, rawDSN, schema)
+	m, err := migrate.New("file://"+migrationsDir(t), scopedDSN)
+	if err != nil {
+		t.Fatalf("migrate.New: %v", err)
+	}
+	t.Cleanup(func() { _, _ = m.Close() })
+
+	// Migrate up to 0008 (everything BEFORE the backfill). This ensures
+	// specimens + mineral_species exist and we can seed dirty rows.
+	if err := m.Migrate(8); err != nil {
+		t.Fatalf("migrate up to 8: %v", err)
+	}
+
+	// Seed dirty data through a scoped pool.
+	pool, err := pgxpool.New(ctx, scopedDSN)
+	if err != nil {
+		t.Fatalf("scoped pool: %v", err)
+	}
+	defer pool.Close()
+
+	const dirtyFormula = "Pb(UO<sub>2</sub>)<sub>3</sub>O<sub>3</sub>(OH)<sub>2</sub> &middot; 3H<sub>2</sub>O"
+	const cleanFormula = "Pb(UO₂)₃O₃(OH)₂ · 3H₂O"
+	const alreadyClean = "SiO₂"
+
+	specimenDirty := uuid.New()
+	specimenClean := uuid.New()
+	speciesDirty := uuid.New()
+	speciesAlreadyClean := uuid.New()
+	authorID := "00000000-0000-0000-0000-000000000001" // overseer stub from 0008
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO specimens (id, type, name, author_id, type_data, created_at, updated_at)
+		VALUES
+			($1, 'mineral', 'Curite-dirty', $2,
+				jsonb_build_object('chemical_formula', $3::text), now(), now()),
+			($4, 'mineral', 'Quartz-clean', $2,
+				jsonb_build_object('chemical_formula', $5::text), now(), now())
+	`, specimenDirty, authorID, dirtyFormula, specimenClean, alreadyClean); err != nil {
+		t.Fatalf("seed specimens: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO mineral_species (id, name, source, data, author_id, created_at, updated_at)
+		VALUES
+			($1, 'Curite-dirty', 'mindat',
+				jsonb_build_object('chemical_formula', $2::text), $3, now(), now()),
+			($4, 'Quartz-clean', 'user',
+				jsonb_build_object('chemical_formula', $5::text), $3, now(), now())
+	`, speciesDirty, dirtyFormula, authorID, speciesAlreadyClean, alreadyClean); err != nil {
+		t.Fatalf("seed mineral_species: %v", err)
+	}
+
+	// Apply 0009.
+	if err := m.Migrate(9); err != nil {
+		t.Fatalf("migrate up to 9: %v", err)
+	}
+
+	// Dirty rows are now clean.
+	for _, c := range []struct {
+		table, idCol, dataCol string
+		id                    uuid.UUID
+		want                  string
+	}{
+		{"specimens", "id", "type_data", specimenDirty, cleanFormula},
+		{"specimens", "id", "type_data", specimenClean, alreadyClean},
+		{"mineral_species", "id", "data", speciesDirty, cleanFormula},
+		{"mineral_species", "id", "data", speciesAlreadyClean, alreadyClean},
+	} {
+		var got string
+		q := "SELECT " + c.dataCol + "->>'chemical_formula' FROM " + c.table + " WHERE " + c.idCol + " = $1"
+		if err := pool.QueryRow(ctx, q, c.id).Scan(&got); err != nil {
+			t.Errorf("readback %s/%s: %v", c.table, c.id, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("%s/%s chemical_formula = %q, want %q", c.table, c.id, got, c.want)
+		}
+		if strings.ContainsAny(got, "<&") {
+			t.Errorf("%s/%s still contains markup: %q", c.table, c.id, got)
+		}
+	}
+
+	// Down is a documented no-op for the data; should run cleanly.
+	if err := m.Migrate(8); err != nil {
+		t.Fatalf("migrate down to 8: %v", err)
+	}
+}
+
 // --- pg_catalog introspection helpers ---
 
 func tableExists(ctx context.Context, t *testing.T, pool *pgxpool.Pool, schema, table string) bool {
