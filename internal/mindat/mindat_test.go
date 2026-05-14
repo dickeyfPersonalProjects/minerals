@@ -148,6 +148,35 @@ func TestLookupByName_EmptyName(t *testing.T) {
 	}
 }
 
+// TestLookupByName_NormalizesHTMLFormula proves the Mindat-ingest path
+// applies NormalizeChemicalFormula. Mindat is the dominant source of
+// HTML-flavored markup; this guard catches a future refactor that
+// accidentally drops the normalization call.
+func TestLookupByName_NormalizesHTMLFormula(t *testing.T) {
+	const body = `{"results":[{
+		"id": 1,
+		"name": "Curite",
+		"ima_formula": "Pb(UO<sub>2</sub>)<sub>3</sub>O<sub>3</sub>(OH)<sub>2</sub> &middot; 3H<sub>2</sub>O"
+	}]}`
+	_, c := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	})
+	rec, err := c.LookupByName(context.Background(), "Curite")
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if rec.Data.ChemicalFormula == nil {
+		t.Fatal("formula was nil")
+	}
+	const want = "Pb(UO₂)₃O₃(OH)₂ · 3H₂O"
+	if got := *rec.Data.ChemicalFormula; got != want {
+		t.Errorf("formula = %q, want %q", got, want)
+	}
+	if strings.ContainsAny(*rec.Data.ChemicalFormula, "<&") {
+		t.Errorf("formula still contains markup: %q", *rec.Data.ChemicalFormula)
+	}
+}
+
 func TestLookupByName_HardnessRangeMidpoint(t *testing.T) {
 	const body = `{"results":[{"id":1,"name":"Talc","hardness_min":1,"hardness_max":2}]}`
 	_, c := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {

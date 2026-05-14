@@ -288,6 +288,37 @@ func TestCreateMineralSpecies_UserSource(t *testing.T) {
 	}
 }
 
+// A user posting an HTML-flavored chemical_formula must be normalized
+// at the write boundary (mi-c8v). Mirrors the Mindat-ingest path so the
+// column is uniformly Unicode regardless of source.
+func TestCreateMineralSpecies_NormalizesHTMLChemicalFormula(t *testing.T) {
+	repo := newFakeMineralSpeciesRepo()
+	h := newServerWithMineralSpecies(t, repo, nil)
+
+	body, _ := json.Marshal(map[string]any{
+		"name": "Curite",
+		"data": map[string]any{
+			"chemical_formula": "Pb(UO<sub>2</sub>)<sub>3</sub>O<sub>3</sub>(OH)<sub>2</sub> &middot; 3H<sub>2</sub>O",
+		},
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/mineral-species", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var view MineralSpeciesView
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	const want = "Pb(UO₂)₃O₃(OH)₂ · 3H₂O"
+	if view.Data.ChemicalFormula == nil || *view.Data.ChemicalFormula != want {
+		t.Errorf("chemical_formula = %v, want %q", view.Data.ChemicalFormula, want)
+	}
+}
+
 func TestCreateMineralSpecies_DuplicateNameConflict(t *testing.T) {
 	repo := newFakeMineralSpeciesRepo()
 	id := domain.NewID()

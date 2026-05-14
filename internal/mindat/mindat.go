@@ -210,6 +210,11 @@ func toMineralRecord(g geomaterial) *MineralRecord {
 	}
 	formula := strings.TrimSpace(firstNonEmpty(g.IMAFormula, g.MindatFormula))
 	if formula != "" {
+		// Mindat returns HTML-flavored formulas (e.g. H<sub>2</sub>O,
+		// CuSO<sub>4</sub> &middot; 5H<sub>2</sub>O). Normalize once at
+		// the write boundary so callers and the DB only ever see clean
+		// Unicode (mi-c8v).
+		formula = NormalizeChemicalFormula(formula)
 		rec.Data.ChemicalFormula = &formula
 	}
 	if cs := strings.TrimSpace(g.CrystalSystem); cs != "" {

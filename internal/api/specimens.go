@@ -36,6 +36,7 @@ import (
 
 	"github.com/dickeyfPersonalProjects/minerals/internal/auth"
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
+	"github.com/dickeyfPersonalProjects/minerals/internal/mindat"
 )
 
 // SpecimenTypeData is the wire shape of `type_data`. Internally it
@@ -573,6 +574,13 @@ func validateAndCanonicalizeTypeData(t domain.SpecimenType, raw []byte) ([]byte,
 			return nil, newAPIError(http.StatusBadRequest, "invalid_type_data",
 				"type_data does not match MineralData shape",
 				map[string]any{"field": "type_data", "type": "mineral"})
+		}
+		// Defensive normalization: a user pasting HTML-flavored markup
+		// gets cleaned the same way Mindat-sourced values do, so the
+		// column is uniformly Unicode at rest (mi-c8v).
+		if d.ChemicalFormula != nil {
+			normalized := mindat.NormalizeChemicalFormula(*d.ChemicalFormula)
+			d.ChemicalFormula = &normalized
 		}
 		if err := d.Validate(); err != nil {
 			return nil, newAPIError(http.StatusUnprocessableEntity, "invalid_type_data",
