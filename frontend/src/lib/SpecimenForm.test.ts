@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { axe } from 'vitest-axe';
+
+const { mockGet } = vi.hoisted(() => ({ mockGet: vi.fn() }));
+vi.mock('./api/index', () => ({
+  client: { GET: mockGet },
+}));
+vi.mock('./api/wrapper', () => ({
+  SUPPRESS_TOAST_HEADERS: { 'x-suppress-toast': '1' },
+}));
+
 import SpecimenForm from './SpecimenForm.svelte';
 import type { SpecimenFormSubmitResult } from './SpecimenForm.svelte';
 import { emptyFormValues, type SpecimenFormValues } from './schemas/specimen';
@@ -11,6 +20,7 @@ function fillRequired(values: Partial<SpecimenFormValues> = {}): SpecimenFormVal
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  mockGet.mockReset();
 });
 
 afterEach(() => {
@@ -216,6 +226,93 @@ describe('SpecimenForm', () => {
       const fieldset = screen.getByTestId('type-fieldset') as HTMLFieldSetElement;
       expect(fieldset.disabled).toBe(true);
       expect(screen.getByTestId('type-immutable-hint')).toBeInTheDocument();
+    });
+  });
+
+  describe('mindat lookup', () => {
+    it('Lookup button populates the visible mineral form inputs with fetched data', async () => {
+      // Regression for mi-xly: the previous autocomplete updated felte's
+      // store via setData but the rendered <input> values stayed empty,
+      // so users thought the lookup did nothing. Switching to setFields
+      // pushes the new values into the DOM as well.
+      mockGet.mockResolvedValue({
+        data: {
+          items: [
+            {
+              id: 'aaaaaaaa-0000-0000-0000-000000000001',
+              name: 'Quartz',
+              source: 'mindat',
+              mindat_id: '1234',
+              attribution: 'data via Mindat (CC-BY-NC-SA 4.0)',
+              author_id: '00000000-0000-0000-0000-000000000001',
+              created_at: '2026-05-01T12:00:00Z',
+              updated_at: '2026-05-01T12:00:00Z',
+              data: {
+                chemical_formula: 'SiO2',
+                crystal_system: 'trigonal',
+                mohs_hardness: 7,
+                color: 'colorless',
+                luster: 'vitreous',
+                mindat_id: '1234',
+                mineral_species: ['Quartz'],
+              },
+            },
+          ],
+        },
+        error: null,
+      });
+
+      render(SpecimenForm, {
+        mode: 'edit',
+        submitLabel: 'Save',
+        onSubmit: vi.fn(),
+        initial: { type: 'mineral', name: 'Quartz' },
+      });
+
+      const lookupInput = screen.getByTestId('mineral-species-lookup-input') as HTMLInputElement;
+      await fireEvent.input(lookupInput, { target: { value: 'quartz' } });
+      await fireEvent.click(screen.getByTestId('mineral-species-lookup-button'));
+
+      const formula = document.getElementById('specimen-m-chemical-formula') as HTMLInputElement;
+      const mindatId = document.getElementById('specimen-m-mindat-id') as HTMLInputElement;
+      const crystal = document.getElementById('specimen-m-crystal-system') as HTMLInputElement;
+      const hardness = document.getElementById('specimen-m-mohs-hardness') as HTMLInputElement;
+
+      await waitFor(() => expect(formula.value).toBe('SiO2'));
+      expect(crystal.value).toBe('trigonal');
+      expect(mindatId.value).toBe('1234');
+      expect(hardness.value).toBe('7');
+
+      // Attribution from Mindat is rendered (CC-BY-NC-SA 4.0).
+      expect(screen.getByTestId('mineral-attribution')).toHaveTextContent(/Mindat/);
+    });
+
+    it('shows inline error and leaves fields untouched when no match is found', async () => {
+      mockGet.mockResolvedValue({ data: { items: [] }, error: null });
+
+      render(SpecimenForm, {
+        mode: 'edit',
+        submitLabel: 'Save',
+        onSubmit: vi.fn(),
+        initial: {
+          type: 'mineral',
+          name: 'Unobtanium',
+          m_chemical_formula: 'XYZ',
+        },
+      });
+
+      const lookupInput = screen.getByTestId('mineral-species-lookup-input') as HTMLInputElement;
+      await fireEvent.input(lookupInput, { target: { value: 'unobtanium' } });
+      await fireEvent.click(screen.getByTestId('mineral-species-lookup-button'));
+
+      await waitFor(() =>
+        expect(screen.getByTestId('mineral-species-lookup-error')).toHaveTextContent(
+          /No match found/,
+        ),
+      );
+      // Pre-existing chemical formula is preserved on failed lookup.
+      const formula = document.getElementById('specimen-m-chemical-formula') as HTMLInputElement;
+      expect(formula.value).toBe('XYZ');
     });
   });
 
