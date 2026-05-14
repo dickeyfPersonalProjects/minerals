@@ -21,9 +21,7 @@
     type SpecimenFormValues,
     type SpecimenType,
   } from './schemas/specimen';
-  import MineralSpeciesAutocomplete, {
-    type MineralSpeciesView,
-  } from './MineralSpeciesAutocomplete.svelte';
+  import MineralSpeciesLookup, { type MineralSpeciesView } from './MineralSpeciesLookup.svelte';
 
   interface Props {
     initial?: Partial<SpecimenFormValues>;
@@ -58,7 +56,7 @@
   let catalogNumberError: string | null = $state(null);
   let fieldErrors: Record<string, string> = $state({});
 
-  const { form, errors, isSubmitting, data, setData } = createForm<SpecimenFormValues>({
+  const { form, errors, isSubmitting, data, setData, setFields } = createForm<SpecimenFormValues>({
     initialValues,
     extend: validator({ schema: specimenFormSchema }),
     onSubmit: async (values) => {
@@ -135,7 +133,11 @@
       m_mindat_id: d.mindat_id ?? '',
       m_mineral_species: (d.mineral_species ?? []).join(', '),
     };
-    setData(next);
+    // setFields (not setData) — setData only updates the felte store,
+    // leaving the rendered <input> values untouched. setFields also
+    // pushes the new values into the DOM so the user can see (and
+    // edit) what was fetched before saving.
+    setFields(next);
     mineralAttribution = s.attribution ?? null;
   }
 
@@ -555,7 +557,7 @@
   {#if $data.type === 'mineral'}
     <fieldset class="space-y-3" data-testid="mineral-fields">
       <legend class="text-sm font-medium text-[var(--color-text)]">Mineralogy</legend>
-      <MineralSpeciesAutocomplete initialQuery={$data.name} onSelect={prefillMineralFromSpecies} />
+      <MineralSpeciesLookup initialQuery={$data.name} onSelect={prefillMineralFromSpecies} />
       <div class="grid gap-3 sm:grid-cols-2">
         <div>
           <label
