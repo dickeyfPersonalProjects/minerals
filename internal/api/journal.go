@@ -57,7 +57,7 @@ type JournalService struct {
 	deps JournalServiceDeps
 }
 
-func registerJournalOperations(api huma.API, deps *JournalServiceDeps) {
+func registerJournalOperations(api huma.API, authMW authMiddlewares, deps *JournalServiceDeps) {
 	if deps == nil || deps.Entries == nil {
 		return
 	}
@@ -65,7 +65,7 @@ func registerJournalOperations(api huma.API, deps *JournalServiceDeps) {
 		deps.Markdown = markdown.NewRenderer()
 	}
 	s := &JournalService{deps: *deps}
-	mws := huma.Middlewares{humaAuth}
+	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
 		OperationID:   "create-journal-entry",

@@ -88,6 +88,14 @@ type Deps struct {
 	// disables the OIDC block in the response, which signals to the
 	// SPA that login is unavailable in this environment.
 	RuntimeOIDC RuntimeOIDCConfig
+	// Users powers the first-login gate (mi-2hf): the auth chain
+	// resolves the JWT `sub` to a row here, auto-creates a pending
+	// row on first-login, and gates protected endpoints with a 403
+	// + redirect until the profile is completed. nil disables the
+	// resolver entirely — protected routes still run humaAuth so
+	// existing handlers see the StubUser, but no DB lookup or gate
+	// runs. Tests that don't exercise auth leave it nil.
+	Users domain.UserRepo
 }
 
 // RuntimeOIDCConfig captures the SPA-facing OIDC settings the backend
@@ -145,17 +153,22 @@ func New(deps Deps) http.Handler {
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "runtime-config", Description: "Browser-facing runtime config (PUBLIC_OIDC_*) served to the SPA at startup (mi-5ew).",
 	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "profile", Description: "First-login profile completion (mi-2hf). Pending users complete setup here before any other protected endpoint becomes reachable.",
+	})
 
 	humaAPI := humago.New(mux, cfg)
+	authMW := newAuthMiddlewares(deps.Users)
 	registerSystemOperations(humaAPI, deps)
-	registerCollectorOperations(humaAPI, deps.Collectors)
-	registerPhotoOperations(humaAPI, mux, deps.Photos)
-	registerSpecimenOperations(humaAPI, deps.Specimens)
-	registerJournalOperations(humaAPI, deps.Journal)
-	registerSpecimenCollectorOperations(humaAPI, deps.Specimens, deps.SpecimenCollectors)
-	registerJournalFileOperations(humaAPI, mux, deps.JournalFiles)
-	registerMineralSpeciesOperations(humaAPI, deps.MineralSpecies)
-	registerQRSheetOperations(humaAPI, deps.QRSheets)
+	registerCollectorOperations(humaAPI, authMW, deps.Collectors)
+	registerPhotoOperations(humaAPI, mux, authMW, deps.Photos)
+	registerSpecimenOperations(humaAPI, authMW, deps.Specimens)
+	registerJournalOperations(humaAPI, authMW, deps.Journal)
+	registerSpecimenCollectorOperations(humaAPI, authMW, deps.Specimens, deps.SpecimenCollectors)
+	registerJournalFileOperations(humaAPI, mux, authMW, deps.JournalFiles)
+	registerMineralSpeciesOperations(humaAPI, authMW, deps.MineralSpecies)
+	registerQRSheetOperations(humaAPI, authMW, deps.QRSheets)
+	registerProfileOperations(humaAPI, authMW, deps.Users)
 	registerSpecimenRedirect(mux)
 
 	// Protected /api/v1/* fallback. Real handlers land in feature

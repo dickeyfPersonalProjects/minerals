@@ -13,10 +13,12 @@ import Collectors from './routes/Collectors.svelte';
 import CollectorEdit from './routes/CollectorEdit.svelte';
 import QRPreview from './routes/QRPreview.svelte';
 import AuthCallback from './routes/AuthCallback.svelte';
+import ProfileSetup from './routes/ProfileSetup.svelte';
 
 export const routes: RouteDefinition = {
   '/': Specimens,
   '/auth/callback': AuthCallback,
+  '/profile/setup': ProfileSetup,
   '/specimens': Specimens,
   '/specimens/new': SpecimenNew,
   // Static routes must precede the `:id` capture (svelte-spa-router

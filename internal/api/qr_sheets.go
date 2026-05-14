@@ -113,12 +113,12 @@ type QRSheetService struct {
 	repo domain.QRSheetRepo
 }
 
-func registerQRSheetOperations(api huma.API, repo domain.QRSheetRepo) {
+func registerQRSheetOperations(api huma.API, authMW authMiddlewares, repo domain.QRSheetRepo) {
 	if repo == nil {
 		return
 	}
 	s := &QRSheetService{repo: repo}
-	mws := huma.Middlewares{humaAuth}
+	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
 		OperationID: "get-qr-sheet",

@@ -197,6 +197,21 @@ func (specStubQRSheetRepo) ListSpecimens(context.Context, uuid.UUID) ([]domain.Q
 	return nil, nil
 }
 
+// specStubUserRepo is a never-called stand-in so the
+// type-derived OpenAPI spec advertises /api/v1/profile during
+// codegen (mi-2hf).
+type specStubUserRepo struct{}
+
+func (specStubUserRepo) GetBySub(context.Context, string) (domain.User, error) {
+	return domain.User{}, domain.ErrUserNotFound
+}
+func (specStubUserRepo) Create(context.Context, domain.Tx, domain.User) error {
+	return domain.ErrUserNotFound
+}
+func (specStubUserRepo) MarkActive(context.Context, domain.Tx, uuid.UUID, string, time.Time) error {
+	return domain.ErrUserNotFound
+}
+
 // specStubSpecimenCollectorRepo is a never-called stand-in so the
 // type-derived OpenAPI spec advertises the chain routes during
 // codegen (mi-zv3 / C-3).
@@ -242,6 +257,7 @@ func runOpenAPI(args []string) error {
 			Repo: specStubMineralSpeciesRepo{},
 		},
 		QRSheets: specStubQRSheetRepo{},
+		Users:    specStubUserRepo{},
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        specStubJournalRepo{},
 			Attachments:    specStubJournalAttachmentRepo{},

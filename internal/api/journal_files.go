@@ -111,7 +111,7 @@ type JournalFileService struct {
 	deps JournalFileServiceDeps
 }
 
-func registerJournalFileOperations(api huma.API, mux *http.ServeMux, deps *JournalFileServiceDeps) {
+func registerJournalFileOperations(api huma.API, mux *http.ServeMux, authMW authMiddlewares, deps *JournalFileServiceDeps) {
 	if deps == nil {
 		return
 	}
@@ -127,7 +127,7 @@ func registerJournalFileOperations(api huma.API, mux *http.ServeMux, deps *Journ
 	}
 
 	s := &JournalFileService{deps: *deps}
-	mws := huma.Middlewares{humaAuth}
+	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
 		OperationID:   "upload-journal-file",
