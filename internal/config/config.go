@@ -30,6 +30,17 @@ type Config struct {
 	// every environment — when unset, the system falls back to
 	// DB-only mineral-species lookups.
 	MindatAPIKey string
+
+	// PublicOIDCIssuerURL, PublicOIDCClientID, and PublicOIDCRedirectURI
+	// are the SPA-facing OIDC settings the backend exposes through
+	// `/api/v1/runtime-config` (mi-5ew). The `PUBLIC_` prefix marks
+	// them as safe to ship to the browser. When all three are set the
+	// SPA enables the OIDC login flow; when any is empty the SPA hides
+	// the login UI. Backend-side JWT verification (`OIDC_ISSUER_URL`,
+	// `OIDC_CLIENT_ID`) is wired separately by mi-aw3.
+	PublicOIDCIssuerURL   string
+	PublicOIDCClientID    string
+	PublicOIDCRedirectURI string
 }
 
 // Defaults for ENV=dev or unset. Mirrors the inventory in CONTRACT.md
@@ -79,6 +90,9 @@ func loadFrom(get func(string) string) (*Config, error) {
 	cfg.LogLevel = orDefault(get("LOG_LEVEL"), defaultLogLevel)
 	cfg.S3Region = orDefault(get("S3_REGION"), defaultS3Region)
 	cfg.MindatAPIKey = strings.TrimSpace(get("MINDAT_API_KEY"))
+	cfg.PublicOIDCIssuerURL = strings.TrimSpace(get("PUBLIC_OIDC_ISSUER_URL"))
+	cfg.PublicOIDCClientID = strings.TrimSpace(get("PUBLIC_OIDC_CLIENT_ID"))
+	cfg.PublicOIDCRedirectURI = strings.TrimSpace(get("PUBLIC_OIDC_REDIRECT_URI"))
 
 	// Required-in-prod variables: in dev, fall back to the inventory
 	// default; in prod, leave the field empty so ValidateFor* can

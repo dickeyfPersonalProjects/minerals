@@ -140,6 +140,11 @@ func runServe(_ []string) error {
 			Mindat: newMindatClient(cfg.MindatAPIKey),
 		},
 		QRSheets: db.NewQRSheetPostgres(pool),
+		RuntimeOIDC: api.RuntimeOIDCConfig{
+			IssuerURL:   cfg.PublicOIDCIssuerURL,
+			ClientID:    cfg.PublicOIDCClientID,
+			RedirectURI: cfg.PublicOIDCRedirectURI,
+		},
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        db.NewJournalEntryPostgres(pool),
 			Attachments:    db.NewJournalEntryFilePostgres(pool),

@@ -67,7 +67,9 @@ func TestOpenAPISpecHasExpectedPaths(t *testing.T) {
 	if body.Info.Title == "" || body.Info.Version == "" {
 		t.Errorf("info = %+v, want non-empty title/version", body.Info)
 	}
-	for _, want := range []string{"/healthz", "/readyz", "/docs", "/api/v1/openapi.json"} {
+	for _, want := range []string{
+		"/healthz", "/readyz", "/docs", "/api/v1/openapi.json", "/api/v1/runtime-config",
+	} {
 		if _, ok := body.Paths[want]; !ok {
 			t.Errorf("spec missing path %q (have %v)", want, keysOf(body.Paths))
 		}
@@ -80,6 +82,85 @@ func keysOf(m map[string]any) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+func TestRuntimeConfigOIDCConfigured(t *testing.T) {
+	h := New(Deps{
+		RuntimeOIDC: RuntimeOIDCConfig{
+			IssuerURL:   "https://auth.example.com/realms/minerals",
+			ClientID:    "minerals-frontend",
+			RedirectURI: "https://www.example.com/auth/callback",
+		},
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/runtime-config", nil)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var body struct {
+		OIDC *struct {
+			IssuerURL   string `json:"issuer_url"`
+			ClientID    string `json:"client_id"`
+			RedirectURI string `json:"redirect_uri"`
+		} `json:"oidc"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.OIDC == nil {
+		t.Fatalf("oidc block missing; body = %s", rec.Body.String())
+	}
+	if got := body.OIDC.IssuerURL; got != "https://auth.example.com/realms/minerals" {
+		t.Errorf("issuer_url = %q", got)
+	}
+	if got := body.OIDC.ClientID; got != "minerals-frontend" {
+		t.Errorf("client_id = %q", got)
+	}
+	if got := body.OIDC.RedirectURI; got != "https://www.example.com/auth/callback" {
+		t.Errorf("redirect_uri = %q", got)
+	}
+}
+
+func TestRuntimeConfigOIDCOmittedWhenUnconfigured(t *testing.T) {
+	h := New(Deps{})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/runtime-config", nil)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	// Any field missing → entire oidc block omitted.
+	var body struct {
+		OIDC *struct{} `json:"oidc"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.OIDC != nil {
+		t.Errorf("expected oidc to be omitted; body = %s", rec.Body.String())
+	}
+}
+
+func TestRuntimeConfigOIDCRequiresAllThreeFields(t *testing.T) {
+	h := New(Deps{
+		RuntimeOIDC: RuntimeOIDCConfig{
+			IssuerURL: "https://auth.example.com/realms/minerals",
+			ClientID:  "minerals-frontend",
+			// RedirectURI intentionally missing
+		},
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/runtime-config", nil)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "oidc") {
+		t.Errorf("expected oidc block to be omitted when redirect_uri is missing; body = %s", rec.Body.String())
+	}
 }
 
 func TestDocsPlaceholder(t *testing.T) {

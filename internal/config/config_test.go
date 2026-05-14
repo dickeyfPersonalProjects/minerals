@@ -38,6 +38,38 @@ func TestLoad_DevDefaults(t *testing.T) {
 	}
 }
 
+func TestLoad_PublicOIDCConfig(t *testing.T) {
+	t.Parallel()
+	cfg, err := loadFrom(envFunc(map[string]string{
+		"PUBLIC_OIDC_ISSUER_URL":   "https://auth.example.com/realms/minerals",
+		"PUBLIC_OIDC_CLIENT_ID":    "minerals-frontend",
+		"PUBLIC_OIDC_REDIRECT_URI": "https://www.example.com/auth/callback",
+	}))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if got := cfg.PublicOIDCIssuerURL; got != "https://auth.example.com/realms/minerals" {
+		t.Errorf("PublicOIDCIssuerURL = %q", got)
+	}
+	if got := cfg.PublicOIDCClientID; got != "minerals-frontend" {
+		t.Errorf("PublicOIDCClientID = %q", got)
+	}
+	if got := cfg.PublicOIDCRedirectURI; got != "https://www.example.com/auth/callback" {
+		t.Errorf("PublicOIDCRedirectURI = %q", got)
+	}
+}
+
+func TestLoad_PublicOIDCEmptyByDefault(t *testing.T) {
+	t.Parallel()
+	cfg, err := loadFrom(envFunc(nil))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.PublicOIDCIssuerURL != "" || cfg.PublicOIDCClientID != "" || cfg.PublicOIDCRedirectURI != "" {
+		t.Errorf("PublicOIDC* defaults should be empty, got %+v", cfg)
+	}
+}
+
 func TestLoad_DevExplicit(t *testing.T) {
 	t.Parallel()
 	cfg, err := loadFrom(envFunc(map[string]string{"ENV": "dev"}))

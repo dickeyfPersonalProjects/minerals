@@ -2,7 +2,10 @@
   import { onMount, type Snippet } from 'svelte';
   import { link } from 'svelte-spa-router';
   import ThemeToggle from './ThemeToggle.svelte';
+  import LoginButton from './LoginButton.svelte';
   import { qrSheetState, refreshQrSheet } from './qrSheet';
+  import { authStore } from './oidc/auth';
+  import { loadOidcConfig, oidcConfigStore } from './oidc/config';
 
   interface Props {
     children?: Snippet;
@@ -16,10 +19,22 @@
   const sheetState = $derived($qrSheetState);
   const showQrSheetLink = $derived(sheetState.status === 'loaded');
 
+  // Login button shows only once the runtime-config fetch has
+  // confirmed the backend has OIDC configured AND the user is
+  // unauthenticated.
+  const auth = $derived($authStore);
+  const oidcState = $derived($oidcConfigStore);
+  const showLoginButton = $derived(
+    oidcState.kind === 'ready' && oidcState.config !== null && auth.accessToken === null,
+  );
+
   onMount(() => {
     // Probe once on app load. The store ignores 404s and keeps the
     // nav item hidden when no sheet exists.
     void refreshQrSheet();
+    // Resolve the OIDC config so the Login button can appear if
+    // configured. Errors are swallowed — the button just stays hidden.
+    void loadOidcConfig();
   });
 </script>
 
@@ -61,6 +76,9 @@
         >
           Collectors
         </a>
+        {#if showLoginButton}
+          <LoginButton />
+        {/if}
         <ThemeToggle />
       </nav>
     </div>
