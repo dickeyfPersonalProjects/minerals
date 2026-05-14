@@ -1,0 +1,29 @@
+# Example tfvars for production Keycloak realm setup.
+# Copy to terraform.tfvars and fill in real values. terraform.tfvars is gitignored.
+
+# These two fields contain the client you create for Terraform.
+# See 'Terraform Authentication' in docs/deploy/keycloak.md for instructions.
+# (Assumes you have a freshly deployed Keycloak already)
+keycloak_client_id     = "terraform-admin"
+keycloak_client_secret = "<client_secret for the client you created in keycloak>"
+
+env_domain           = "example.com"
+realm_name           = "minerals"
+realm_display_name   = "mineral app"
+registration_allowed = true
+
+# ===================
+# SMTP / Email Configuration
+# ===================
+# Required for password reset, email verification, etc.
+
+smtp_from              = "do-not-reply@example.com"
+smtp_from_display_name = "mineral app"
+smtp_host              = "<SMTP HOST>"
+smtp_port              = "465"
+smtp_ssl               = true
+smtp_starttls          = false
+smtp_user              = "<SMTP USER>"
+
+# REQUIRED: SMTP password (no default — must be provided)
+smtp_password = "<SMTP PASSWORD>"
