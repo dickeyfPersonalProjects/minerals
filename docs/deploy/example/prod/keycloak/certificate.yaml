@@ -1,22 +1,21 @@
-# cert-manager Certificate for the public Keycloak auth hostname.
+# cert-manager Certificate for the prod Keycloak auth hostname.
 #
 # The resulting Secret (`secretName` below) is referenced from the
 # strategic merge patch in `keycloak-ingress-patch.yaml` as
 # `spec.http.tlsSecret`. The Secret name and the patch's `tlsSecret`
 # value must match exactly.
 #
-# Mirrors the shape of ../staging/certificate.yaml — only the
-# dnsNames, secretName, and namespace differ. Swap `auth.example.com`
-# and the ClusterIssuer name for the real values in your env.
+# Mirrors ../../staging/keycloak/certificate.yaml — only the dnsNames
+# and namespace differ.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: keycloak-tls
-  namespace: keycloak
+  namespace: mineral-prod
 spec:
   dnsNames:
     - auth.example.com
   issuerRef:
     kind: ClusterIssuer
-    name: example-cluster-issuer
+    name: letsencrypt-prod
   secretName: keycloak-tls
