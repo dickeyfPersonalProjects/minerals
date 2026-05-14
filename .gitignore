@@ -8,6 +8,7 @@
 *.out
 coverage.txt
 coverage.html
+junit.xml
 
 # Env / secrets
 .env

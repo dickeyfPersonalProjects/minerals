@@ -1,6 +1,20 @@
 BINARY := minerals
 PKG := ./cmd/minerals
 
+# ── Tool versions (must match .github/workflows/{pr,main}.yml) ───────
+# Pin tool versions so polecats and CI run identical gates. When CI
+# updates a version, update these too — the auto-install logic below
+# enforces the pin by reinstalling on mismatch.
+GOLANGCI_LINT_VERSION ?= v2.12.2
+GOTESTSUM_VERSION     ?= v1.13.0
+GO_LICENSES_VERSION   ?= latest
+GOVULNCHECK_VERSION   ?= latest
+
+GOBIN := $(shell go env GOBIN)
+ifeq ($(strip $(GOBIN)),)
+GOBIN := $(shell go env GOPATH)/bin
+endif
+
 .PHONY: build run test test-cover fmt vet tidy clean fmt-frontend fmt-check-frontend lint-frontend
 
 build:
@@ -9,8 +23,12 @@ build:
 run:
 	go run $(PKG)
 
-test:
-	go test ./...
+# Race detector + shuffled execution matches CI (.github/workflows/pr.yml
+# `Unit tests` step). Gotestsum drives `go test` so we get the same JUnit
+# artefact CI uploads; junit.xml is gitignored. Auto-installs gotestsum
+# at the pinned version when missing.
+test: install-gotestsum
+	gotestsum --junitfile junit.xml -- -race -shuffle=on ./...
 
 # Coverage with race detector. Outputs coverage.txt (atomic mode for
 # safe accumulation across parallel goroutines) and an HTML report.
@@ -34,7 +52,7 @@ clean:
 # --- mi-bi6: backend skeleton + migrate/lint targets ----------------
 .PHONY: lint fmt-check migrate-up migrate-down migrate-version migrate-create test-integration license-check vulncheck
 
-lint:
+lint: install-golangci-lint
 	golangci-lint run
 
 fmt-check:
@@ -68,20 +86,64 @@ test-integration:
 LICENSE_ALLOWLIST := MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,Unlicense,CC0-1.0
 LICENSE_IGNORE := github.com/dickeyfPersonalProjects/minerals
 
-license-check:
+license-check: install-go-licenses
 	go-licenses check ./... \
 		--allowed_licenses=$(LICENSE_ALLOWLIST) \
 		--ignore=$(LICENSE_IGNORE)
 
 # SCA against known CVEs in direct + transitive Go deps. Scoped to the
 # reachable callgraph, so it's lower-noise than naive SBOM scanners
-# (per mi-xql / Q-1 R3 / CONTRACT §16). Install separately:
-#   go install golang.org/x/vuln/cmd/govulncheck@latest
-vulncheck:
+# (per mi-xql / Q-1 R3 / CONTRACT §16).
+vulncheck: install-govulncheck
 	govulncheck ./...
 
+# ── Tool install targets ─────────────────────────────────────────────
+# Each ensures the pinned version is present in $(GOBIN). Idempotent:
+# silent when already correct. The pinned-version targets (golangci-lint,
+# gotestsum) detect mismatches and reinstall; @latest targets only check
+# for presence.
+.PHONY: install-golangci-lint install-gotestsum install-go-licenses install-govulncheck tools
+
+# Install all build/test tools at their pinned versions. Useful for a
+# one-shot environment bootstrap.
+tools: install-golangci-lint install-gotestsum install-go-licenses install-govulncheck
+
+install-golangci-lint:
+	@want="$(GOLANGCI_LINT_VERSION)"; \
+	have=""; \
+	if command -v golangci-lint >/dev/null 2>&1; then \
+		have=$$(golangci-lint version 2>&1 | sed -n 's/.*has version v\{0,1\}\([0-9][0-9.]*\).*/v\1/p' | head -1); \
+	fi; \
+	if [ "$$have" != "$$want" ]; then \
+		echo "Installing golangci-lint@$$want (have: $${have:-none})..."; \
+		GOBIN="$(GOBIN)" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$$want; \
+	fi
+
+install-gotestsum:
+	@want="$(GOTESTSUM_VERSION)"; \
+	have=""; \
+	if command -v gotestsum >/dev/null 2>&1; then \
+		have=$$(gotestsum --version 2>&1 | sed -n 's/.*gotestsum version v\{0,1\}\([0-9][0-9.]*\).*/v\1/p' | head -1); \
+	fi; \
+	if [ "$$have" != "$$want" ]; then \
+		echo "Installing gotestsum@$$want (have: $${have:-none})..."; \
+		GOBIN="$(GOBIN)" go install gotest.tools/gotestsum@$$want; \
+	fi
+
+install-go-licenses:
+	@command -v go-licenses >/dev/null 2>&1 || { \
+		echo "Installing go-licenses@$(GO_LICENSES_VERSION)..."; \
+		GOBIN="$(GOBIN)" go install github.com/google/go-licenses@$(GO_LICENSES_VERSION); \
+	}
+
+install-govulncheck:
+	@command -v govulncheck >/dev/null 2>&1 || { \
+		echo "Installing govulncheck@$(GOVULNCHECK_VERSION)..."; \
+		GOBIN="$(GOBIN)" go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION); \
+	}
+
 # ── Frontend (mi-p5h) ─────────────────────────────────────────────
-.PHONY: test-frontend test-cover-frontend
+.PHONY: test-frontend test-cover-frontend check-frontend
 
 fmt-frontend:
 	cd frontend && npx prettier --write .
@@ -92,11 +154,38 @@ fmt-check-frontend:
 lint-frontend:
 	cd frontend && npx eslint .
 
+# Svelte/TypeScript typecheck — mirrors CI's `svelte-check (typecheck)`
+# step (.github/workflows/pr.yml).
+check-frontend:
+	cd frontend && npm run check
+
 test-frontend:
 	cd frontend && npm test
 
 test-cover-frontend:
 	cd frontend && npm run test:cover
+
+# ── CI parity targets (mi-c0v) ────────────────────────────────────
+# The two-tier model that lets polecats reproduce CI locally:
+#
+#   ci-quick  — fast subset for pre-push (lefthook wires this in).
+#               Skips slow gates (vuln/license, frontend typecheck,
+#               frontend tests). Catches most regressions in seconds.
+#
+#   ci-local  — full parity with .github/workflows/pr.yml. Run before
+#               `gt done` / opening a PR. Includes vuln scan, license
+#               audit, svelte-check, and frontend tests with coverage.
+#
+# Integration tests and compose-smoke are intentionally excluded — they
+# need running Postgres/MinIO and aren't part of the gate "union" called
+# out in the bead. Run `make test-integration` separately when needed.
+.PHONY: ci-quick ci-local
+
+ci-quick: fmt-check vet lint test fmt-check-frontend lint-frontend
+	@echo "✓ Quick gates passed"
+
+ci-local: fmt-check vet lint license-check test vulncheck fmt-check-frontend lint-frontend check-frontend test-cover-frontend
+	@echo "✓ All CI gates passed"
 
 # ── API client codegen (mi-cy4) ───────────────────────────────────
 # Dumps the type-derived OpenAPI spec from the in-process server and

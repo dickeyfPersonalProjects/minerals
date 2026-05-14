@@ -70,9 +70,9 @@ make compose-down-v     # stop + wipe volumes (fresh DB / MinIO next run)
 
 ### Local git hooks (optional)
 
-Enforce `make fmt-check` before commit and `make lint && make test`
-before push, so the same gates CI runs catch problems on your machine
-first. Opt-in per clone:
+Enforce `make fmt-check` before commit and `make ci-quick` before push,
+so the same gates CI runs catch problems on your machine first. Opt-in
+per clone:
 
 ```bash
 make hooks-install
@@ -80,6 +80,22 @@ make hooks-install
 
 This installs [lefthook](https://github.com/evilmartians/lefthook)
 into `$GOPATH/bin` if missing and wires up the hooks in `lefthook.yml`.
+
+### Running CI gates locally
+
+Two Makefile targets mirror the GitHub Actions workflow, so you can
+reproduce CI failures before pushing:
+
+- `make ci-quick` — fast subset (fmt-check, vet, lint, test, prettier
+  + eslint on the frontend). Used by the pre-push hook. Skips the slow
+  vuln/license/typecheck gates.
+- `make ci-local` — full CI parity: adds `govulncheck`, the SPDX
+  license audit, `svelte-check`, and frontend tests with coverage.
+  Run before `gt done` / opening a PR.
+
+Tool versions (golangci-lint, gotestsum, govulncheck, go-licenses) are
+pinned at the top of the `Makefile` to match CI and auto-install on
+demand — no manual setup needed.
 
 ## Production deployment
 
