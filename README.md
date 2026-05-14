@@ -5,10 +5,29 @@ meteorites. v1 is a single-overseer, locally-hosted SPA over a Go API
 backed by Postgres + MinIO; see `docs/design/01-scope.md` for the v1
 cut line and `CONTRACT.md` for the operational rulebook.
 
+## Contents
+
+- [Quickstart](#quickstart)
+  - [Prerequisites](#prerequisites)
+  - [Standard onboarding (full stack in containers)](#standard-onboarding-full-stack-in-containers)
+  - [Hot-reload dev (deps in containers, app on the host)](#hot-reload-dev-deps-in-containers-app-on-the-host)
+  - [Tear-down](#tear-down)
+  - [Local git hooks (optional)](#local-git-hooks-optional)
+- [Production deployment](#production-deployment)
+- [Where to go next](#where-to-go-next)
+- [For AI agents (polecats)](#for-ai-agents-polecats)
+
 ## Quickstart
 
-Prerequisites (per CONTRACT.md §3): Go 1.25+, Node 22+, Docker with
-Compose v2, `make`, `git`.
+### Prerequisites
+
+- Go 1.25+
+- Node 22+
+- Docker with Compose v2
+- `make`
+- `git`
+
+See [CONTRACT.md §3](CONTRACT.md) for the full prerequisites contract.
 
 ### Standard onboarding (full stack in containers)
 
@@ -62,13 +81,71 @@ make hooks-install
 This installs [lefthook](https://github.com/evilmartians/lefthook)
 into `$GOPATH/bin` if missing and wires up the hooks in `lefthook.yml`.
 
+## Production deployment
+
+Production deploys to Kubernetes via Flux GitOps. The repo ships a
+reusable `kustomize/base/` describing **what to run**; per-environment
+overlays in a separate fleet-infra GitOps repo describe **how it runs
+there** (namespace, hostname, image tag, secrets). Two environments
+are wired up today: `mineral-staging` and `mineral-prod`. Flux polls
+the GitOps repo, reconciles each overlay against the base, and pulls
+container images from GHCR.
+
+```mermaid
+flowchart LR
+    GH[GitHub: this repo<br/>kustomize/base/]
+    GHCR[GHCR image registry]
+    FleetRepo[Fleet-infra GitOps repo<br/>per-env overlays]
+    Flux[Flux:<br/>GitRepository + Kustomize controller]
+
+    subgraph staging[mineral-staging namespace]
+        AppS[app pod]
+        PGS[(Postgres / CNPG)]
+        MinIOS[(MinIO)]
+    end
+
+    subgraph prod[mineral-prod namespace]
+        AppP[app pod]
+        PGP[(Postgres / CNPG)]
+        MinIOP[(MinIO)]
+    end
+
+    GH -->|base| Flux
+    FleetRepo -->|overlays| Flux
+    Flux --> staging
+    Flux --> prod
+    GHCR --> AppS
+    GHCR --> AppP
+```
+
+See [docs/deploy/README.md](docs/deploy/README.md) for full deployment instructions.
+
 ## Where to go next
 
-- **`CONTRACT.md`** — operational rulebook: layout, dev workflow, CI,
-  migrations, code review rules, and the rest. §3 covers both modes
-  above in more depth.
-- **`CONFIG.md`** — canonical inventory of every tunable setting (env
-  vars, ConfigMap keys, feature flags). The first stop when adding or
-  changing a setting.
-- **`docs/design/01-scope.md` … `07-build-embed-observability.md`** —
-  frozen design decisions and rationale for v1.
+- **[CONFIG.md](CONFIG.md)** — Reference for every setting the application
+  supports (env vars, ConfigMap keys, feature flags) plus the secrets
+  inventory.
+- **[docs/deploy/README.md](docs/deploy/README.md)** — Full Kubernetes/Flux
+  deployment guide.
+- **[docs/deploy/keycloak.md](docs/deploy/keycloak.md)** — How to set up
+  OIDC authentication with Keycloak.
+- **[docs/deploy/secrets.md](docs/deploy/secrets.md)** — Inventory of every
+  Secret the deployment consumes.
+
+## For AI agents (polecats)
+
+If you're a polecat (or any AI agent) working on this repo, start here:
+
+- **[CONTRACT.md](CONTRACT.md)** — The operational rulebook: layout, dev
+  workflow, CI, migrations, code review rules. Read this before writing
+  any code.
+- **[CONFIG.md](CONFIG.md)** — Canonical inventory of every tunable
+  setting. First stop when adding or changing one.
+- **Design docs (frozen v1 decisions and rationale):**
+  - [docs/design/01-scope.md](docs/design/01-scope.md) — Scope & v1 cut line
+  - [docs/design/02-domain-model.md](docs/design/02-domain-model.md) — Domain model
+  - [docs/design/03-files-and-photos.md](docs/design/03-files-and-photos.md) — Photo & file handling
+  - [docs/design/04-api-shape.md](docs/design/04-api-shape.md) — API shape
+  - [docs/design/05-auth-slot.md](docs/design/05-auth-slot.md) — Auth slot design
+  - [docs/design/06-dev-prod-config.md](docs/design/06-dev-prod-config.md) — Dev/prod boundary & config
+  - [docs/design/07-build-embed-observability.md](docs/design/07-build-embed-observability.md) — Build, embed, observability
