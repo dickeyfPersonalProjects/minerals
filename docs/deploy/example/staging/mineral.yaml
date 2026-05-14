@@ -51,3 +51,23 @@ spec:
           name: minerals-config
         data:
           ENV: staging
+    # OIDC config. Hostname-dependent, so it lives in the overlay
+    # rather than the base. Backend is a pure resource server and
+    # validates JWTs via Keycloak's JWKS endpoint — no client_secret
+    # is needed (see CONFIG.md, "Prod routing"). The PUBLIC_OIDC_*
+    # entries are read by the backend and served to the SPA at
+    # runtime. Replace staging.example.com with the env's real hostname.
+    - target:
+        kind: ConfigMap
+        name: minerals-config
+      patch: |-
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: minerals-config
+        data:
+          OIDC_ISSUER_URL: https://auth.staging.example.com/realms/minerals
+          OIDC_CLIENT_ID: minerals-frontend
+          PUBLIC_OIDC_ISSUER_URL: https://auth.staging.example.com/realms/minerals
+          PUBLIC_OIDC_CLIENT_ID: minerals-frontend
+          PUBLIC_OIDC_REDIRECT_URI: https://www.staging.example.com/auth/callback

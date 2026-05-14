@@ -458,33 +458,43 @@ editing the committed file.
 ## How the app consumes OIDC
 
 > **Forward reference.** The Go backend does not consume these
-> variables yet — the auth implementation lands in a later bead. This
-> section documents the contract Terraform's outputs already
-> establish, so the auth bead has a fixed target.
+> variables yet — the auth implementation lands in a later bead
+> (`mi-aw3`). The operator contract is settled (env-var names,
+> ConfigMap shape) so the auth bead has a fixed target;
+> [`CONFIG.md`](../../CONFIG.md) and the example overlays already
+> document the values.
 
-The backend will need three values at runtime, derived from the
-Terraform outputs:
+**Backend is a pure resource server.** It validates incoming JWTs
+against Keycloak's public JWKS endpoint and never holds a
+`client_secret`. No Secret is required for OIDC. The Terraform-
+provisioned `minerals-backend` confidential client exists for a future
+service-to-service (Client Credentials) flow, not for the user-facing
+auth path.
 
-| Setting | Source (Terraform output) | Notes |
-|---|---|---|
-| OIDC issuer URL | `realm_issuer` (e.g. `https://auth.example.com/realms/minerals`) | Used to discover endpoints and verify token `iss`. |
-| Frontend client ID | `frontend_client_id` (`minerals-frontend`) | The SPA's public client. No secret. |
-| Backend client ID | `backend_client_id` (`minerals-backend`) | Confidential client used for token introspection / userinfo lookups. |
-| Backend client secret | `backend_client_secret` (sensitive) | Paired with the backend client ID. |
+The deployment consumes five non-secret env vars, all in the
+`minerals-config` ConfigMap. Two are backend-internal; three are
+served by the backend to the SPA at runtime:
 
-The expected env-var names follow the existing CONFIG.md convention
-(`SCREAMING_SNAKE_CASE`, no prefix). Likely shape:
+| Env var | Component | Source (Terraform output / pattern) | Purpose |
+|---|---|---|---|
+| `OIDC_ISSUER_URL` | backend | `realm_issuer` (e.g. `https://auth.example.com/realms/minerals`) | Discover endpoints and verify token `iss`. JWKS URL is learned via `{OIDC_ISSUER_URL}/.well-known/openid-configuration`. |
+| `OIDC_CLIENT_ID` | backend | `frontend_client_id` (`minerals-frontend`) | Expected `aud` claim on bearer tokens (audience check only). |
+| `PUBLIC_OIDC_ISSUER_URL` | frontend (via backend) | Same as `OIDC_ISSUER_URL` | Realm URL the SPA uses to discover the authorization endpoint. |
+| `PUBLIC_OIDC_CLIENT_ID` | frontend (via backend) | Same as `OIDC_CLIENT_ID` (`minerals-frontend`) | Public OIDC `client_id` the SPA uses for auth-code-with-PKCE. |
+| `PUBLIC_OIDC_REDIRECT_URI` | frontend (via backend) | `https://www.<env_domain>/auth/callback` | SPA's OIDC redirect target. Must match a `valid_redirect_uris` entry on the `minerals-frontend` client. |
 
-```
-OIDC_ISSUER_URL=https://auth.example.com/realms/minerals
-OIDC_FRONTEND_CLIENT_ID=minerals-frontend
-OIDC_BACKEND_CLIENT_ID=minerals-backend
-OIDC_BACKEND_CLIENT_SECRET=...    # from SealedSecret
-```
+The `PUBLIC_*` prefix is a convention marking values the backend is
+allowed to ship to the SPA at runtime. The backend reads all five as
+env vars via `envFrom: configMapRef: minerals-config`; the mechanism
+for exposing the `PUBLIC_*` set to the browser (runtime config
+endpoint or HTML injection) is decided by the auth bead.
 
-Final names are decided by the auth bead. When that bead lands it must
-update [`CONFIG.md`](../../CONFIG.md) (settings inventory) and
-[`secrets.md`](./secrets.md) (Secret inventory) in the same PR.
+Per-env values live in the GitOps overlay — see
+[`example/staging/mineral.yaml`](./example/staging/mineral.yaml) and
+[`example/prod/mineral.yaml`](./example/prod/mineral.yaml) for the
+ConfigMap patch shape. The base manifest's
+[`kustomize/base/configmap.yaml`](../../kustomize/base/configmap.yaml)
+intentionally omits these keys because they are hostname-dependent.
 
 The realm exposes two devops/staff roles — `devops-viewer` and
 `devops-admin`. Normal users have no realm role; the backend
