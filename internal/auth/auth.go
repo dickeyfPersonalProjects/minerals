@@ -1,14 +1,23 @@
 // Package auth provides the User type, request-scoped user identity,
-// and the v1 stub auth middleware. Per CONTRACT.md §13 this is the
-// single sanctioned entry point for reading the current user.
+// and the auth middleware. Per CONTRACT.md §13 this is the single
+// sanctioned entry point for reading the current user.
+//
+// mi-aw3a: the middleware validates Keycloak-issued bearer tokens
+// against the realm JWKS endpoint (via internal/oidc) and populates
+// User from the verified claims. When constructed with a nil
+// TokenVerifier it falls back to the v1 stub identity — that path
+// exists only for tests that do not exercise authentication.
 package auth
 
 import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
+
+	"github.com/dickeyfPersonalProjects/minerals/internal/oidc"
 )
 
 // User identifies the caller behind a request. v1 has no real auth, so
@@ -39,6 +48,50 @@ type User struct {
 	// protected endpoints while this flag is set; the setup
 	// endpoint itself is exempt.
 	Pending bool
+	// Roles is the caller's set of Keycloak realm roles, taken
+	// verbatim from the JWT `realm_access.roles` claim. The authz
+	// enforcer (mi-aw3b) evaluates each role independently. Empty
+	// for the stub identity — the stub path predates RBAC.
+	Roles []string
+}
+
+// TokenVerifier validates a raw bearer token and returns the subset
+// of claims the app cares about. *oidc.Verifier satisfies it; tests
+// inject a fake. A nil TokenVerifier passed to Auth / the huma auth
+// middleware selects the v1 stub-identity fallback.
+type TokenVerifier interface {
+	Verify(ctx context.Context, rawToken string) (*oidc.Claims, error)
+}
+
+// UserFromClaims builds the request-scoped User from verified JWT
+// claims. ID is left as the Keycloak `sub` parsed into a UUID when
+// it is UUID-shaped (Keycloak subjects are UUIDs); the resolver
+// middleware (mi-2hf) overwrites ID with the application users.id
+// before the request reaches a handler. A non-UUID sub leaves ID
+// nil — RequireUser still admits the request via Sub, and the
+// resolver fills ID from the DB row.
+func UserFromClaims(c *oidc.Claims) User {
+	u := User{Sub: c.Subject, Email: c.Email, Roles: c.Roles}
+	if id, err := uuid.Parse(c.Subject); err == nil {
+		u.ID = id
+	}
+	return u
+}
+
+// BearerToken extracts the token from an `Authorization: Bearer
+// <token>` header. The bool is false when the header is absent or
+// not a well-formed Bearer credential. The scheme match is
+// case-insensitive per RFC 7235.
+func BearerToken(header string) (string, bool) {
+	const prefix = "bearer "
+	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return "", false
+	}
+	tok := strings.TrimSpace(header[len(prefix):])
+	if tok == "" {
+		return "", false
+	}
+	return tok, true
 }
 
 // StubUserSub is the keycloak_sub seeded by migration 0008 for the
@@ -91,23 +144,49 @@ func RequestID(ctx context.Context) string {
 	return id
 }
 
-// Auth is the v1 stub auth middleware. It always populates StubUser
-// in the request context. Real-auth replacement (deferred) validates
-// credentials and populates the resolved User instead.
-func Auth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := WithUser(r.Context(), StubUser)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+// Auth returns the net/http auth middleware. With a real
+// TokenVerifier it extracts the bearer token, validates it against
+// the Keycloak JWKS, and populates User from the verified claims;
+// a missing or invalid token short-circuits with a 401 envelope.
+// With a nil verifier it falls back to populating the v1 StubUser
+// (test-only path).
+//
+// This middleware guards the /api/v1 catch-all only — every real
+// operation runs the huma-side chain in internal/api. The split
+// mirrors CONTRACT.md §13's two-middleware design.
+func Auth(v TokenVerifier) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if v == nil {
+				ctx := WithUser(r.Context(), StubUser)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+			tok, ok := BearerToken(r.Header.Get("Authorization"))
+			if !ok {
+				writeUnauthorized(w)
+				return
+			}
+			claims, err := v.Verify(r.Context(), tok)
+			if err != nil {
+				writeUnauthorized(w)
+				return
+			}
+			ctx := WithUser(r.Context(), UserFromClaims(claims))
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
 
-// RequireUser returns 401 when no User is in the request context. v1
-// passes through (Auth always populates); the middleware exists so
-// real-auth replacement is mechanical.
+// RequireUser returns 401 when no User is in the request context. A
+// User is considered present when it carries either an application
+// ID or a JWT subject — the latter covers the window after Auth has
+// verified the token but before the resolver has mapped the subject
+// to a users.id row.
 func RequireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u := FromContext(r.Context())
-		if u.ID == uuid.Nil {
+		if u.ID == uuid.Nil && u.Sub == "" {
 			writeUnauthorized(w)
 			return
 		}

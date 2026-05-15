@@ -70,6 +70,37 @@ func TestLoad_PublicOIDCEmptyByDefault(t *testing.T) {
 	}
 }
 
+func TestLoad_OIDCBackendDefaults(t *testing.T) {
+	t.Parallel()
+	cfg, err := loadFrom(envFunc(nil))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.OIDCIssuerURL != defaultOIDCIssuerURL {
+		t.Errorf("OIDCIssuerURL = %q, want %q", cfg.OIDCIssuerURL, defaultOIDCIssuerURL)
+	}
+	if cfg.OIDCClientID != defaultOIDCClientID {
+		t.Errorf("OIDCClientID = %q, want %q", cfg.OIDCClientID, defaultOIDCClientID)
+	}
+}
+
+func TestLoad_OIDCBackendExplicit(t *testing.T) {
+	t.Parallel()
+	cfg, err := loadFrom(envFunc(map[string]string{
+		"OIDC_ISSUER_URL": "https://auth.example.com/realms/minerals",
+		"OIDC_CLIENT_ID":  "minerals-api",
+	}))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.OIDCIssuerURL != "https://auth.example.com/realms/minerals" {
+		t.Errorf("OIDCIssuerURL = %q", cfg.OIDCIssuerURL)
+	}
+	if cfg.OIDCClientID != "minerals-api" {
+		t.Errorf("OIDCClientID = %q", cfg.OIDCClientID)
+	}
+}
+
 func TestLoad_DevExplicit(t *testing.T) {
 	t.Parallel()
 	cfg, err := loadFrom(envFunc(map[string]string{"ENV": "dev"}))

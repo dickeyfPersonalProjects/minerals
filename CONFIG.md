@@ -23,8 +23,8 @@ setting" — updating this inventory is the first and mandatory step.
 | `LOG_LEVEL` | env | `info` | no | `debug` / `info` / `warn` / `error` | `internal/config/config.go:63` |
 | `ENV` | env | `dev` | **yes** | `dev` / `prod`; flips strictness | `internal/config/config.go:54` |
 | `MINDAT_API_KEY` | env | _(unset)_ | no | Mindat REST API token for mineral-species lookup (mi-dtg / F-1). When unset, mineral lookup falls back to DB-only mode (no Mindat fallthrough). | `internal/config/config.go` |
-| `OIDC_ISSUER_URL` | env | `http://localhost:8081/realms/minerals` | no | Keycloak realm URL used by the backend for JWT verification. Discovery (`{OIDC_ISSUER_URL}/.well-known/openid-configuration`) yields the JWKS endpoint. Consumed by `internal/oidc`. Documented; wired by mi-aw3. | _(pending mi-aw3)_ |
-| `OIDC_CLIENT_ID` | env | `minerals-frontend` | no | Expected `aud` claim on bearer tokens reaching the backend. Audience check only — no client secret on the backend (pure resource server, JWKS validation). Consumed by `internal/oidc`. Documented; wired by mi-aw3. | _(pending mi-aw3)_ |
+| `OIDC_ISSUER_URL` | env | `http://localhost:8081/realms/minerals` | no | Keycloak realm URL used by the backend for JWT verification. Discovery (`{OIDC_ISSUER_URL}/.well-known/openid-configuration`) yields the JWKS endpoint. Consumed by `internal/oidc` via the auth middleware (mi-aw3a). | `internal/config/config.go` |
+| `OIDC_CLIENT_ID` | env | `minerals-frontend` | no | Expected `aud` claim on bearer tokens reaching the backend. Audience check only — no client secret on the backend (pure resource server, JWKS validation). Consumed by `internal/oidc` via the auth middleware (mi-aw3a). | `internal/config/config.go` |
 | `PUBLIC_OIDC_ISSUER_URL` | env | `http://localhost:8081/realms/minerals` | no | Keycloak realm URL exposed to the SPA via `/api/v1/runtime-config` (the SPA uses it to discover the authorization endpoint for the PKCE login flow). The `PUBLIC_` prefix marks "safe to send to the browser". Consumed by `internal/api` (mi-5ew). | `internal/config/config.go` |
 | `PUBLIC_OIDC_CLIENT_ID` | env | `minerals-frontend` | no | Public OIDC `client_id` the SPA uses for the auth-code-with-PKCE flow. Same value as `OIDC_CLIENT_ID` today (the backend's expected audience and the SPA's client id are the `minerals-frontend` Keycloak client). Served to the SPA via `/api/v1/runtime-config`. | `internal/config/config.go` |
 | `PUBLIC_OIDC_REDIRECT_URI` | env | `http://localhost:5173/auth/callback` | no | Absolute URL the SPA hands Keycloak as the `redirect_uri` in the auth-code flow. Must match a `valid_redirect_uris` entry on the `minerals-frontend` Keycloak client (`terraform/keycloak/clients.tf`). Served to the SPA via `/api/v1/runtime-config`. | `internal/config/config.go` |
@@ -50,9 +50,10 @@ into two sources:
   `PORT`, `ENV`, `S3_BUCKET`, `S3_REGION`, `MAX_UPLOAD_BYTES`,
   `LOG_LEVEL`, `S3_ENDPOINT`. The OIDC vars (`OIDC_ISSUER_URL`,
   `OIDC_CLIENT_ID`, `PUBLIC_OIDC_ISSUER_URL`, `PUBLIC_OIDC_CLIENT_ID`,
-  `PUBLIC_OIDC_REDIRECT_URI`) join this ConfigMap when the auth bead
-  (mi-aw3) lands — values are hostname-dependent and supplied by
-  per-env overlays (see [`docs/deploy/example/`](./docs/deploy/example/)).
+  `PUBLIC_OIDC_REDIRECT_URI`) are read by the app (backend JWT
+  verification wired by mi-aw3a) but are not in the base ConfigMap —
+  values are hostname-dependent and supplied by per-env overlays (see
+  [`docs/deploy/example/`](./docs/deploy/example/)).
 - Secret `minerals-s3-creds` supplies `S3_ACCESS_KEY_ID` and
   `S3_SECRET_ACCESS_KEY`.
 - Secret `minerals-pg-app` (CNPG-managed) supplies `DATABASE_URL` via

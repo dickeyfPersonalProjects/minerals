@@ -106,6 +106,23 @@ func authedCtx() context.Context {
 	return auth.WithUser(context.Background(), auth.StubUser)
 }
 
+// seedUser inserts a minimal active users row so a fabricated
+// author/owner UUID satisfies the FK constraints added by migration
+// 0011. Idempotent — repeated calls for the same id are no-ops.
+// migration 0008 already seeds the StubUser row, so tests that only
+// use auth.StubUser.ID do not need this.
+func seedUser(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO users (id, keycloak_sub, email, status)
+		VALUES ($1, $2, $3, 'active')
+		ON CONFLICT (id) DO NOTHING`,
+		id, "test-"+id.String(), id.String()+"@example.invalid")
+	if err != nil {
+		t.Fatalf("seed user %s: %v", id, err)
+	}
+}
+
 func mkCollector(name string, notes *string) domain.Collector {
 	now := time.Now().UTC()
 	return domain.Collector{
@@ -361,6 +378,7 @@ func TestIntegration_AuthorIDPopulated(t *testing.T) {
 		ID:    domain.NewID(),
 		Email: "tester@example.invalid",
 	}
+	seedUser(t, pool, customUser.ID)
 	ctx := auth.WithUser(context.Background(), customUser)
 
 	c := mkCollector("authorial", nil)

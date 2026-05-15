@@ -49,6 +49,7 @@ func TestIntegration_QRSheet_CreateAndGet(t *testing.T) {
 	ctx := authedCtx()
 
 	userID := uuid.New()
+	seedUser(t, pool, userID)
 	sheet := mkSheet(userID, "avery-5160")
 	if err := repo.Create(ctx, nil, sheet); err != nil {
 		t.Fatalf("create: %v", err)
@@ -78,6 +79,7 @@ func TestIntegration_QRSheet_CreateDuplicateUserConflict(t *testing.T) {
 	ctx := authedCtx()
 
 	userID := uuid.New()
+	seedUser(t, pool, userID)
 	if err := repo.Create(ctx, nil, mkSheet(userID, "avery-5160")); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
@@ -93,6 +95,7 @@ func TestIntegration_QRSheet_UpdateTemplate(t *testing.T) {
 	ctx := authedCtx()
 
 	userID := uuid.New()
+	seedUser(t, pool, userID)
 	if err := repo.Create(ctx, nil, mkSheet(userID, "avery-5160")); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -131,6 +134,7 @@ func TestIntegration_QRSheet_DeleteCascadesSpecimens(t *testing.T) {
 	ctx := authedCtx()
 
 	userID := uuid.New()
+	seedUser(t, pool, userID)
 	if err := repo.Create(ctx, nil, mkSheet(userID, "avery-5160")); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -163,6 +167,7 @@ func TestIntegration_QRSheet_AddSpecimen_AppendsAndIsIdempotent(t *testing.T) {
 	ctx := authedCtx()
 
 	userID := uuid.New()
+	seedUser(t, pool, userID)
 	if err := repo.Create(ctx, nil, mkSheet(userID, "avery-5160")); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -215,6 +220,7 @@ func TestIntegration_QRSheet_AddSpecimen_MissingSpecimenReturnsNotFound(t *testi
 	ctx := authedCtx()
 
 	userID := uuid.New()
+	seedUser(t, pool, userID)
 	if err := repo.Create(ctx, nil, mkSheet(userID, "avery-5160")); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -230,6 +236,7 @@ func TestIntegration_QRSheet_RemoveSpecimen_RepacksPositions(t *testing.T) {
 	ctx := authedCtx()
 
 	userID := uuid.New()
+	seedUser(t, pool, userID)
 	if err := repo.Create(ctx, nil, mkSheet(userID, "avery-5160")); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -285,6 +292,7 @@ func TestIntegration_QRSheet_RemoveSpecimen_NotOnSheetReturnsNotFound(t *testing
 	ctx := authedCtx()
 
 	userID := uuid.New()
+	seedUser(t, pool, userID)
 	if err := repo.Create(ctx, nil, mkSheet(userID, "avery-5160")); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -302,6 +310,7 @@ func TestIntegration_QRSheet_ListSpecimens_IncludesFirstPhoto(t *testing.T) {
 	ctx := authedCtx()
 
 	userID := uuid.New()
+	seedUser(t, pool, userID)
 	if err := repo.Create(ctx, nil, mkSheet(userID, "avery-5160")); err != nil {
 		t.Fatalf("create: %v", err)
 	}

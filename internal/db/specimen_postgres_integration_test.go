@@ -601,6 +601,7 @@ func TestIntegration_Specimen_AuthorIDPopulated(t *testing.T) {
 		ID:    domain.NewID(),
 		Email: "tester@example.invalid",
 	}
+	seedUser(t, pool, customUser.ID)
 	ctx := auth.WithUser(context.Background(), customUser)
 
 	s := mkSpecimen(domain.SpecimenMineral, "authored")

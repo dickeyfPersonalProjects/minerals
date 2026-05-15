@@ -20,6 +20,7 @@ import (
 	"github.com/dickeyfPersonalProjects/minerals/internal/db"
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
 	"github.com/dickeyfPersonalProjects/minerals/internal/mindat"
+	"github.com/dickeyfPersonalProjects/minerals/internal/oidc"
 	"github.com/dickeyfPersonalProjects/minerals/internal/storage"
 	"github.com/dickeyfPersonalProjects/minerals/internal/web"
 )
@@ -110,6 +111,20 @@ func runServe(_ []string) error {
 		return fmt.Errorf("serve: read embedded migrations: %w", err)
 	}
 
+	// Backend-side JWT verification (mi-aw3a). Construction only
+	// validates config — OIDC discovery / JWKS fetching is lazy
+	// (first request), so startup does not depend on Keycloak being
+	// reachable. NewVerifier errors here only on a malformed config
+	// (empty issuer or client id).
+	verifier, err := oidc.NewVerifier(rootCtx, oidc.Config{
+		Issuer:   cfg.OIDCIssuerURL,
+		ClientID: cfg.OIDCClientID,
+	})
+	if err != nil {
+		return fmt.Errorf("serve: init oidc verifier: %w", err)
+	}
+	slog.Info("oidc verifier configured", "issuer", cfg.OIDCIssuerURL, "client_id", cfg.OIDCClientID)
+
 	photoDeps := &api.PhotoServiceDeps{
 		Photos:         db.NewPhotoPostgres(pool),
 		Files:          db.NewFilePostgres(pool),
@@ -141,6 +156,7 @@ func runServe(_ []string) error {
 		},
 		QRSheets: db.NewQRSheetPostgres(pool),
 		Users:    db.NewUserPostgres(pool),
+		Verifier: verifier,
 		RuntimeOIDC: api.RuntimeOIDCConfig{
 			IssuerURL:   cfg.PublicOIDCIssuerURL,
 			ClientID:    cfg.PublicOIDCClientID,

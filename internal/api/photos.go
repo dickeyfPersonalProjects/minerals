@@ -198,7 +198,7 @@ func registerPhotoOperations(api huma.API, mux *http.ServeMux, authMW authMiddle
 	// /api/v1/ handler in api.New). Auth is enforced here because the
 	// route is registered to a specific path that wins over the
 	// catch-all.
-	registerPhotoDownloadRoutes(mux, s)
+	registerPhotoDownloadRoutes(mux, s, authMW.verifier)
 }
 
 // maxBytesMiddleware wraps the request body in http.MaxBytesReader so
@@ -582,10 +582,10 @@ func (s *PhotoService) delete(ctx context.Context, in *deletePhotoInput) (*delet
 	return &deletePhotoOutput{}, nil
 }
 
-func registerPhotoDownloadRoutes(mux *http.ServeMux, s *PhotoService) {
+func registerPhotoDownloadRoutes(mux *http.ServeMux, s *PhotoService, verifier auth.TokenVerifier) {
 	// Wrap each download handler in the protected-bucket auth chain.
 	wrap := func(h http.Handler) http.Handler {
-		return Chain(h, auth.Auth, auth.RequireUser)
+		return Chain(h, auth.Auth(verifier), auth.RequireUser)
 	}
 	// Per the bead acceptance criteria (mi-jpu) GET /api/v1/photos/{id}
 	// returns the original bytes — not a JSON metadata view. Photo
