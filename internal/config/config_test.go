@@ -101,6 +101,30 @@ func TestLoad_OIDCBackendExplicit(t *testing.T) {
 	}
 }
 
+func TestLoad_OIDCJWKSURL(t *testing.T) {
+	t.Parallel()
+	// Unset → empty: the verifier falls back to OIDC discovery.
+	cfg, err := loadFrom(envFunc(nil))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.OIDCJWKSURL != "" {
+		t.Errorf("OIDCJWKSURL default = %q, want empty", cfg.OIDCJWKSURL)
+	}
+
+	// Set → propagates verbatim (mi-dau: needed when the canonical
+	// issuer URL is not reachable from inside the backend container).
+	cfg, err = loadFrom(envFunc(map[string]string{
+		"OIDC_JWKS_URL": "http://keycloak:8080/realms/minerals/protocol/openid-connect/certs",
+	}))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.OIDCJWKSURL != "http://keycloak:8080/realms/minerals/protocol/openid-connect/certs" {
+		t.Errorf("OIDCJWKSURL = %q", cfg.OIDCJWKSURL)
+	}
+}
+
 func TestLoad_DevExplicit(t *testing.T) {
 	t.Parallel()
 	cfg, err := loadFrom(envFunc(map[string]string{"ENV": "dev"}))

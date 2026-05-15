@@ -120,11 +120,15 @@ func runServe(_ []string) error {
 	verifier, err := oidc.NewVerifier(rootCtx, oidc.Config{
 		Issuer:   cfg.OIDCIssuerURL,
 		ClientID: cfg.OIDCClientID,
+		JWKSURL:  cfg.OIDCJWKSURL,
 	})
 	if err != nil {
 		return fmt.Errorf("serve: init oidc verifier: %w", err)
 	}
-	slog.Info("oidc verifier configured", "issuer", cfg.OIDCIssuerURL, "client_id", cfg.OIDCClientID)
+	slog.Info("oidc verifier configured",
+		"issuer", cfg.OIDCIssuerURL,
+		"client_id", cfg.OIDCClientID,
+		"jwks_url", cfg.OIDCJWKSURL)
 
 	// CONTRACT.md §13 v2 authorization (mi-aw3b). The §13 v2 policy
 	// set is static and code-defined (authz.DefaultPolicies), so an

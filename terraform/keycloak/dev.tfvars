@@ -18,11 +18,21 @@ realm_display_name = "Minerals (dev)"
 
 registration_allowed = false
 
-# Wire the SPA dev origin (Vite default) into the public frontend
-# client's redirect / web-origin lists. The default `https://www.localhost/*`
-# entries derived from env_domain are harmless but unused.
-additional_redirect_uris = ["http://localhost:5173/*"]
-additional_web_origins   = ["http://localhost:5173"]
+# Wire the SPA dev origins into the public frontend client's redirect
+# / web-origin lists. The default `https://www.localhost/*` entries
+# derived from env_domain are harmless but unused.
+#
+# Two origins (one realm, both dev workflows):
+#   :5173 — Vite hot-reload mode (host runs `npm run dev` + `make run`)
+#   :8080 — Compose mode (SPA served by the `app` container, mi-dau)
+additional_redirect_uris = [
+  "http://localhost:5173/*",
+  "http://localhost:8080/*",
+]
+additional_web_origins = [
+  "http://localhost:5173",
+  "http://localhost:8080",
+]
 
 # Create the `minerals-test` public direct-access-grant client so local
 # dev and the CI auth smoke test (mi-ivk) can obtain realm tokens for a
