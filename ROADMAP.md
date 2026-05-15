@@ -92,11 +92,11 @@ This is the source of truth for the project roadmap.
 *Focused on real authentication and making the app multi-user ready. Unlocks when v1 is stable and tested in real use.*
 
 ### Auth
-- [ ] Real OIDC authentication via Keycloak operator (cluster already has it)
-- [ ] Replace stub middleware — handlers, context keys, route groupings stay identical
-- [ ] One-time migration: backfill stub `author_id` to real overseer UUID
-- [ ] Per-row authorization (visibility-based reads, ownership-based writes)
-- [ ] CSRF mitigation (decided alongside auth model)
+- [x] Real OIDC authentication via Keycloak operator (cluster already has it) `(mi-7xo)` (#154)
+- [x] Replace stub middleware — handlers, context keys, route groupings stay identical `(mi-7xo)` (#154)
+- [x] One-time migration: backfill stub `author_id` to real overseer UUID `(mi-tl2 + mi-7xo)` (#147, #154)
+- [x] Per-row authorization (visibility-based reads, ownership-based writes) `(mi-bqe)` (#157)
+- [x] CSRF mitigation — by design: PKCE + bearer tokens in `Authorization` header (no cookies, no CSRF surface). See CONTRACT §13.
 
 ### Public sharing
 - [ ] Visibility UX — expose `private | unlisted | public` control in specimen UI (column already exists)
