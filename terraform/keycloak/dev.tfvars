@@ -23,3 +23,8 @@ registration_allowed = false
 # entries derived from env_domain are harmless but unused.
 additional_redirect_uris = ["http://localhost:5173/*"]
 additional_web_origins   = ["http://localhost:5173"]
+
+# Create the `minerals-test` public direct-access-grant client so local
+# dev and the CI auth smoke test (mi-ivk) can obtain realm tokens for a
+# test user via the password grant. Dev-only — never set in prod.
+test_environment = true

@@ -8,7 +8,7 @@ resource "keycloak_openid_client" "frontend" {
 
   access_type = "PUBLIC"
 
-  standard_flow_enabled = true
+  standard_flow_enabled        = true
   direct_access_grants_enabled = false
   implicit_flow_enabled        = false
 
@@ -28,6 +28,23 @@ resource "keycloak_openid_client" "frontend" {
 
   root_url = local.frontend_url
   base_url = "/"
+}
+
+# Audience mapper for the SPA client. Keycloak access tokens otherwise
+# carry only `aud: account` — the requesting client lands in `azp`, not
+# `aud`. The Go backend is a pure resource server that checks `aud`
+# contains OIDC_CLIENT_ID (minerals-frontend), so without this mapper
+# every real SPA token is rejected on the audience check. Adds
+# `minerals-frontend` to the access-token `aud`.
+resource "keycloak_openid_audience_protocol_mapper" "frontend_audience" {
+  realm_id  = keycloak_realm.minerals.id
+  client_id = keycloak_openid_client.frontend.id
+  name      = "minerals-frontend-audience"
+
+  included_client_audience = keycloak_openid_client.frontend.client_id
+
+  add_to_id_token     = false
+  add_to_access_token = true
 }
 
 # Confidential backend client with a service account, used by the Go
@@ -81,4 +98,22 @@ resource "keycloak_openid_client" "test_password_grant" {
   standard_flow_enabled        = false
   direct_access_grants_enabled = true
   implicit_flow_enabled        = false
+}
+
+# The test client issues tokens for the same resource server as the SPA,
+# so its access tokens must also carry `minerals-frontend` in `aud` —
+# the backend checks `aud`, not `azp`. Without this the CI auth smoke
+# test (mi-ivk) gets a token Keycloak considers valid but the app
+# rejects on the audience check.
+resource "keycloak_openid_audience_protocol_mapper" "test_audience" {
+  count = var.test_environment ? 1 : 0
+
+  realm_id  = keycloak_realm.minerals.id
+  client_id = keycloak_openid_client.test_password_grant[0].id
+  name      = "minerals-frontend-audience"
+
+  included_client_audience = keycloak_openid_client.frontend.client_id
+
+  add_to_id_token     = false
+  add_to_access_token = true
 }
