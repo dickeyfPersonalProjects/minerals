@@ -54,7 +54,9 @@ fi
 AUTH=(-H "Authorization: Bearer ${TOKEN}")
 JSON=(-H "Content-Type: application/json")
 
-# Echo the user id for a given username, or empty string if not found.
+# Echo the user id for a given Keycloak username, or empty string if
+# not found. The realm sets registration_email_as_username, so the
+# stored username is the email address — callers pass that form.
 user_id() {
   local username=$1
   curl -fsS "${AUTH[@]}" \
@@ -62,25 +64,41 @@ user_id() {
     | jq -r '.[0].id // empty'
 }
 
-# Idempotent create: if the username exists, return its id; otherwise POST a
-# new user. 409 is treated as a successful no-op (race or stale read).
+# Idempotent create: takes the local part of the test user's address
+# (e.g. "user1") and ensures a complete, enabled account exists.
+# Returns the user id. 409 is treated as a successful no-op (race or
+# stale read).
+#
+# The realm has registration_email_as_username = true, so Keycloak
+# forces username == email regardless of what we POST. Lookups must
+# therefore key on the email form ("user1@localhost"), not the bare
+# local part — otherwise every lookup misses and role assignment gets
+# an empty user id.
 create_user() {
-  local username=$1
+  local local_part=$1
+  local email="${local_part}@localhost"
   local id
-  id=$(user_id "$username")
+  id=$(user_id "$email")
   if [[ -n "$id" ]]; then
     echo "$id"
     return
   fi
 
+  # firstName/lastName are required: Keycloak's default user profile
+  # marks a user missing them as "not fully set up", which makes the
+  # password grant fail with invalid_grant. The CI auth smoke test
+  # (mi-ivk) obtains tokens for these users, so they must be complete.
   local body
   body=$(jq -n \
-    --arg u "$username" \
-    --arg e "${username}@localhost" \
+    --arg u "$email" \
+    --arg e "$email" \
+    --arg fn "$local_part" \
     --arg p "$DEV_PASSWORD" \
     '{
        username: $u,
        email: $e,
+       firstName: "Dev",
+       lastName: $fn,
        enabled: true,
        emailVerified: true,
        credentials: [{type: "password", value: $p, temporary: false}]
@@ -91,11 +109,11 @@ create_user() {
     -X POST "${KEYCLOAK_URL}/admin/realms/${REALM}/users" \
     -d "$body")
   if [[ "$code" != "201" && "$code" != "409" ]]; then
-    echo "create user $username failed: HTTP $code" >&2
+    echo "create user $local_part failed: HTTP $code" >&2
     exit 1
   fi
 
-  user_id "$username"
+  user_id "$email"
 }
 
 # Assign a realm role to a user. Re-assigning an existing role is a no-op.
@@ -135,8 +153,8 @@ Issuer:          ${REALM_ISSUER}
 Frontend client: ${FRONTEND_CLIENT_ID}
 Backend client:  ${BACKEND_CLIENT_ID}
 
-Test users (password = ${DEV_PASSWORD}):
-  user1, user2, user3, user4, user5     (no roles)
-  devops_viewer_user                    (devops-viewer)
-  devops_admin_user                     (devops-admin)
+Test users (log in with the email; password = ${DEV_PASSWORD}):
+  user1@localhost .. user5@localhost          (no roles)
+  devops_viewer_user@localhost                (devops-viewer)
+  devops_admin_user@localhost                 (devops-admin)
 EOF
