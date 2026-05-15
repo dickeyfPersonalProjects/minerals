@@ -55,6 +55,45 @@ export function clearAuth(): void {
   store.set(initial);
 }
 
+export interface TokenClaims {
+  readonly name: string | null;
+  readonly preferredUsername: string | null;
+  readonly email: string | null;
+}
+
+function decodeBase64Url(segment: string): string {
+  const b64 = segment.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Decode the display-relevant claims from a JWT access token. This is
+ * a best-effort, unverified read of the payload for UI purposes only
+ * (the backend independently verifies the token via JWKS) — never
+ * trust these claims for authorization decisions. Returns null for a
+ * missing or malformed token.
+ */
+export function decodeTokenClaims(token: string | null): TokenClaims | null {
+  if (!token) return null;
+  const parts = token.split('.');
+  const payloadSegment = parts[1];
+  if (parts.length !== 3 || !payloadSegment) return null;
+  try {
+    const payload = JSON.parse(decodeBase64Url(payloadSegment)) as Record<string, unknown>;
+    return {
+      name: typeof payload.name === 'string' ? payload.name : null,
+      preferredUsername:
+        typeof payload.preferred_username === 'string' ? payload.preferred_username : null,
+      email: typeof payload.email === 'string' ? payload.email : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export interface BeginLoginDeps {
   config?: OidcConfig | null;
   sessionStorage?: Storage;
@@ -95,6 +134,43 @@ export async function beginLogin(returnTo?: string, deps: BeginLoginDeps = {}): 
     code_challenge_method: 'S256',
   });
   assign(`${config.issuerUrl}/protocol/openid-connect/auth?${params.toString()}`);
+}
+
+export interface BeginLogoutDeps {
+  config?: OidcConfig | null;
+  locationAssign?: (url: string) => void;
+  appUrl?: string;
+}
+
+/**
+ * Sign out. PKCE auth holds the token in the frontend only — there is
+ * no backend session — so logout drops the in-memory token and then
+ * redirects to Keycloak's end-session endpoint to terminate the SSO
+ * session. Keycloak bounces back to the app root unauthenticated.
+ *
+ * `client_id` + `post_logout_redirect_uri` are used in place of an
+ * `id_token_hint` because mi-5ew's authStore does not retain the id
+ * token; Keycloak accepts this form when the redirect URI is
+ * registered on the client. When OIDC is not configured, local state
+ * is still cleared and the app navigates home.
+ */
+export async function beginLogout(deps: BeginLogoutDeps = {}): Promise<void> {
+  const config = deps.config ?? (await loadOidcConfig());
+  const assign = deps.locationAssign ?? ((url) => window.location.assign(url));
+  const appUrl = deps.appUrl ?? `${window.location.origin}/`;
+
+  clearAuth();
+
+  if (!config) {
+    assign(appUrl);
+    return;
+  }
+
+  const params = new URLSearchParams({
+    client_id: config.clientId,
+    post_logout_redirect_uri: appUrl,
+  });
+  assign(`${config.issuerUrl}/protocol/openid-connect/logout?${params.toString()}`);
 }
 
 export interface HandleCallbackDeps {
