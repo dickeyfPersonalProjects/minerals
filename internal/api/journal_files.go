@@ -129,6 +129,7 @@ func registerJournalFileOperations(api huma.API, mux *http.ServeMux, authMW auth
 
 	s := &JournalFileService{deps: *deps, authz: guard}
 	mws := authMW.Protected()
+	optionalMWs := authMW.Optional()
 
 	huma.Register(api, huma.Operation{
 		OperationID:   "upload-journal-file",
@@ -154,10 +155,11 @@ func registerJournalFileOperations(api huma.API, mux *http.ServeMux, authMW auth
 		Method:      http.MethodGet,
 		Path:        "/api/v1/journal/{id}/files",
 		Summary:     "List a journal entry's attachments",
-		Description: "Returns attachments ordered by (position ASC, created_at ASC). v1 returns the full set in one response; pagination is deferred (entries have at most a handful of attachments in practice).",
+		Description: "Returns attachments ordered by (position ASC, created_at ASC). v1 returns the full set in one response; pagination is deferred (entries have at most a handful of attachments in practice). " +
+			"Returns 404 when the caller cannot see the parent journal entry — sub-resource visibility is inherited (CONTRACT.md §13 v2).",
 		Tags:        []string{"journal-files"},
-		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound},
-		Middlewares: mws,
+		Errors:      []int{http.StatusBadRequest, http.StatusNotFound},
+		Middlewares: optionalMWs,
 	}, s.list)
 
 	huma.Register(api, huma.Operation{
@@ -369,7 +371,10 @@ func (s *JournalFileService) list(ctx context.Context, in *listJournalFilesInput
 		return nil, newAPIError(http.StatusInternalServerError, "internal_error",
 			"failed to look up journal entry", nil)
 	}
-	if err := s.authz.check(ctx, journalResource(entry), actView); err != nil {
+	// CONTRACT.md §13 v2: a caller who cannot see the parent gets
+	// the same 404 — sub-resource lists do not leak parent existence.
+	if err := s.authz.checkView(ctx, journalResource(entry),
+		"journal_entry_not_found", "no such journal entry"); err != nil {
 		return nil, err
 	}
 
@@ -466,8 +471,14 @@ func isAllowedJournalContentType(ct string) bool {
 }
 
 func registerJournalFileDownloadRoute(mux *http.ServeMux, s *JournalFileService, verifier auth.TokenVerifier) {
+	// CONTRACT.md §13 v2: file downloads are detail-style reads.
+	// Anonymous callers are admitted; the per-file checkView (below)
+	// rewrites a forbidden outcome as 404. An invalid token still
+	// 401s. Journal attachments — which are owned-only — will 404
+	// for any anonymous caller, matching the don't-leak-existence
+	// rule.
 	wrap := func(h http.Handler) http.Handler {
-		return Chain(h, auth.Auth(verifier), auth.RequireUser)
+		return Chain(h, auth.OptionalAuth(verifier))
 	}
 	// GET /api/v1/files/{file_id} is the canonical Go-proxied
 	// download path for any file (CONTRACT.md §12 download flow).
@@ -518,7 +529,8 @@ func (s *JournalFileService) downloadOriginal(w http.ResponseWriter, r *http.Req
 					"internal server error", nil)
 				return
 			}
-			if !s.authz.checkHTTP(w, r, journalResource(entry), actView) {
+			if !s.authz.checkViewHTTP(w, r, journalResource(entry),
+				"file_not_found", "no such file") {
 				return
 			}
 		case errors.Is(aerr, domain.ErrJournalAttachmentNotFound):

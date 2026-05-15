@@ -77,6 +77,7 @@ func registerSpecimenCollectorOperations(
 	}
 	s := &SpecimenCollectorService{specimens: specimens, links: links, authz: guard}
 	mws := authMW.Protected()
+	optionalMWs := authMW.Optional()
 
 	huma.Register(api, huma.Operation{
 		OperationID: "get-specimen-collectors",
@@ -84,10 +85,12 @@ func registerSpecimenCollectorOperations(
 		Path:        "/api/v1/specimens/{id}/collectors",
 		Summary:     "Get a specimen's collector chain",
 		Description: "Returns the ordered collector chain for the specimen. " +
-			"Empty array when the specimen has no collectors. 404 when the specimen does not exist.",
+			"Empty array when the specimen has no collectors. 404 when the specimen does not exist " +
+			"or the caller cannot see it — sub-resource visibility is inherited from the parent " +
+			"(CONTRACT.md §13 v2 don't-leak-existence rule).",
 		Tags:        []string{"specimens"},
-		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound},
-		Middlewares: mws,
+		Errors:      []int{http.StatusBadRequest, http.StatusNotFound},
+		Middlewares: optionalMWs,
 	}, s.get)
 
 	huma.Register(api, huma.Operation{
@@ -111,14 +114,15 @@ func (s *SpecimenCollectorService) get(
 		return nil, err
 	}
 	// Probe specimen existence so an unknown id returns 404 rather
-	// than a misleading empty 200.
+	// than a misleading empty 200. CONTRACT.md §13 v2: a caller who
+	// can't see the parent gets the same 404 — sub-resource lists do
+	// not leak parent existence.
 	sp, err := s.specimens.GetByID(ctx, id)
 	if err != nil {
 		return nil, mapSpecimenError(err)
 	}
-	// The collector chain is part of the specimen — viewing it
-	// requires view access to the specimen (CONTRACT.md §13 v2).
-	if err := s.authz.check(ctx, specimenResource(sp), actView); err != nil {
+	if err := s.authz.checkView(ctx, specimenResource(sp),
+		"specimen_not_found", "no such specimen"); err != nil {
 		return nil, err
 	}
 	links, err := s.links.GetChain(ctx, nil, id)

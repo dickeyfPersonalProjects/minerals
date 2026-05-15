@@ -178,6 +178,37 @@ func Auth(v TokenVerifier) func(http.Handler) http.Handler {
 	}
 }
 
+// OptionalAuth is the anonymous-friendly analogue of Auth for the
+// raw download routes that serve visibility-scoped resources
+// (CONTRACT.md §13 v2). Behavior matches Auth except that a missing
+// bearer token does NOT 401 — the request continues with no User in
+// context and downstream handlers decide what an anonymous caller
+// may see. An invalid token still 401s (the caller deliberately
+// presented a credential and verification failed).
+func OptionalAuth(v TokenVerifier) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if v == nil {
+				ctx := WithUser(r.Context(), StubUser)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+			tok, ok := BearerToken(r.Header.Get("Authorization"))
+			if !ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+			claims, err := v.Verify(r.Context(), tok)
+			if err != nil {
+				writeUnauthorized(w)
+				return
+			}
+			ctx := WithUser(r.Context(), UserFromClaims(claims))
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
 // RequireUser returns 401 when no User is in the request context. A
 // User is considered present when it carries either an application
 // ID or a JWT subject — the latter covers the window after Auth has

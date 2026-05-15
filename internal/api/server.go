@@ -177,7 +177,7 @@ func New(deps Deps) http.Handler {
 	registerCollectorOperations(humaAPI, authMW, guard, deps.Collectors)
 	registerPhotoOperations(humaAPI, mux, authMW, guard, deps.Photos)
 	registerSpecimenOperations(humaAPI, authMW, guard, deps.Specimens)
-	registerJournalOperations(humaAPI, authMW, guard, deps.Journal)
+	registerJournalOperations(humaAPI, authMW, guard, deps.Specimens, deps.Journal)
 	registerSpecimenCollectorOperations(humaAPI, authMW, guard, deps.Specimens, deps.SpecimenCollectors)
 	registerJournalFileOperations(humaAPI, mux, authMW, guard, deps.JournalFiles)
 	registerMineralSpeciesOperations(humaAPI, authMW, deps.MineralSpecies)

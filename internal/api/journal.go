@@ -53,20 +53,25 @@ type JournalServiceDeps struct {
 }
 
 // JournalService wires huma operations against a JournalServiceDeps.
+// Specimens resolves the parent for sub-resource list and detail
+// endpoints — CONTRACT.md §13 v2 requires GET /specimens/{id}/journal
+// to gate on parent visibility before evaluating the sub-list.
 type JournalService struct {
-	deps  JournalServiceDeps
-	authz authzGuard
+	deps      JournalServiceDeps
+	specimens domain.SpecimenRepo
+	authz     authzGuard
 }
 
-func registerJournalOperations(api huma.API, authMW authMiddlewares, guard authzGuard, deps *JournalServiceDeps) {
+func registerJournalOperations(api huma.API, authMW authMiddlewares, guard authzGuard, specimens domain.SpecimenRepo, deps *JournalServiceDeps) {
 	if deps == nil || deps.Entries == nil {
 		return
 	}
 	if deps.Markdown == nil {
 		deps.Markdown = markdown.NewRenderer()
 	}
-	s := &JournalService{deps: *deps, authz: guard}
+	s := &JournalService{deps: *deps, specimens: specimens, authz: guard}
 	mws := authMW.Protected()
+	optionalMWs := authMW.Optional()
 
 	huma.Register(api, huma.Operation{
 		OperationID:   "create-journal-entry",
@@ -85,10 +90,11 @@ func registerJournalOperations(api huma.API, authMW authMiddlewares, guard authz
 		Method:      http.MethodGet,
 		Path:        "/api/v1/specimens/{id}/journal",
 		Summary:     "List a specimen's journal entries",
-		Description: "Cursor-paginated list ordered `created_at DESC, id DESC` (CONTRACT.md §10.3). Each entry includes `body_html` alongside `body_md`.",
+		Description: "Cursor-paginated list ordered `created_at DESC, id DESC` (CONTRACT.md §10.3). Each entry includes `body_html` alongside `body_md`. " +
+			"Returns 404 when the caller cannot see the parent specimen — sub-resource visibility is inherited (CONTRACT.md §13 v2).",
 		Tags:        []string{"journal"},
-		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized},
-		Middlewares: mws,
+		Errors:      []int{http.StatusBadRequest, http.StatusNotFound},
+		Middlewares: optionalMWs,
 	}, s.list)
 
 	huma.Register(api, huma.Operation{
@@ -96,9 +102,10 @@ func registerJournalOperations(api huma.API, authMW authMiddlewares, guard authz
 		Method:      http.MethodGet,
 		Path:        "/api/v1/journal/{id}",
 		Summary:     "Get a journal entry by id",
+		Description: "Returns 404 (not 403/401) when the caller does not own the entry (CONTRACT.md §13 v2 don't-leak-existence rule).",
 		Tags:        []string{"journal"},
-		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound},
-		Middlewares: mws,
+		Errors:      []int{http.StatusBadRequest, http.StatusNotFound},
+		Middlewares: optionalMWs,
 	}, s.get)
 
 	huma.Register(api, huma.Operation{
@@ -226,6 +233,12 @@ func (s *JournalService) list(ctx context.Context, in *listJournalInput) (*listJ
 	if err != nil {
 		return nil, err
 	}
+	// CONTRACT.md §13 v2: sub-resource lists 404 before evaluating
+	// the list when the caller cannot see the parent — the URL is
+	// meaningless to them, not "filter to nothing."
+	if err := s.gateParentSpecimen(ctx, specimenID); err != nil {
+		return nil, err
+	}
 	rows, cursor, err := s.deps.Entries.ListBySpecimen(ctx, specimenID, domain.Page{Limit: in.Limit, Cursor: in.Cursor})
 	if err != nil {
 		return nil, mapListError(err)
@@ -256,7 +269,8 @@ func (s *JournalService) get(ctx context.Context, in *getJournalInput) (*journal
 	if err != nil {
 		return nil, mapJournalError(err)
 	}
-	if err := s.authz.check(ctx, journalResource(e), actView); err != nil {
+	if err := s.authz.checkView(ctx, journalResource(e),
+		"journal_entry_not_found", "no such journal entry"); err != nil {
 		return nil, err
 	}
 	html, rerr := s.deps.Markdown.RenderString(e.BodyMD)
@@ -321,6 +335,25 @@ func (s *JournalService) delete(ctx context.Context, in *deleteJournalInput) (*d
 		return nil, mapJournalError(err)
 	}
 	return &deleteJournalOutput{}, nil
+}
+
+// gateParentSpecimen resolves the parent specimen and applies the
+// §13 v2 sub-resource rule: when the caller cannot see the parent
+// the response is a single 404 (the same envelope the specimen's
+// own GET-by-id endpoint would produce for a missing or
+// not-visible row). The sub-resource is never queried. A nil
+// specimens repo (a test path) skips parent enforcement; the
+// optional-auth chain keeps anonymous callers running.
+func (s *JournalService) gateParentSpecimen(ctx context.Context, specimenID uuid.UUID) error {
+	if s.specimens == nil {
+		return nil
+	}
+	sp, err := s.specimens.GetByID(ctx, specimenID)
+	if err != nil {
+		return mapSpecimenError(err)
+	}
+	return s.authz.checkView(ctx, specimenResource(sp),
+		"specimen_not_found", "no such specimen")
 }
 
 func toJournalView(e domain.JournalEntry, html string) JournalView {
