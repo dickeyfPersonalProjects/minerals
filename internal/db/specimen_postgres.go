@@ -237,6 +237,12 @@ func (r *SpecimenPostgres) listDefault(
 		args = append(args, curTS, curID)
 	}
 	where, args = applySharedFilters(where, args, filter)
+	// CONTRACT.md §13 v2 layer-1: scope the list to rows the caller
+	// may see (own + public + shared; admin sees all).
+	if clause, scoped := specimenListScope(auth.FromContext(ctx), "specimens", args); clause != "" {
+		where = append(where, clause)
+		args = scoped
+	}
 
 	sql := `SELECT ` + specimenColumns + ` FROM specimens`
 	if len(where) > 0 {
@@ -298,6 +304,12 @@ func (r *SpecimenPostgres) listRanked(
 		args = append(args, curRank, curTS, curID)
 	}
 	where, args = applySharedFilters(where, args, filter)
+	// CONTRACT.md §13 v2 layer-1: scope the list to rows the caller
+	// may see (own + public + shared; admin sees all).
+	if clause, scoped := specimenListScope(auth.FromContext(ctx), "specimens", args); clause != "" {
+		where = append(where, clause)
+		args = scoped
+	}
 
 	sql := `
 		SELECT ` + specimenColumns + `, ` + tsRankExpr + ` AS rank

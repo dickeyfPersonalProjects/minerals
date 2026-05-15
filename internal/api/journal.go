@@ -54,17 +54,18 @@ type JournalServiceDeps struct {
 
 // JournalService wires huma operations against a JournalServiceDeps.
 type JournalService struct {
-	deps JournalServiceDeps
+	deps  JournalServiceDeps
+	authz authzGuard
 }
 
-func registerJournalOperations(api huma.API, authMW authMiddlewares, deps *JournalServiceDeps) {
+func registerJournalOperations(api huma.API, authMW authMiddlewares, guard authzGuard, deps *JournalServiceDeps) {
 	if deps == nil || deps.Entries == nil {
 		return
 	}
 	if deps.Markdown == nil {
 		deps.Markdown = markdown.NewRenderer()
 	}
-	s := &JournalService{deps: *deps}
+	s := &JournalService{deps: *deps, authz: guard}
 	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
@@ -197,11 +198,16 @@ func (s *JournalService) create(ctx context.Context, in *createJournalInput) (*c
 			"failed to render markdown", map[string]any{"field": "body_md"})
 	}
 
+	authorID := auth.FromContext(ctx).ID
+	if err := s.authz.check(ctx, ownedResource("journal", authorID), actCreate); err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UTC()
 	e := domain.JournalEntry{
 		ID:         domain.NewID(),
 		SpecimenID: specimenID,
-		AuthorID:   auth.FromContext(ctx).ID,
+		AuthorID:   authorID,
 		BodyMD:     in.Body.BodyMD,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -250,6 +256,9 @@ func (s *JournalService) get(ctx context.Context, in *getJournalInput) (*journal
 	if err != nil {
 		return nil, mapJournalError(err)
 	}
+	if err := s.authz.check(ctx, journalResource(e), actView); err != nil {
+		return nil, err
+	}
 	html, rerr := s.deps.Markdown.RenderString(e.BodyMD)
 	if rerr != nil {
 		return nil, newAPIError(http.StatusInternalServerError, "internal_error",
@@ -271,6 +280,9 @@ func (s *JournalService) patch(ctx context.Context, in *patchJournalInput) (*jou
 	current, err := s.deps.Entries.GetByID(ctx, id)
 	if err != nil {
 		return nil, mapJournalError(err)
+	}
+	if err := s.authz.check(ctx, journalResource(current), actEdit); err != nil {
+		return nil, err
 	}
 	if in.Body.BodyMD != nil {
 		if *in.Body.BodyMD == "" {
@@ -296,6 +308,13 @@ func (s *JournalService) patch(ctx context.Context, in *patchJournalInput) (*jou
 func (s *JournalService) delete(ctx context.Context, in *deleteJournalInput) (*deleteJournalOutput, error) {
 	id, err := parseUUID(in.ID, "id")
 	if err != nil {
+		return nil, err
+	}
+	current, err := s.deps.Entries.GetByID(ctx, id)
+	if err != nil {
+		return nil, mapJournalError(err)
+	}
+	if err := s.authz.check(ctx, journalResource(current), actDelete); err != nil {
 		return nil, err
 	}
 	if err := s.deps.Entries.Delete(ctx, nil, id); err != nil {

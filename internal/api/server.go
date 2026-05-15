@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/casbin/casbin/v2"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
@@ -101,6 +102,13 @@ type Deps struct {
 	// production. nil selects the v1 stub-identity fallback — the
 	// path for tests that don't exercise authentication.
 	Verifier auth.TokenVerifier
+	// Enforcer is the Casbin enforcer backing CONTRACT.md §13 v2
+	// per-resource authorization (mi-aw3b). Wired in production by
+	// cmd/minerals with the DB-backed shares lookup. nil disables
+	// per-resource enforcement entirely — handlers still run, but no
+	// authz check fires. This mirrors the nil-Verifier stub path and
+	// is the seam unit tests use; serve always wires a real enforcer.
+	Enforcer *casbin.Enforcer
 }
 
 // RuntimeOIDCConfig captures the SPA-facing OIDC settings the backend
@@ -164,15 +172,16 @@ func New(deps Deps) http.Handler {
 
 	humaAPI := humago.New(mux, cfg)
 	authMW := newAuthMiddlewares(deps.Users, deps.Verifier)
+	guard := authzGuard{enforcer: deps.Enforcer}
 	registerSystemOperations(humaAPI, deps)
-	registerCollectorOperations(humaAPI, authMW, deps.Collectors)
-	registerPhotoOperations(humaAPI, mux, authMW, deps.Photos)
-	registerSpecimenOperations(humaAPI, authMW, deps.Specimens)
-	registerJournalOperations(humaAPI, authMW, deps.Journal)
-	registerSpecimenCollectorOperations(humaAPI, authMW, deps.Specimens, deps.SpecimenCollectors)
-	registerJournalFileOperations(humaAPI, mux, authMW, deps.JournalFiles)
+	registerCollectorOperations(humaAPI, authMW, guard, deps.Collectors)
+	registerPhotoOperations(humaAPI, mux, authMW, guard, deps.Photos)
+	registerSpecimenOperations(humaAPI, authMW, guard, deps.Specimens)
+	registerJournalOperations(humaAPI, authMW, guard, deps.Journal)
+	registerSpecimenCollectorOperations(humaAPI, authMW, guard, deps.Specimens, deps.SpecimenCollectors)
+	registerJournalFileOperations(humaAPI, mux, authMW, guard, deps.JournalFiles)
 	registerMineralSpeciesOperations(humaAPI, authMW, deps.MineralSpecies)
-	registerQRSheetOperations(humaAPI, authMW, deps.QRSheets)
+	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets)
 	registerProfileOperations(humaAPI, authMW, deps.Users)
 	registerSpecimenRedirect(mux)
 

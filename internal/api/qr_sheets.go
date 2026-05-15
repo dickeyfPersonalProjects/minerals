@@ -110,14 +110,15 @@ type generateQRSheetPDFOutput struct {
 // and the specimen repo (needed to surface ErrSpecimenNotFound up
 // front for the add path).
 type QRSheetService struct {
-	repo domain.QRSheetRepo
+	repo  domain.QRSheetRepo
+	authz authzGuard
 }
 
-func registerQRSheetOperations(api huma.API, authMW authMiddlewares, repo domain.QRSheetRepo) {
+func registerQRSheetOperations(api huma.API, authMW authMiddlewares, guard authzGuard, repo domain.QRSheetRepo) {
 	if repo == nil {
 		return
 	}
-	s := &QRSheetService{repo: repo}
+	s := &QRSheetService{repo: repo, authz: guard}
 	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
@@ -208,6 +209,9 @@ func registerQRSheetOperations(api huma.API, authMW authMiddlewares, repo domain
 
 func (s *QRSheetService) get(ctx context.Context, _ *struct{}) (*qrSheetOutput, error) {
 	user := auth.FromContext(ctx)
+	if err := s.authz.check(ctx, ownedResource("qr-sheets", user.ID), actView); err != nil {
+		return nil, err
+	}
 	view, err := s.loadView(ctx, user.ID)
 	if err != nil {
 		return nil, err
@@ -223,6 +227,9 @@ func (s *QRSheetService) create(
 		return nil, err
 	}
 	user := auth.FromContext(ctx)
+	if err := s.authz.check(ctx, ownedResource("qr-sheets", user.ID), actCreate); err != nil {
+		return nil, err
+	}
 
 	now := time.Now().UTC()
 	sheet := domain.QRSheet{
@@ -250,6 +257,9 @@ func (s *QRSheetService) patch(
 		return nil, err
 	}
 	user := auth.FromContext(ctx)
+	if err := s.authz.check(ctx, ownedResource("qr-sheets", user.ID), actEdit); err != nil {
+		return nil, err
+	}
 
 	now := time.Now().UTC()
 	if err := s.repo.UpdateTemplate(ctx, nil, user.ID, template, now); err != nil {
@@ -266,6 +276,9 @@ func (s *QRSheetService) delete(
 	ctx context.Context, _ *struct{},
 ) (*deleteQRSheetOutput, error) {
 	user := auth.FromContext(ctx)
+	if err := s.authz.check(ctx, ownedResource("qr-sheets", user.ID), actDelete); err != nil {
+		return nil, err
+	}
 	if err := s.repo.Delete(ctx, nil, user.ID); err != nil {
 		return nil, mapQRSheetError(err)
 	}
@@ -280,6 +293,9 @@ func (s *QRSheetService) addSpecimen(
 		return nil, err
 	}
 	user := auth.FromContext(ctx)
+	if err := s.authz.check(ctx, ownedResource("qr-sheets", user.ID), actEdit); err != nil {
+		return nil, err
+	}
 
 	now := time.Now().UTC()
 	if err := s.repo.AddSpecimen(ctx, nil, user.ID, specimenID, now); err != nil {
@@ -300,6 +316,9 @@ func (s *QRSheetService) removeSpecimen(
 		return nil, err
 	}
 	user := auth.FromContext(ctx)
+	if err := s.authz.check(ctx, ownedResource("qr-sheets", user.ID), actEdit); err != nil {
+		return nil, err
+	}
 	if err := s.repo.RemoveSpecimen(ctx, nil, user.ID, specimenID); err != nil {
 		return nil, mapQRSheetError(err)
 	}
@@ -315,6 +334,9 @@ func (s *QRSheetService) generatePDF(
 	ctx context.Context, _ *struct{},
 ) (*generateQRSheetPDFOutput, error) {
 	user := auth.FromContext(ctx)
+	if err := s.authz.check(ctx, ownedResource("qr-sheets", user.ID), actView); err != nil {
+		return nil, err
+	}
 	sheet, err := s.repo.GetByUser(ctx, user.ID)
 	if err != nil {
 		return nil, mapQRSheetError(err)

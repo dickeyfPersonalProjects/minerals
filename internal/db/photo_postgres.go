@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/dickeyfPersonalProjects/minerals/internal/auth"
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
 )
 
@@ -131,6 +132,15 @@ func (r *PhotoPostgres) ListBySpecimen(
 			" AND (position, created_at, id) > ($%d, $%d, $%d)",
 			len(args)+1, len(args)+2, len(args)+3)
 		args = append(args, curPos, curTS, curID)
+	}
+	// CONTRACT.md §13 v2 layer-1: photos carry no visibility or owner
+	// of their own — they inherit the parent specimen's. Scope the
+	// list to photos whose specimen the caller may access (public or
+	// unlisted, own, or shared; admin sees all).
+	if clause, scoped := specimenAccessScope(auth.FromContext(ctx), "specimens", args); clause != "" {
+		sql += " AND EXISTS (SELECT 1 FROM specimens" +
+			" WHERE specimens.id = photos.specimen_id AND " + clause + ")"
+		args = scoped
 	}
 	sql += " ORDER BY position ASC, created_at ASC, id ASC LIMIT $2"
 

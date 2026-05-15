@@ -235,14 +235,15 @@ type deleteSpecimenOutput struct{}
 
 // SpecimenService wires huma operations against a domain.SpecimenRepo.
 type SpecimenService struct {
-	repo domain.SpecimenRepo
+	repo  domain.SpecimenRepo
+	authz authzGuard
 }
 
-func registerSpecimenOperations(api huma.API, authMW authMiddlewares, repo domain.SpecimenRepo) {
+func registerSpecimenOperations(api huma.API, authMW authMiddlewares, guard authzGuard, repo domain.SpecimenRepo) {
 	if repo == nil {
 		return
 	}
-	s := &SpecimenService{repo: repo}
+	s := &SpecimenService{repo: repo, authz: guard}
 	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
@@ -388,6 +389,9 @@ func (s *SpecimenService) get(ctx context.Context, in *getSpecimenInput) (*speci
 	if err != nil {
 		return nil, mapSpecimenError(err)
 	}
+	if err := s.authz.check(ctx, specimenResource(sp), actView); err != nil {
+		return nil, err
+	}
 	return &specimenResponseOutput{Body: toSpecimenView(sp)}, nil
 }
 
@@ -418,6 +422,11 @@ func (s *SpecimenService) create(ctx context.Context, in *createSpecimenInput) (
 		return nil, err
 	}
 
+	authorID := auth.FromContext(ctx).ID
+	if err := s.authz.check(ctx, newSpecimenResource(authorID, visibility), actCreate); err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UTC()
 	sp := domain.Specimen{
 		ID:            domain.NewID(),
@@ -426,7 +435,7 @@ func (s *SpecimenService) create(ctx context.Context, in *createSpecimenInput) (
 		Name:          name,
 		Description:   b.Description,
 		Visibility:    visibility,
-		AuthorID:      auth.FromContext(ctx).ID,
+		AuthorID:      authorID,
 		AcquiredAt:    b.AcquiredAt,
 		AcquiredFrom:  b.AcquiredFrom,
 		PriceCents:    b.PriceCents,
@@ -457,6 +466,9 @@ func (s *SpecimenService) patch(ctx context.Context, in *patchSpecimenInput) (*s
 	current, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, mapSpecimenError(err)
+	}
+	if err := s.authz.check(ctx, specimenResource(current), actEdit); err != nil {
+		return nil, err
 	}
 
 	b := in.Body
@@ -549,6 +561,13 @@ func (s *SpecimenService) patch(ctx context.Context, in *patchSpecimenInput) (*s
 func (s *SpecimenService) delete(ctx context.Context, in *deleteSpecimenInput) (*deleteSpecimenOutput, error) {
 	id, err := parseUUID(in.ID, "id")
 	if err != nil {
+		return nil, err
+	}
+	current, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, mapSpecimenError(err)
+	}
+	if err := s.authz.check(ctx, specimenResource(current), actDelete); err != nil {
 		return nil, err
 	}
 	if err := s.repo.Delete(ctx, nil, id); err != nil {

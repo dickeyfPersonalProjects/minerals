@@ -110,19 +110,26 @@ func toPhotoView(p domain.Photo, f domain.File) PhotoView {
 // PhotoServiceDeps carries everything the photo handlers need. The
 // service is registered when PhotoServiceDeps is non-nil in api.Deps.
 type PhotoServiceDeps struct {
-	Photos         domain.PhotoRepo
-	Files          domain.FileRepo
-	Storage        PhotoStorage
-	RunInTx        TxRunner
+	Photos  domain.PhotoRepo
+	Files   domain.FileRepo
+	Storage PhotoStorage
+	RunInTx TxRunner
+	// Specimens resolves the parent specimen whose author_id and
+	// visibility drive a photo's authorization (photos carry neither
+	// of their own — CONTRACT.md §13 v2). Required for per-resource
+	// enforcement; nil disables it (the unit-test path, alongside a
+	// nil Enforcer).
+	Specimens      domain.SpecimenRepo
 	MaxUploadBytes int64
 }
 
 // PhotoService wires huma operations against a PhotoServiceDeps.
 type PhotoService struct {
-	deps PhotoServiceDeps
+	deps  PhotoServiceDeps
+	authz authzGuard
 }
 
-func registerPhotoOperations(api huma.API, mux *http.ServeMux, authMW authMiddlewares, deps *PhotoServiceDeps) {
+func registerPhotoOperations(api huma.API, mux *http.ServeMux, authMW authMiddlewares, guard authzGuard, deps *PhotoServiceDeps) {
 	if deps == nil {
 		return
 	}
@@ -136,7 +143,7 @@ func registerPhotoOperations(api huma.API, mux *http.ServeMux, authMW authMiddle
 		deps.MaxUploadBytes = 100 * 1024 * 1024
 	}
 
-	s := &PhotoService{deps: *deps}
+	s := &PhotoService{deps: *deps, authz: guard}
 	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
@@ -210,6 +217,51 @@ func (s *PhotoService) maxBytesMiddleware(ctx huma.Context, next func(huma.Conte
 	next(ctx)
 }
 
+// enforcePhoto runs the §13 v2 per-resource check for a photo
+// operation, deriving the photo's owner and visibility from its
+// parent specimen (photos carry neither of their own). A no-op when
+// authorization is disabled or no specimen repo is wired — the
+// unit-test path, alongside a nil Enforcer.
+func (s *PhotoService) enforcePhoto(
+	ctx context.Context, specimenID, photoID uuid.UUID, act string,
+) error {
+	if !s.authz.active() || s.deps.Specimens == nil {
+		return nil
+	}
+	sp, err := s.deps.Specimens.GetByID(ctx, specimenID)
+	if err != nil {
+		if errors.Is(err, domain.ErrSpecimenNotFound) {
+			return newAPIError(http.StatusNotFound, "specimen_not_found",
+				"no such specimen", map[string]any{"field": "id"})
+		}
+		return newAPIError(http.StatusInternalServerError, "internal_error",
+			"internal server error", nil)
+	}
+	return s.authz.check(ctx, photoResource(photoID, sp), act)
+}
+
+// enforcePhotoHTTP is the net/http analogue of enforcePhoto for the
+// raw download routes. It writes a §10 envelope and returns false
+// when access is denied (or the parent specimen is missing).
+func (s *PhotoService) enforcePhotoHTTP(
+	w http.ResponseWriter, r *http.Request, specimenID, photoID uuid.UUID, act string,
+) bool {
+	if !s.authz.active() || s.deps.Specimens == nil {
+		return true
+	}
+	sp, err := s.deps.Specimens.GetByID(r.Context(), specimenID)
+	if err != nil {
+		if errors.Is(err, domain.ErrSpecimenNotFound) {
+			writeError(w, http.StatusNotFound, "specimen_not_found", "no such specimen", nil)
+			return false
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error",
+			"internal server error", nil)
+		return false
+	}
+	return s.authz.checkHTTP(w, r, photoResource(photoID, sp), act)
+}
+
 type uploadPhotoForm struct {
 	File    huma.FormFile `form:"file" required:"true" doc:"The image file to upload."`
 	TakenAt string        `form:"taken_at" required:"false" doc:"Optional ISO 8601 timestamp; defaults to EXIF DateTimeOriginal when present."`
@@ -246,6 +298,11 @@ func (s *PhotoService) upload(ctx context.Context, in *uploadPhotoInput) (*uploa
 
 	specimenID, err := parseUUID(in.SpecimenID, "id")
 	if err != nil {
+		return nil, err
+	}
+	// CONTRACT.md §13 v2: adding a photo is editing the specimen's
+	// gallery — the caller must own (or be admin of) the specimen.
+	if err := s.enforcePhoto(ctx, specimenID, uuid.Nil, actCreate); err != nil {
 		return nil, err
 	}
 
@@ -504,6 +561,9 @@ func (s *PhotoService) patch(ctx context.Context, in *patchPhotoInput) (*patchPh
 	if err != nil {
 		return nil, mapPhotoError(err)
 	}
+	if err := s.enforcePhoto(ctx, current.SpecimenID, current.ID, actEdit); err != nil {
+		return nil, err
+	}
 
 	if in.Body.TakenAt != nil {
 		t := in.Body.TakenAt.UTC()
@@ -551,6 +611,9 @@ func (s *PhotoService) delete(ctx context.Context, in *deletePhotoInput) (*delet
 	current, err := s.deps.Photos.GetByID(ctx, id)
 	if err != nil {
 		return nil, mapPhotoError(err)
+	}
+	if err := s.enforcePhoto(ctx, current.SpecimenID, current.ID, actDelete); err != nil {
+		return nil, err
 	}
 
 	originalKey := "files/" + current.FileID.String()
@@ -627,6 +690,11 @@ func (s *PhotoService) serveDownload(w http.ResponseWriter, r *http.Request, var
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "internal server error", nil)
+		return
+	}
+	// CONTRACT.md §13 v2: viewing a photo's bytes requires view
+	// access to its parent specimen (public/unlisted shortcut applies).
+	if !s.enforcePhotoHTTP(w, r, p.SpecimenID, p.ID, actView) {
 		return
 	}
 	f, err := s.deps.Files.GetByID(ctx, p.FileID)

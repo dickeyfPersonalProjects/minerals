@@ -137,6 +137,13 @@ func (r *CollectorPostgres) List(
 		// Escape LIKE metacharacters in user input then wrap with %.
 		args = append(args, "%"+escapeLike(q)+"%")
 	}
+	// CONTRACT.md §13 v2 layer-1: the `user` role only ever has
+	// `collectors:*:own` — list returns the caller's own rows (admin
+	// sees all; anonymous sees none).
+	if clause, scoped := ownerScope(auth.FromContext(ctx), "author_id", args); clause != "" {
+		where = append(where, clause)
+		args = scoped
+	}
 
 	sql := `
 		SELECT id, name, notes, author_id, created_at, updated_at

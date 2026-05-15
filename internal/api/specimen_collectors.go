@@ -65,15 +65,17 @@ type putSpecimenCollectorsBody struct {
 type SpecimenCollectorService struct {
 	specimens domain.SpecimenRepo
 	links     domain.SpecimenCollectorRepo
+	authz     authzGuard
 }
 
 func registerSpecimenCollectorOperations(
-	api huma.API, authMW authMiddlewares, specimens domain.SpecimenRepo, links domain.SpecimenCollectorRepo,
+	api huma.API, authMW authMiddlewares, guard authzGuard,
+	specimens domain.SpecimenRepo, links domain.SpecimenCollectorRepo,
 ) {
 	if specimens == nil || links == nil {
 		return
 	}
-	s := &SpecimenCollectorService{specimens: specimens, links: links}
+	s := &SpecimenCollectorService{specimens: specimens, links: links, authz: guard}
 	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
@@ -110,8 +112,14 @@ func (s *SpecimenCollectorService) get(
 	}
 	// Probe specimen existence so an unknown id returns 404 rather
 	// than a misleading empty 200.
-	if _, err := s.specimens.GetByID(ctx, id); err != nil {
+	sp, err := s.specimens.GetByID(ctx, id)
+	if err != nil {
 		return nil, mapSpecimenError(err)
+	}
+	// The collector chain is part of the specimen — viewing it
+	// requires view access to the specimen (CONTRACT.md §13 v2).
+	if err := s.authz.check(ctx, specimenResource(sp), actView); err != nil {
+		return nil, err
 	}
 	links, err := s.links.GetChain(ctx, nil, id)
 	if err != nil {
@@ -130,6 +138,15 @@ func (s *SpecimenCollectorService) put(
 ) (*specimenCollectorsOutput, error) {
 	id, err := parseUUID(in.ID, "id")
 	if err != nil {
+		return nil, err
+	}
+	// Editing the collector chain is editing the specimen
+	// (CONTRACT.md §13 v2).
+	sp, err := s.specimens.GetByID(ctx, id)
+	if err != nil {
+		return nil, mapSpecimenError(err)
+	}
+	if err := s.authz.check(ctx, specimenResource(sp), actEdit); err != nil {
 		return nil, err
 	}
 
