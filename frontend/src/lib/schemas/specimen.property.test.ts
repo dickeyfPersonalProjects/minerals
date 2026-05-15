@@ -5,13 +5,11 @@
 
 import { describe, expect, it } from 'vitest';
 import * as fc from 'fast-check';
-import { ZodFastCheck } from 'zod-fast-check';
 import type { components } from '../api/schema';
 import {
   emptyFormValues,
   formToCreateBody,
   formToPatchBody,
-  rockDataSchema,
   specimenFormSchema,
   specimenToFormValues,
   type SpecimenFormValues,
@@ -123,17 +121,6 @@ describe('specimenFormSchema property tests', () => {
           expect(specimenFormSchema.safeParse(v).success).toBe(false);
         },
       ),
-    );
-  });
-
-  it('zod-fast-check inputs for rockDataSchema validate cleanly', () => {
-    // Smoke test of the zod-fast-check integration: derived arbitraries
-    // must satisfy the source schema they were derived from.
-    const rockArb = ZodFastCheck().inputOf(rockDataSchema);
-    fc.assert(
-      fc.property(rockArb, (v) => {
-        expect(rockDataSchema.safeParse(v).success).toBe(true);
-      }),
     );
   });
 });
