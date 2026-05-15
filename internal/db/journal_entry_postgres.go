@@ -135,6 +135,14 @@ func (r *JournalEntryPostgres) ListBySpecimen(
 			len(args)+1, len(args)+2)
 		args = append(args, curTS, curID)
 	}
+	// CONTRACT.md §13 v2 layer-1: the `user` role only ever has
+	// `journal:*:own` — there is no public or shared tier for journal
+	// entries, so the list returns the caller's own rows (admin sees
+	// all; anonymous sees none).
+	if clause, scoped := ownerScope(auth.FromContext(ctx), "author_id", args); clause != "" {
+		sql += " AND " + clause
+		args = scoped
+	}
 	sql += " ORDER BY created_at DESC, id DESC LIMIT $2"
 
 	rows, err := r.pool.Query(ctx, sql, args...)

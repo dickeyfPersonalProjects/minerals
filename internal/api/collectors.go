@@ -111,14 +111,15 @@ type deleteCollectorOutput struct{}
 // CollectorService wires huma operations against a domain.CollectorRepo.
 // Construct one in api.New() when deps.CollectorRepo is non-nil.
 type CollectorService struct {
-	repo domain.CollectorRepo
+	repo  domain.CollectorRepo
+	authz authzGuard
 }
 
-func registerCollectorOperations(api huma.API, authMW authMiddlewares, repo domain.CollectorRepo) {
+func registerCollectorOperations(api huma.API, authMW authMiddlewares, guard authzGuard, repo domain.CollectorRepo) {
 	if repo == nil {
 		return
 	}
-	s := &CollectorService{repo: repo}
+	s := &CollectorService{repo: repo, authz: guard}
 	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
@@ -206,6 +207,9 @@ func (s *CollectorService) get(ctx context.Context, in *getCollectorInput) (*col
 	if err != nil {
 		return nil, mapDomainError(err)
 	}
+	if err := s.authz.check(ctx, collectorResource(c), actView); err != nil {
+		return nil, err
+	}
 	return &collectorResponseOutput{Body: toCollectorView(c)}, nil
 }
 
@@ -216,12 +220,17 @@ func (s *CollectorService) create(ctx context.Context, in *createCollectorInput)
 			"name is required", nil)
 	}
 
+	authorID := auth.FromContext(ctx).ID
+	if err := s.authz.check(ctx, ownedResource("collectors", authorID), actCreate); err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UTC()
 	c := domain.Collector{
 		ID:        domain.NewID(),
 		Name:      name,
 		Notes:     in.Body.Notes,
-		AuthorID:  auth.FromContext(ctx).ID,
+		AuthorID:  authorID,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -244,6 +253,9 @@ func (s *CollectorService) patch(ctx context.Context, in *patchCollectorInput) (
 	current, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, mapDomainError(err)
+	}
+	if err := s.authz.check(ctx, collectorResource(current), actEdit); err != nil {
+		return nil, err
 	}
 
 	if in.Body.Name != nil {
@@ -273,6 +285,13 @@ func (s *CollectorService) patch(ctx context.Context, in *patchCollectorInput) (
 func (s *CollectorService) delete(ctx context.Context, in *deleteCollectorInput) (*deleteCollectorOutput, error) {
 	id, err := parseUUID(in.ID, "id")
 	if err != nil {
+		return nil, err
+	}
+	current, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, mapDomainError(err)
+	}
+	if err := s.authz.check(ctx, collectorResource(current), actDelete); err != nil {
 		return nil, err
 	}
 	if err := s.repo.Delete(ctx, nil, id); err != nil {

@@ -108,10 +108,11 @@ type JournalFileServiceDeps struct {
 // JournalFileService wires huma operations against a
 // JournalFileServiceDeps.
 type JournalFileService struct {
-	deps JournalFileServiceDeps
+	deps  JournalFileServiceDeps
+	authz authzGuard
 }
 
-func registerJournalFileOperations(api huma.API, mux *http.ServeMux, authMW authMiddlewares, deps *JournalFileServiceDeps) {
+func registerJournalFileOperations(api huma.API, mux *http.ServeMux, authMW authMiddlewares, guard authzGuard, deps *JournalFileServiceDeps) {
 	if deps == nil {
 		return
 	}
@@ -126,7 +127,7 @@ func registerJournalFileOperations(api huma.API, mux *http.ServeMux, authMW auth
 		deps.MaxUploadBytes = 100 * 1024 * 1024
 	}
 
-	s := &JournalFileService{deps: *deps}
+	s := &JournalFileService{deps: *deps, authz: guard}
 	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
@@ -228,7 +229,8 @@ func (s *JournalFileService) upload(ctx context.Context, in *uploadJournalFileIn
 	// this check the FK violation would only surface after we've
 	// already written the original to MinIO and rolled back the DB
 	// — wasteful when the caller used a stale entry id.
-	if _, err := s.deps.Entries.GetByID(ctx, entryID); err != nil {
+	entry, err := s.deps.Entries.GetByID(ctx, entryID)
+	if err != nil {
 		if errors.Is(err, domain.ErrJournalEntryNotFound) {
 			return nil, newAPIError(http.StatusNotFound, "journal_entry_not_found",
 				"no such journal entry",
@@ -236,6 +238,11 @@ func (s *JournalFileService) upload(ctx context.Context, in *uploadJournalFileIn
 		}
 		return nil, newAPIError(http.StatusInternalServerError, "internal_error",
 			"failed to look up journal entry", nil)
+	}
+	// CONTRACT.md §13 v2: attaching a file is editing the journal
+	// entry — the caller must own (or be admin of) the entry.
+	if err := s.authz.check(ctx, journalResource(entry), actEdit); err != nil {
+		return nil, err
 	}
 
 	innerCT := strings.ToLower(strings.TrimSpace(form.File.ContentType))
@@ -353,13 +360,17 @@ func (s *JournalFileService) list(ctx context.Context, in *listJournalFilesInput
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.deps.Entries.GetByID(ctx, entryID); err != nil {
+	entry, err := s.deps.Entries.GetByID(ctx, entryID)
+	if err != nil {
 		if errors.Is(err, domain.ErrJournalEntryNotFound) {
 			return nil, newAPIError(http.StatusNotFound, "journal_entry_not_found",
 				"no such journal entry", map[string]any{"field": "id"})
 		}
 		return nil, newAPIError(http.StatusInternalServerError, "internal_error",
 			"failed to look up journal entry", nil)
+	}
+	if err := s.authz.check(ctx, journalResource(entry), actView); err != nil {
+		return nil, err
 	}
 
 	rows, err := s.deps.Attachments.ListByEntry(ctx, entryID)
@@ -402,7 +413,18 @@ func (s *JournalFileService) delete(ctx context.Context, in *deleteJournalFileIn
 		return nil, newAPIError(http.StatusInternalServerError, "internal_error",
 			"failed to look up attachment", nil)
 	}
-	_ = attachment // entry id available if a future audit log wants it.
+	// CONTRACT.md §13 v2: removing an attachment is editing the
+	// journal entry — the caller must own (or be admin of) the entry.
+	if s.authz.active() {
+		entry, eerr := s.deps.Entries.GetByID(ctx, attachment.EntryID)
+		if eerr != nil {
+			return nil, newAPIError(http.StatusInternalServerError, "internal_error",
+				"failed to look up journal entry", nil)
+		}
+		if aerr := s.authz.check(ctx, journalResource(entry), actEdit); aerr != nil {
+			return nil, aerr
+		}
+	}
 	originalKey := "files/" + fileID.String()
 
 	txErr := s.deps.RunInTx(ctx, func(tx domain.Tx) error {
@@ -479,6 +501,33 @@ func (s *JournalFileService) downloadOriginal(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "internal_error",
 			"internal server error", nil)
 		return
+	}
+
+	// CONTRACT.md §13 v2: when this file is a journal attachment,
+	// viewing its bytes requires view access to the parent entry. A
+	// file_id that is not a journal attachment falls through to the
+	// existing authenticated-download behaviour (photo files enforce
+	// via their own /api/v1/photos/{id} route).
+	if s.authz.active() {
+		att, aerr := s.deps.Attachments.GetByFileID(ctx, id)
+		switch {
+		case aerr == nil:
+			entry, eerr := s.deps.Entries.GetByID(ctx, att.EntryID)
+			if eerr != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error",
+					"internal server error", nil)
+				return
+			}
+			if !s.authz.checkHTTP(w, r, journalResource(entry), actView) {
+				return
+			}
+		case errors.Is(aerr, domain.ErrJournalAttachmentNotFound):
+			// Not a journal attachment — nothing to enforce here.
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error",
+				"internal server error", nil)
+			return
+		}
 	}
 
 	etag := `"` + f.SHA256 + `"`

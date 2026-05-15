@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dickeyfPersonalProjects/minerals/internal/api"
+	"github.com/dickeyfPersonalProjects/minerals/internal/authz"
 	"github.com/dickeyfPersonalProjects/minerals/internal/config"
 	"github.com/dickeyfPersonalProjects/minerals/internal/db"
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
@@ -125,10 +126,26 @@ func runServe(_ []string) error {
 	}
 	slog.Info("oidc verifier configured", "issuer", cfg.OIDCIssuerURL, "client_id", cfg.OIDCClientID)
 
+	// CONTRACT.md §13 v2 authorization (mi-aw3b). The §13 v2 policy
+	// set is static and code-defined (authz.DefaultPolicies), so an
+	// in-memory enforcer seeded at startup is the canonical store —
+	// no Postgres policy adapter is needed. The shares lookup is
+	// DB-backed so the `:shared` instance qualifier resolves against
+	// the shares table (migration 0010).
+	enforcer, err := authz.NewEnforcer(nil, db.NewSharesLookup(pool))
+	if err != nil {
+		return fmt.Errorf("serve: init authz enforcer: %w", err)
+	}
+	if err := authz.SeedDefaultPolicies(enforcer); err != nil {
+		return fmt.Errorf("serve: seed authz policies: %w", err)
+	}
+	slog.Info("authz enforcer configured", "policies", len(authz.DefaultPolicies))
+
 	photoDeps := &api.PhotoServiceDeps{
 		Photos:         db.NewPhotoPostgres(pool),
 		Files:          db.NewFilePostgres(pool),
 		Storage:        store,
+		Specimens:      db.NewSpecimenPostgres(pool),
 		MaxUploadBytes: cfg.MaxUploadBytes,
 		RunInTx: func(ctx context.Context, fn func(tx domain.Tx) error) error {
 			return db.RunInTx(ctx, pool, func(pgxTx pgx.Tx) error {
@@ -157,6 +174,7 @@ func runServe(_ []string) error {
 		QRSheets: db.NewQRSheetPostgres(pool),
 		Users:    db.NewUserPostgres(pool),
 		Verifier: verifier,
+		Enforcer: enforcer,
 		RuntimeOIDC: api.RuntimeOIDCConfig{
 			IssuerURL:   cfg.PublicOIDCIssuerURL,
 			ClientID:    cfg.PublicOIDCClientID,
