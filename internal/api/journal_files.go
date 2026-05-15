@@ -175,7 +175,7 @@ func registerJournalFileOperations(api huma.API, mux *http.ServeMux, authMW auth
 	// JSON-by-default response shaping by registering directly on
 	// the mux. Auth is enforced via the Chain wrapper because the
 	// path wins over the catch-all /api/v1/.
-	registerJournalFileDownloadRoute(mux, s)
+	registerJournalFileDownloadRoute(mux, s, authMW.verifier)
 }
 
 // maxBytesMiddleware wraps the request body in http.MaxBytesReader so
@@ -443,9 +443,9 @@ func isAllowedJournalContentType(ct string) bool {
 	return false
 }
 
-func registerJournalFileDownloadRoute(mux *http.ServeMux, s *JournalFileService) {
+func registerJournalFileDownloadRoute(mux *http.ServeMux, s *JournalFileService, verifier auth.TokenVerifier) {
 	wrap := func(h http.Handler) http.Handler {
-		return Chain(h, auth.Auth, auth.RequireUser)
+		return Chain(h, auth.Auth(verifier), auth.RequireUser)
 	}
 	// GET /api/v1/files/{file_id} is the canonical Go-proxied
 	// download path for any file (CONTRACT.md §12 download flow).

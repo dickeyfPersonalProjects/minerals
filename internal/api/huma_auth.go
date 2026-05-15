@@ -14,14 +14,38 @@ import (
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
 )
 
-// humaAuth is the huma-side analogue of auth.Auth + auth.RequireUser
-// (per CONTRACT.md §13). v1 always populates StubUser; real-auth
-// replacement validates credentials and either populates a User or
-// aborts with 401. Apply via Operation.Middlewares for protected
-// operations — system endpoints (healthz, readyz, openapi, docs) are
+// makeHumaAuth builds the huma-side analogue of auth.Auth +
+// auth.RequireUser (per CONTRACT.md §13). With a real TokenVerifier
+// it extracts the bearer token, validates it against the Keycloak
+// JWKS, and either populates User from the verified claims or aborts
+// with a 401 envelope. With a nil verifier it falls back to
+// populating StubUser — the test-only path for suites that do not
+// exercise authentication.
+//
+// Apply via Operation.Middlewares for protected operations — system
+// endpoints (healthz, readyz, openapi, docs, runtime-config) are
 // public and MUST NOT carry this middleware.
-func humaAuth(ctx huma.Context, next func(huma.Context)) {
-	next(huma.WithContext(ctx, auth.WithUser(ctx.Context(), auth.StubUser)))
+func makeHumaAuth(v auth.TokenVerifier) func(huma.Context, func(huma.Context)) {
+	return func(ctx huma.Context, next func(huma.Context)) {
+		if v == nil {
+			next(huma.WithContext(ctx, auth.WithUser(ctx.Context(), auth.StubUser)))
+			return
+		}
+		tok, ok := auth.BearerToken(ctx.Header("Authorization"))
+		if !ok {
+			writeHumaError(ctx, http.StatusUnauthorized,
+				"unauthorized", "authentication required")
+			return
+		}
+		claims, err := v.Verify(ctx.Context(), tok)
+		if err != nil {
+			slog.WarnContext(ctx.Context(), "auth: token verification failed", "err", err)
+			writeHumaError(ctx, http.StatusUnauthorized,
+				"unauthorized", "invalid or expired token")
+			return
+		}
+		next(huma.WithContext(ctx, auth.WithUser(ctx.Context(), auth.UserFromClaims(claims))))
+	}
 }
 
 // ProfileSetupPath is the SPA route the profile gate hands the
@@ -48,6 +72,11 @@ type authMiddlewares struct {
 	humaAuth        func(huma.Context, func(huma.Context))
 	resolveUser     func(huma.Context, func(huma.Context))
 	requireComplete func(huma.Context, func(huma.Context))
+	// verifier is the same TokenVerifier humaAuth closes over,
+	// retained so the net/http download routes (photos, journal
+	// files) can build the auth.Auth chain with the identical
+	// verification behavior. nil selects the stub fallback.
+	verifier auth.TokenVerifier
 }
 
 // Protected returns the full chain — auth, resolve, gate — used by
@@ -71,17 +100,22 @@ func (m authMiddlewares) SetupAllowed() huma.Middlewares {
 	return huma.Middlewares{m.humaAuth, m.resolveUser}
 }
 
-// newAuthMiddlewares builds the per-request chain bound to repo.
-// When repo is nil the chain collapses to just humaAuth, matching
-// the v1 behavior for tests that don't wire a UserRepo.
-func newAuthMiddlewares(repo domain.UserRepo) authMiddlewares {
+// newAuthMiddlewares builds the per-request chain bound to repo and
+// verifier. When repo is nil the chain collapses to just the auth
+// step (no resolver, no profile gate) — the path for tests that
+// don't wire a UserRepo. verifier is threaded into the auth step:
+// nil selects the stub-identity fallback, a real verifier enables
+// bearer-token validation.
+func newAuthMiddlewares(repo domain.UserRepo, verifier auth.TokenVerifier) authMiddlewares {
+	humaAuth := makeHumaAuth(verifier)
 	if repo == nil {
-		return authMiddlewares{humaAuth: humaAuth}
+		return authMiddlewares{humaAuth: humaAuth, verifier: verifier}
 	}
 	return authMiddlewares{
 		humaAuth:        humaAuth,
 		resolveUser:     makeResolveUserMiddleware(repo),
 		requireComplete: requireCompleteProfile,
+		verifier:        verifier,
 	}
 }
 

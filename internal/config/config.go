@@ -36,11 +36,23 @@ type Config struct {
 	// `/api/v1/runtime-config` (mi-5ew). The `PUBLIC_` prefix marks
 	// them as safe to ship to the browser. When all three are set the
 	// SPA enables the OIDC login flow; when any is empty the SPA hides
-	// the login UI. Backend-side JWT verification (`OIDC_ISSUER_URL`,
-	// `OIDC_CLIENT_ID`) is wired separately by mi-aw3.
+	// the login UI. Backend-side JWT verification uses the non-public
+	// OIDCIssuerURL / OIDCClientID below.
 	PublicOIDCIssuerURL   string
 	PublicOIDCClientID    string
 	PublicOIDCRedirectURI string
+
+	// OIDCIssuerURL and OIDCClientID configure backend-side JWT
+	// verification (mi-aw3a). The backend is a pure resource server:
+	// it validates bearer tokens against the Keycloak realm's JWKS
+	// endpoint (discovered from the issuer URL) and checks that the
+	// token's audience contains OIDCClientID. No client secret — the
+	// backend never performs an auth-code exchange. Both default to
+	// the local dev Keycloak so `docker compose up` wires real auth
+	// without extra env; prod overlays supply the real values via the
+	// `minerals-config` ConfigMap (see CONFIG.md).
+	OIDCIssuerURL string
+	OIDCClientID  string
 }
 
 // Defaults for ENV=dev or unset. Mirrors the inventory in CONTRACT.md
@@ -60,6 +72,11 @@ const (
 	defaultMaxUploadBytes    = int64(104857600) // 100 MiB
 	defaultLogLevel          = "info"
 	defaultEnv               = "dev"
+	// defaultOIDCIssuerURL / defaultOIDCClientID point at the local
+	// dev Keycloak realm (docker-compose). Prod overlays override
+	// both via the minerals-config ConfigMap.
+	defaultOIDCIssuerURL = "http://localhost:8081/realms/minerals"
+	defaultOIDCClientID  = "minerals-frontend"
 )
 
 // Load reads the environment and produces a Config with format-level
@@ -93,6 +110,8 @@ func loadFrom(get func(string) string) (*Config, error) {
 	cfg.PublicOIDCIssuerURL = strings.TrimSpace(get("PUBLIC_OIDC_ISSUER_URL"))
 	cfg.PublicOIDCClientID = strings.TrimSpace(get("PUBLIC_OIDC_CLIENT_ID"))
 	cfg.PublicOIDCRedirectURI = strings.TrimSpace(get("PUBLIC_OIDC_REDIRECT_URI"))
+	cfg.OIDCIssuerURL = orDefault(get("OIDC_ISSUER_URL"), defaultOIDCIssuerURL)
+	cfg.OIDCClientID = orDefault(get("OIDC_CLIENT_ID"), defaultOIDCClientID)
 
 	// Required-in-prod variables: in dev, fall back to the inventory
 	// default; in prod, leave the field empty so ValidateFor* can

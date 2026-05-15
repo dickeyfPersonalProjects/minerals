@@ -96,6 +96,11 @@ type Deps struct {
 	// existing handlers see the StubUser, but no DB lookup or gate
 	// runs. Tests that don't exercise auth leave it nil.
 	Users domain.UserRepo
+	// Verifier validates Keycloak bearer tokens for the auth
+	// middleware (mi-aw3a). Wired with an *oidc.Verifier in
+	// production. nil selects the v1 stub-identity fallback — the
+	// path for tests that don't exercise authentication.
+	Verifier auth.TokenVerifier
 }
 
 // RuntimeOIDCConfig captures the SPA-facing OIDC settings the backend
@@ -158,7 +163,7 @@ func New(deps Deps) http.Handler {
 	})
 
 	humaAPI := humago.New(mux, cfg)
-	authMW := newAuthMiddlewares(deps.Users)
+	authMW := newAuthMiddlewares(deps.Users, deps.Verifier)
 	registerSystemOperations(humaAPI, deps)
 	registerCollectorOperations(humaAPI, authMW, deps.Collectors)
 	registerPhotoOperations(humaAPI, mux, authMW, deps.Photos)
@@ -177,7 +182,7 @@ func New(deps Deps) http.Handler {
 	apiNotFound := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such endpoint", nil)
 	})
-	mux.Handle("/api/v1/", Chain(apiNotFound, auth.Auth, auth.RequireUser))
+	mux.Handle("/api/v1/", Chain(apiNotFound, auth.Auth(deps.Verifier), auth.RequireUser))
 
 	// SPA fallback (public): everything else is the embedded SPA.
 	if deps.WebHandler != nil {

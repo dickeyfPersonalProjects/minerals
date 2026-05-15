@@ -17,7 +17,23 @@ import (
 
 	"github.com/dickeyfPersonalProjects/minerals/internal/auth"
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
+	"github.com/dickeyfPersonalProjects/minerals/internal/oidc"
 )
+
+// fakeVerifier maps known token strings to claims. Unknown tokens
+// return an error, standing in for an invalid/expired/forged JWT.
+// Real signature verification is covered by internal/oidc's tests.
+type fakeVerifier struct {
+	tokens map[string]*oidc.Claims
+}
+
+func (f fakeVerifier) Verify(_ context.Context, raw string) (*oidc.Claims, error) {
+	c, ok := f.tokens[raw]
+	if !ok {
+		return nil, errors.New("oidc: token not recognized")
+	}
+	return c, nil
+}
 
 // fakeUserRepo is an in-memory domain.UserRepo for middleware tests.
 // It is goroutine-safe so it can stand in for the race detector's
@@ -98,7 +114,7 @@ func seedActiveStubUser(repo *fakeUserRepo) {
 
 func TestAuthMiddlewares_NilRepoCollapsesToHumaAuth(t *testing.T) {
 	t.Parallel()
-	mw := newAuthMiddlewares(nil)
+	mw := newAuthMiddlewares(nil, nil)
 	if got := len(mw.Protected()); got != 1 {
 		t.Fatalf("Protected len = %d, want 1 when repo is nil", got)
 	}
@@ -110,12 +126,108 @@ func TestAuthMiddlewares_NilRepoCollapsesToHumaAuth(t *testing.T) {
 func TestAuthMiddlewares_WithRepoIncludesResolverAndGate(t *testing.T) {
 	t.Parallel()
 	repo := newFakeUserRepo()
-	mw := newAuthMiddlewares(repo)
+	mw := newAuthMiddlewares(repo, nil)
 	if got := len(mw.Protected()); got != 3 {
 		t.Fatalf("Protected len = %d, want auth+resolve+gate", got)
 	}
 	if got := len(mw.SetupAllowed()); got != 2 {
 		t.Fatalf("SetupAllowed len = %d, want auth+resolve only", got)
+	}
+}
+
+// realAuthSub is a UUID-shaped Keycloak subject used by the
+// verifier-backed tests below.
+const realAuthSub = "00000000-0000-0000-0000-0000000000fe"
+
+func newFakeVerifier() fakeVerifier {
+	return fakeVerifier{tokens: map[string]*oidc.Claims{
+		"valid": {Subject: realAuthSub, Email: "fury@minerals.local", Roles: []string{"user"}},
+	}}
+}
+
+func TestHumaAuth_ValidTokenResolvesSeededUser(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	repo.seed(domain.User{
+		ID:          uuid.MustParse(realAuthSub),
+		KeycloakSub: realAuthSub,
+		Email:       "fury@minerals.local",
+		Status:      domain.UserStatusActive,
+	})
+	h := New(Deps{Users: repo, Verifier: newFakeVerifier(), Collectors: newStubCollectorRepo()})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/collectors", nil)
+	req.Header.Set("Authorization", "Bearer valid")
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHumaAuth_ValidTokenFirstLoginGatesOnRealSub(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo() // not seeded — simulates first-login
+	h := New(Deps{Users: repo, Verifier: newFakeVerifier(), Collectors: newStubCollectorRepo()})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/collectors", nil)
+	req.Header.Set("Authorization", "Bearer valid")
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	// The resolver must have created the pending row keyed by the
+	// JWT subject — proof the real sub (not the stub) drove resolution.
+	stored, err := repo.GetBySub(context.Background(), realAuthSub)
+	if err != nil {
+		t.Fatalf("GetBySub(realAuthSub): %v", err)
+	}
+	if stored.Status != domain.UserStatusPending {
+		t.Errorf("status = %q, want pending", stored.Status)
+	}
+	if stored.Email != "fury@minerals.local" {
+		t.Errorf("email = %q, want fury@minerals.local", stored.Email)
+	}
+}
+
+func TestHumaAuth_RejectsMissingAndInvalidTokens(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		header string
+	}{
+		{"no header", ""},
+		{"unrecognized token", "Bearer forged"},
+		{"wrong scheme", "Basic Zm9vOmJhcg=="},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo := newFakeUserRepo()
+			h := New(Deps{Users: repo, Verifier: newFakeVerifier(), Collectors: newStubCollectorRepo()})
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/collectors", nil)
+			if tc.header != "" {
+				req.Header.Set("Authorization", tc.header)
+			}
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+			}
+			got := decodeError(t, rec.Body)
+			if got.Error.Code != "unauthorized" {
+				t.Errorf("code = %q, want unauthorized", got.Error.Code)
+			}
+			// A rejected token must never reach the resolver.
+			if atomic.LoadInt32(&repo.createCalls) != 0 {
+				t.Errorf("resolver ran on rejected auth (createCalls = %d)", repo.createCalls)
+			}
+		})
 	}
 }
 
