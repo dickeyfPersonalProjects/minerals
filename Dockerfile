@@ -15,7 +15,7 @@ COPY frontend/ .
 RUN npm run build
 
 # Stage 2: build the Go binary, embedding dist/
-FROM docker.io/library/golang:1.25-alpine AS backend
+FROM docker.io/library/golang:1.26-alpine AS backend
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
