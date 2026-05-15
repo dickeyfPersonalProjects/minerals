@@ -5,6 +5,11 @@ meteorites. v1 is a single-overseer, locally-hosted SPA over a Go API
 backed by Postgres + MinIO; see `docs/design/01-scope.md` for the v1
 cut line and `CONTRACT.md` for the operational rulebook.
 
+> **License:** [PolyForm Noncommercial 1.0.0](LICENSE).
+> Free for personal, educational, research, charitable, and government
+> use. Commercial use requires a separate license — please open an
+> issue or contact the maintainer.
+
 ## Contents
 
 - [Quickstart](#quickstart)
