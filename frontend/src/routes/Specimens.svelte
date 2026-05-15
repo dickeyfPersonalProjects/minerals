@@ -40,6 +40,9 @@
   }
 
   function serializeFilters(value: SpecimenFiltersValue): string {
+    // Local-only string builder — not reactive state, so the plain
+    // URLSearchParams is fine here.
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
     const params = new URLSearchParams();
     // Iterate in a stable order so the resulting URL is
     // deterministic — keeps tests and bookmarks predictable.
