@@ -111,10 +111,11 @@ func runServe(_ []string) error {
 		return fmt.Errorf("serve: read embedded migrations: %w", err)
 	}
 
-	// Backend-side JWT verification (mi-aw3a). The verifier performs
-	// OIDC discovery against the issuer at construction time, so a
-	// failure here (Keycloak unreachable, bad issuer URL) fails
-	// startup fast rather than 401-ing every request later.
+	// Backend-side JWT verification (mi-aw3a). Construction only
+	// validates config — OIDC discovery / JWKS fetching is lazy
+	// (first request), so startup does not depend on Keycloak being
+	// reachable. NewVerifier errors here only on a malformed config
+	// (empty issuer or client id).
 	verifier, err := oidc.NewVerifier(rootCtx, oidc.Config{
 		Issuer:   cfg.OIDCIssuerURL,
 		ClientID: cfg.OIDCClientID,
@@ -122,7 +123,7 @@ func runServe(_ []string) error {
 	if err != nil {
 		return fmt.Errorf("serve: init oidc verifier: %w", err)
 	}
-	slog.Info("oidc verifier ready", "issuer", cfg.OIDCIssuerURL, "client_id", cfg.OIDCClientID)
+	slog.Info("oidc verifier configured", "issuer", cfg.OIDCIssuerURL, "client_id", cfg.OIDCClientID)
 
 	photoDeps := &api.PhotoServiceDeps{
 		Photos:         db.NewPhotoPostgres(pool),
