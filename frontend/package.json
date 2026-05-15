@@ -39,8 +39,7 @@
     "typescript-eslint": "^8.18.2",
     "vite": "^6.0.6",
     "vitest": "^3.2.4",
-    "vitest-axe": "^0.1.0",
-    "zod-fast-check": "^0.10.1"
+    "vitest-axe": "^0.1.0"
   },
   "dependencies": {
     "@felte/validator-zod": "^1.0.18",
@@ -49,6 +48,6 @@
     "openapi-fetch": "^0.17.0",
     "qrcode": "^1.5.4",
     "svelte-spa-router": "^5.1.0",
-    "zod": "^3.25.76"
+    "zod": "^4.4.3"
   }
 }
