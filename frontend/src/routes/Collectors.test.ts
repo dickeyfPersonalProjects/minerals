@@ -12,6 +12,7 @@ vi.mock('../lib/api', () => ({
 }));
 
 import Collectors from './Collectors.svelte';
+import { __resetAuthStore, setAccessToken } from '../lib/oidc/auth';
 
 type CollectorSeed = {
   id: string;
@@ -36,11 +37,15 @@ beforeEach(() => {
   mockDelete.mockReset();
   // window.confirm always says yes by default; tests can override.
   vi.spyOn(window, 'confirm').mockReturnValue(true);
+  // Default to authenticated for the existing CTA tests. The
+  // unauthenticated block at the bottom resets the store.
+  setAccessToken('test-token', 600);
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  __resetAuthStore();
 });
 
 describe('Collectors route', () => {
@@ -311,5 +316,36 @@ describe('Collectors route', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe('when unauthenticated', () => {
+    it('hides write CTAs while still rendering the list (mi-eec)', async () => {
+      __resetAuthStore();
+      mockGet.mockResolvedValue({
+        data: {
+          items: [collector({ id: '11111111-1111-1111-1111-111111111111', name: 'Marie Curie' })],
+          next_cursor: null,
+        },
+        error: undefined,
+        response: new Response(),
+      });
+
+      render(Collectors);
+
+      await waitFor(() => expect(screen.getByTestId('collector-list')).toBeInTheDocument());
+      expect(screen.getByText('Marie Curie')).toBeInTheDocument();
+      // No Add / Edit / Delete affordances for anonymous users.
+      expect(screen.queryByTestId('toggle-create')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('create-form-wrapper')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('delete-button')).not.toBeInTheDocument();
+      // The "Edit" anchor uses the same row layout — assert nothing
+      // with that text is rendered for the row.
+      const row = screen.getByTestId('collector-row');
+      expect(row.querySelector('a[href*="/collectors/"]')).toBeTruthy();
+      // The list still shows the collector name link, but the
+      // edit-styled action anchor isn't present in the row's action
+      // column (there are no other anchor "Edit" affordances).
+      expect(row.textContent).not.toMatch(/^Edit$/m);
+    });
   });
 });

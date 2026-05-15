@@ -4,6 +4,7 @@
   import type { components } from '../lib/api/schema';
   import CollectorForm from '../lib/CollectorForm.svelte';
   import type { CollectorFormSubmitResult } from '../lib/CollectorForm.svelte';
+  import { isAuthenticated } from '../lib/oidc/auth';
   import { formatLocal } from '../lib/time';
   import { toastSuccess } from '../lib/toasts';
 
@@ -144,17 +145,19 @@
 <section>
   <header class="mb-4 flex flex-wrap items-end justify-between gap-3">
     <h1 class="text-2xl font-semibold tracking-tight text-[var(--color-text)]">Collectors</h1>
-    <button
-      type="button"
-      data-testid="toggle-create"
-      onclick={() => (showCreateForm = !showCreateForm)}
-      class="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-[var(--color-accent-fg)] hover:opacity-90"
-    >
-      {showCreateForm ? 'Cancel' : 'Add collector'}
-    </button>
+    {#if $isAuthenticated}
+      <button
+        type="button"
+        data-testid="toggle-create"
+        onclick={() => (showCreateForm = !showCreateForm)}
+        class="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-[var(--color-accent-fg)] hover:opacity-90"
+      >
+        {showCreateForm ? 'Cancel' : 'Add collector'}
+      </button>
+    {/if}
   </header>
 
-  {#if showCreateForm}
+  {#if $isAuthenticated && showCreateForm}
     <div
       data-testid="create-form-wrapper"
       class="mb-6 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
@@ -242,23 +245,25 @@
                 Added {formatLocal(c.created_at, { dateStyle: 'medium' })}
               </p>
             </div>
-            <div class="flex shrink-0 gap-2">
-              <a
-                href={`/collectors/${c.id}`}
-                use:link
-                class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
-              >
-                Edit
-              </a>
-              <button
-                type="button"
-                onclick={() => deleteCollector(c)}
-                data-testid="delete-button"
-                class="rounded-md border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs text-red-700 hover:bg-red-500/20 dark:text-red-300"
-              >
-                Delete
-              </button>
-            </div>
+            {#if $isAuthenticated}
+              <div class="flex shrink-0 gap-2">
+                <a
+                  href={`/collectors/${c.id}`}
+                  use:link
+                  class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+                >
+                  Edit
+                </a>
+                <button
+                  type="button"
+                  onclick={() => deleteCollector(c)}
+                  data-testid="delete-button"
+                  class="rounded-md border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs text-red-700 hover:bg-red-500/20 dark:text-red-300"
+                >
+                  Delete
+                </button>
+              </div>
+            {/if}
           </div>
           {#if deleteError && deleteError.collectorId === c.id}
             <div

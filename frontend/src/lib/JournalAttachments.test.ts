@@ -12,6 +12,7 @@ vi.mock('./api', () => ({
 }));
 
 import JournalAttachments, { MAX_ATTACHMENT_BYTES } from './JournalAttachments.svelte';
+import { __resetAuthStore, setAccessToken } from './oidc/auth';
 
 const ENTRY_ID = '11111111-1111-1111-1111-111111111111';
 
@@ -66,10 +67,12 @@ beforeEach(() => {
   mockGet.mockReset();
   mockPost.mockReset();
   mockDelete.mockReset();
+  setAccessToken('test-token', 600);
 });
 
 afterEach(() => {
   cleanup();
+  __resetAuthStore();
 });
 
 describe('JournalAttachments', () => {

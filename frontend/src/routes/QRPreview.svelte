@@ -41,6 +41,7 @@
     type QRSheetView,
     type QRSheetSpecimenView,
   } from '../lib/qrSheet';
+  import { isAuthenticated } from '../lib/oidc/auth';
   import { toastError, toastSuccess } from '../lib/toasts';
 
   type Specimen = components['schemas']['SpecimenView'];
@@ -374,23 +375,25 @@
         >
           Print
         </button>
-        <button
-          type="button"
-          onclick={() => onAddCurrentSpecimenClick(sp.id)}
-          disabled={busy}
-          data-testid="qr-add-to-sheet"
-          class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-50"
-        >
-          {hasSheet ? 'Add to QR code sheet' : 'Start a sheet with this specimen'}
-        </button>
-        <a
-          href="/specimens/qr"
-          use:link
-          data-testid="qr-view-sheet"
-          class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
-        >
-          View sheet →
-        </a>
+        {#if $isAuthenticated}
+          <button
+            type="button"
+            onclick={() => onAddCurrentSpecimenClick(sp.id)}
+            disabled={busy}
+            data-testid="qr-add-to-sheet"
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-50"
+          >
+            {hasSheet ? 'Add to QR code sheet' : 'Start a sheet with this specimen'}
+          </button>
+          <a
+            href="/specimens/qr"
+            use:link
+            data-testid="qr-view-sheet"
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+          >
+            View sheet →
+          </a>
+        {/if}
         <a
           href={`/specimens/${sp.id}`}
           use:link
@@ -436,23 +439,25 @@
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onclick={openChangeTemplate}
-          disabled={busy}
-          data-testid="qr-sheet-change-template"
-          class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-50"
-        >
-          Change template
-        </button>
-        <button
-          type="button"
-          onclick={openClearConfirm}
-          data-testid="qr-sheet-clear"
-          class="rounded-md border border-red-500/40 bg-[var(--color-surface)] px-3 py-1.5 text-sm text-red-600 hover:bg-red-500/10 dark:text-red-400"
-        >
-          Clear sheet
-        </button>
+        {#if $isAuthenticated}
+          <button
+            type="button"
+            onclick={openChangeTemplate}
+            disabled={busy}
+            data-testid="qr-sheet-change-template"
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-50"
+          >
+            Change template
+          </button>
+          <button
+            type="button"
+            onclick={openClearConfirm}
+            data-testid="qr-sheet-clear"
+            class="rounded-md border border-red-500/40 bg-[var(--color-surface)] px-3 py-1.5 text-sm text-red-600 hover:bg-red-500/10 dark:text-red-400"
+          >
+            Clear sheet
+          </button>
+        {/if}
         <button
           type="button"
           onclick={doPrint}
@@ -499,16 +504,18 @@
                 {sp.name}
               </a>
             </span>
-            <button
-              type="button"
-              onclick={() => onRemoveFromSheet(sp.specimen_id)}
-              disabled={busy}
-              aria-label={`Remove ${sp.name} from sheet`}
-              data-testid="qr-sheet-specimen-remove"
-              class="rounded-full px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              ✕
-            </button>
+            {#if $isAuthenticated}
+              <button
+                type="button"
+                onclick={() => onRemoveFromSheet(sp.specimen_id)}
+                disabled={busy}
+                aria-label={`Remove ${sp.name} from sheet`}
+                data-testid="qr-sheet-specimen-remove"
+                class="rounded-full px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                ✕
+              </button>
+            {/if}
           </li>
         {/each}
       </ol>

@@ -34,6 +34,7 @@ Object.defineProperty(window, 'print', { value: printSpy, writable: true });
 
 import QRPreview from './QRPreview.svelte';
 import { __resetQrSheetStore } from '../lib/qrSheet';
+import { __resetAuthStore, setAccessToken } from '../lib/oidc/auth';
 
 const SPECIMEN_ID = '11111111-1111-1111-1111-111111111111';
 const SPECIMEN_ID_2 = '22222222-2222-2222-2222-222222222222';
@@ -97,12 +98,14 @@ beforeEach(() => {
     }
     return { data: undefined, error: undefined, response: new Response() };
   });
+  setAccessToken('test-token', 600);
 });
 
 afterEach(() => {
   cleanup();
   document.body.removeAttribute('data-qr-print');
   setHash('');
+  __resetAuthStore();
 });
 
 describe('QRPreview route — single mode', () => {

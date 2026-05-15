@@ -6,6 +6,7 @@
   import ConfirmModal from '../lib/ConfirmModal.svelte';
   import SpecimenForm from '../lib/SpecimenForm.svelte';
   import type { SpecimenFormSubmitResult } from '../lib/SpecimenForm.svelte';
+  import { isAuthenticated } from '../lib/oidc/auth';
   import {
     formToPatchBody,
     specimenToFormValues,
@@ -204,26 +205,36 @@
       <p class="mt-1 text-xs text-[var(--color-text-muted)]">{loadState.message}</p>
     </div>
   {:else if specimen}
-    <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <SpecimenForm
-        mode="edit"
-        initial={specimenToFormValues(specimen)}
-        submitLabel="Save"
-        onSubmit={saveSpecimen}
-        onCancel={cancel}
-        onDelete={requestDelete}
-      />
-    </div>
+    {#if $isAuthenticated}
+      <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <SpecimenForm
+          mode="edit"
+          initial={specimenToFormValues(specimen)}
+          submitLabel="Save"
+          onSubmit={saveSpecimen}
+          onCancel={cancel}
+          onDelete={requestDelete}
+        />
+      </div>
 
-    {#if confirmingDelete}
-      <ConfirmModal
-        title="Delete specimen?"
-        message={`Delete ${specimen.name}? This cannot be undone.`}
-        confirmLabel="Delete"
-        busy={deleting}
-        onConfirm={confirmDelete}
-        onCancel={cancelDelete}
-      />
+      {#if confirmingDelete}
+        <ConfirmModal
+          title="Delete specimen?"
+          message={`Delete ${specimen.name}? This cannot be undone.`}
+          confirmLabel="Delete"
+          busy={deleting}
+          onConfirm={confirmDelete}
+          onCancel={cancelDelete}
+        />
+      {/if}
+    {:else}
+      <div
+        class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center"
+        data-testid="auth-required"
+        role="alert"
+      >
+        <p class="text-sm text-[var(--color-text)]">Log in to edit this specimen.</p>
+      </div>
     {/if}
   {/if}
 </section>

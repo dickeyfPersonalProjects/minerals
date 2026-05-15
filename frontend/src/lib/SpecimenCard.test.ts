@@ -21,6 +21,7 @@ vi.mock('svelte-spa-router', async () => {
 });
 
 import SpecimenCard from './SpecimenCard.svelte';
+import { __resetAuthStore, setAccessToken } from './oidc/auth';
 import { __resetQrSheetStore, setNoSheet, setSheet, type QRSheetView } from './qrSheet';
 
 function specimen(
@@ -65,11 +66,15 @@ beforeEach(() => {
   mockDelete.mockReset();
   mockPatch.mockReset();
   __resetQrSheetStore();
+  // Most tests exercise the authed path; the anonymous block at
+  // the bottom of this file explicitly resets the store.
+  setAccessToken('test-token', 600);
 });
 
 afterEach(() => {
   cleanup();
   __resetQrSheetStore();
+  __resetAuthStore();
 });
 
 function sheetView(over: Partial<QRSheetView> = {}): QRSheetView {
@@ -327,5 +332,38 @@ describe('SpecimenCard', () => {
     cleanup();
 
     expect(capturedSignal!.aborted).toBe(true);
+  });
+
+  describe('when unauthenticated', () => {
+    it('hides the QR-sheet add/remove buttons (mi-eec)', async () => {
+      __resetAuthStore();
+      setNoSheet();
+      mockGet.mockResolvedValue(listOk([]));
+      render(SpecimenCard, { specimen: specimen() });
+      expect(screen.queryByTestId('qr-sheet-add')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('qr-sheet-remove')).not.toBeInTheDocument();
+    });
+
+    it('hides the on-sheet remove control when already on a sheet', async () => {
+      __resetAuthStore();
+      const s = specimen();
+      setSheet(
+        sheetView({
+          specimens: [
+            {
+              specimen_id: s.id,
+              name: s.name,
+              position: 1,
+              added_at: '2026-05-10T00:00:00Z',
+              thumbnail_url: null,
+            },
+          ],
+        }),
+      );
+      mockGet.mockResolvedValue(listOk([]));
+      render(SpecimenCard, { specimen: s });
+      expect(screen.queryByTestId('qr-sheet-badge')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('qr-sheet-remove')).not.toBeInTheDocument();
+    });
   });
 });

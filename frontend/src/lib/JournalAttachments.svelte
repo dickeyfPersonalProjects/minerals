@@ -75,6 +75,7 @@
   import { client } from './api';
   import { SUPPRESS_TOAST_HEADERS } from './api/wrapper';
   import type { components } from './api/schema';
+  import { isAuthenticated } from './oidc/auth';
   import { toastError, toastSuccess } from './toasts';
 
   type Attachment = components['schemas']['JournalFileView'];
@@ -90,6 +91,9 @@
   // attachment list state thereafter.
   const seed: Attachment[] | undefined = untrack(() => initial);
   let attachments: Attachment[] = $state(seed ?? []);
+  // Stable snapshot of the auth store for non-reactive contexts
+  // (drop handlers). Reactive UI gating still uses $isAuthenticated.
+  const isAuthed = $derived($isAuthenticated);
   let uploads: AttachmentUploadItem[] = $state([]);
   let dragDepth = $state(0);
   let isDragging = $derived(dragDepth > 0);
@@ -196,6 +200,11 @@
   }
 
   function ingest(files: FileList | File[] | null): void {
+    // Drop handlers stay wired even for anonymous users (the
+    // listeners are attached at compile time), so we no-op the
+    // ingest path — anonymous users have no upload affordance and
+    // any drop should be silently ignored rather than 401.
+    if (!isAuthed) return;
     if (!files) return;
     const list = Array.from(files);
     if (list.length === 0) return;
@@ -348,41 +357,45 @@
           <span class="font-mono text-[10px] text-[var(--color-text-muted)]"
             >{formatBytes(att.byte_size)}</span
           >
-          <button
-            type="button"
-            onclick={() => onDelete(att)}
-            disabled={deletingId === att.file_id}
-            data-testid="journal-attachment-delete"
-            class="rounded-md px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-red-500/10 hover:text-red-600 disabled:opacity-50"
-            aria-label={`Delete ${displayName(att)}`}
-          >
-            {deletingId === att.file_id ? 'Deleting…' : 'Delete'}
-          </button>
+          {#if $isAuthenticated}
+            <button
+              type="button"
+              onclick={() => onDelete(att)}
+              disabled={deletingId === att.file_id}
+              data-testid="journal-attachment-delete"
+              class="rounded-md px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-red-500/10 hover:text-red-600 disabled:opacity-50"
+              aria-label={`Delete ${displayName(att)}`}
+            >
+              {deletingId === att.file_id ? 'Deleting…' : 'Delete'}
+            </button>
+          {/if}
         </li>
       {/each}
     </ul>
   {/if}
 
-  <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-    <p class="text-[11px] text-[var(--color-text-muted)]">Drop files here, or</p>
-    <input
-      bind:this={fileInput}
-      type="file"
-      accept="image/jpeg,image/png,image/webp,application/pdf,text/plain,text/csv,text/markdown,.md,application/json,.json,.txt,.csv"
-      multiple
-      class="sr-only"
-      data-testid="journal-attachment-file-input"
-      onchange={onPick}
-    />
-    <button
-      type="button"
-      onclick={() => fileInput?.click()}
-      class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-[11px] text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
-      data-testid="journal-attachment-browse"
-    >
-      Add files
-    </button>
-  </div>
+  {#if $isAuthenticated}
+    <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+      <p class="text-[11px] text-[var(--color-text-muted)]">Drop files here, or</p>
+      <input
+        bind:this={fileInput}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,application/pdf,text/plain,text/csv,text/markdown,.md,application/json,.json,.txt,.csv"
+        multiple
+        class="sr-only"
+        data-testid="journal-attachment-file-input"
+        onchange={onPick}
+      />
+      <button
+        type="button"
+        onclick={() => fileInput?.click()}
+        class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-[11px] text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+        data-testid="journal-attachment-browse"
+      >
+        Add files
+      </button>
+    </div>
+  {/if}
 
   {#if isDragging}
     <div

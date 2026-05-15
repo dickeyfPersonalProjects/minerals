@@ -11,6 +11,7 @@
     specimenOnSheet,
   } from './qrSheet';
   import TemplateSelector from './TemplateSelector.svelte';
+  import { isAuthenticated } from './oidc/auth';
   import type { QRTemplateID } from './qrTemplates';
 
   type Specimen = components['schemas']['SpecimenView'];
@@ -229,38 +230,40 @@
     </div>
   </a>
 
-  <div class="flex items-center justify-end gap-1 px-3 pb-3 pt-1">
-    {#if onSheet}
-      <span
-        data-testid="qr-sheet-badge"
-        class="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
-      >
-        On QR sheet
-      </span>
-      <button
-        type="button"
-        onclick={onRemoveClick}
-        disabled={busy}
-        aria-label="Remove from QR sheet"
-        data-testid="qr-sheet-remove"
-        class="rounded-full px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        ✕
-      </button>
-    {:else}
-      <button
-        type="button"
-        onclick={onAddClick}
-        disabled={busy}
-        data-testid="qr-sheet-add"
-        class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        + Add to QR code sheet
-      </button>
-    {/if}
-  </div>
+  {#if $isAuthenticated}
+    <div class="flex items-center justify-end gap-1 px-3 pb-3 pt-1">
+      {#if onSheet}
+        <span
+          data-testid="qr-sheet-badge"
+          class="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
+        >
+          On QR sheet
+        </span>
+        <button
+          type="button"
+          onclick={onRemoveClick}
+          disabled={busy}
+          aria-label="Remove from QR sheet"
+          data-testid="qr-sheet-remove"
+          class="rounded-full px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          ✕
+        </button>
+      {:else}
+        <button
+          type="button"
+          onclick={onAddClick}
+          disabled={busy}
+          data-testid="qr-sheet-add"
+          class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          + Add to QR code sheet
+        </button>
+      {/if}
+    </div>
+  {/if}
 </div>
 
-{#if showTemplatePicker}
+{#if $isAuthenticated && showTemplatePicker}
   <TemplateSelector onConfirm={onTemplateConfirm} onCancel={onTemplateCancel} {busy} />
 {/if}

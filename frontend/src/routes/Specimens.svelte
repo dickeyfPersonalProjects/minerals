@@ -7,6 +7,7 @@
     activeFilterCount,
     type SpecimenFiltersValue,
   } from '../lib/SpecimenFilters.svelte';
+  import { isAuthenticated } from '../lib/oidc/auth';
 
   type Specimen = components['schemas']['SpecimenView'];
 
@@ -146,14 +147,16 @@
 <section>
   <header class="mb-4 flex flex-wrap items-end justify-between gap-3">
     <h1 class="text-2xl font-semibold tracking-tight text-[var(--color-text)]">Specimens</h1>
-    <a
-      href="/specimens/new"
-      use:link
-      data-testid="new-specimen"
-      class="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-[var(--color-accent-fg)] hover:opacity-90"
-    >
-      New specimen
-    </a>
+    {#if $isAuthenticated}
+      <a
+        href="/specimens/new"
+        use:link
+        data-testid="new-specimen"
+        class="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-[var(--color-accent-fg)] hover:opacity-90"
+      >
+        New specimen
+      </a>
+    {/if}
   </header>
 
   <SpecimenFilters value={filters} onChange={applyFilters} />

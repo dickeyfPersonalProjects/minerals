@@ -24,6 +24,7 @@ vi.mock('svelte-spa-router', async () => {
 });
 
 import Specimens from './Specimens.svelte';
+import { __resetAuthStore, setAccessToken } from '../lib/oidc/auth';
 
 type SpecimenSeed = {
   id: string;
@@ -69,11 +70,14 @@ beforeEach(() => {
     }
     return { data: { items: [], next_cursor: null }, error: undefined };
   });
+  // Default-authed; the anonymous block at the bottom resets.
+  setAccessToken('test-token', 600);
 });
 
 afterEach(() => {
   cleanup();
   window.location.hash = '';
+  __resetAuthStore();
 });
 
 describe('Specimens route', () => {
@@ -268,5 +272,39 @@ describe('Specimens route', () => {
 
     await fireEvent.click(screen.getByTestId('empty-clear-filters'));
     expect(mockReplace).toHaveBeenCalledWith('/specimens');
+  });
+
+  describe('when unauthenticated', () => {
+    it('renders the grid without write buttons (mi-eec)', async () => {
+      __resetAuthStore();
+      mockGet.mockImplementation(async (path: string) => {
+        if (path === '/api/v1/specimens') {
+          return {
+            data: {
+              items: [
+                specimen({
+                  id: '11111111-1111-1111-1111-111111111111',
+                  name: 'Smoky quartz',
+                  type: 'mineral',
+                  visibility: 'public',
+                }),
+              ],
+              next_cursor: null,
+            },
+            error: undefined,
+            response: new Response(),
+          };
+        }
+        return { data: { items: [], next_cursor: null }, error: undefined };
+      });
+
+      render(Specimens);
+
+      await waitFor(() => expect(screen.getByTestId('specimen-grid')).toBeInTheDocument());
+      expect(screen.getByText('Smoky quartz')).toBeInTheDocument();
+      expect(screen.queryByTestId('new-specimen')).not.toBeInTheDocument();
+      // Cards must not surface the QR-sheet add CTA either.
+      expect(screen.queryByTestId('qr-sheet-add')).not.toBeInTheDocument();
+    });
   });
 });

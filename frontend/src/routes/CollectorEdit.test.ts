@@ -22,6 +22,7 @@ vi.mock('svelte-spa-router', async () => {
 });
 
 import CollectorEdit from './CollectorEdit.svelte';
+import { __resetAuthStore, setAccessToken } from '../lib/oidc/auth';
 
 const COLLECTOR_ID = '11111111-1111-1111-1111-111111111111';
 
@@ -40,11 +41,13 @@ beforeEach(() => {
   mockGet.mockReset();
   mockPatch.mockReset();
   mockPush.mockReset();
+  setAccessToken('test-token', 600);
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  __resetAuthStore();
 });
 
 describe('CollectorEdit route', () => {
@@ -140,5 +143,17 @@ describe('CollectorEdit route', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
     expect(mockPush).toHaveBeenCalledWith('/collectors');
+  });
+
+  it('hides the edit form when unauthenticated (mi-eec)', async () => {
+    __resetAuthStore();
+    mockGet.mockResolvedValue({
+      data: collector(),
+      error: undefined,
+      response: new Response(),
+    });
+    render(CollectorEdit, { params: { id: COLLECTOR_ID } });
+    await waitFor(() => expect(screen.getByTestId('auth-required')).toBeInTheDocument());
+    expect(screen.queryByLabelText(/^name/i)).not.toBeInTheDocument();
   });
 });

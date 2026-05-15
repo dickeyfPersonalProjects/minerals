@@ -8,7 +8,7 @@
 // verifier, the CSRF `state` value, and the post-login return path,
 // because those need to survive the Keycloak redirect round-trip.
 
-import { writable, get, type Readable, type Writable } from 'svelte/store';
+import { derived, writable, get, type Readable, type Writable } from 'svelte/store';
 import { deriveCodeChallenge, generateCodeVerifier, generateState } from './pkce';
 import { loadOidcConfig, type OidcConfig } from './config';
 
@@ -25,6 +25,16 @@ const initial: AuthState = { accessToken: null, expiresAt: null };
 const store: Writable<AuthState> = writable(initial);
 
 export const authStore: Readable<AuthState> = { subscribe: store.subscribe };
+
+// True iff a non-expired access token is held. Components gate
+// write CTAs on this (mi-eec) — anonymous users see a read-only UI
+// because writes require auth (CONTRACT §13). Expiry is checked
+// against the same wall clock as getAccessToken so the flag flips
+// to false as soon as the token lapses.
+export const isAuthenticated: Readable<boolean> = derived(
+  store,
+  ($s) => $s.accessToken !== null && ($s.expiresAt === null || Date.now() < $s.expiresAt),
+);
 
 /**
  * Return the current access token, clearing it lazily if expired.
