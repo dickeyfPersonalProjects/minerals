@@ -67,10 +67,6 @@ Navigate to the repository's Security tab and click "Report a
 vulnerability." This creates a private discussion only visible to the
 maintainer.
 
-Alternative: email [your-email@example.com] with the subject line
-beginning `[security]`. PGP encryption is welcome but not required;
-the key is published at [link if you have one, or omit this line].
-
 Please include in your report:
 
 - A description of the vulnerability
