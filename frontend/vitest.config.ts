@@ -19,16 +19,18 @@ export default defineConfig({
         'src/main.ts',
         'src/routes.ts',
       ],
-      // Soft floor baselined 2026-05-11 from `npm run test:cover`:
-      // lines 89.1, statements 89.1, functions 83.87, branches 77.4.
+      // Soft floor re-baselined 2026-05-15 from `npm run test:cover` under
+      // vitest 4 (v8 provider): lines 90.56, statements 88.12, functions 89.33,
+      // branches 71.22. Branch metric shifted vs. vitest 3 baseline (77.4 →
+      // 71.22) due to v8 provider's stricter branch instrumentation.
       // Floor = measured rounded down to nearest 5; refactors shouldn't
       // trip CI, but new untested branches will. Bump only when a
       // deliberate coverage push lifts the baseline (Q-2 R2).
       thresholds: {
         lines: 85,
         statements: 85,
-        functions: 80,
-        branches: 75,
+        functions: 85,
+        branches: 70,
         autoUpdate: false,
       },
     },
