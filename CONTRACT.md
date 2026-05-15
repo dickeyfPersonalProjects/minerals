@@ -3020,6 +3020,55 @@ CREATE TABLE shares (
 Shares are not cascade-deleted when the resource is deleted — a
 background job cleans orphaned shares after resource deletion.
 
+### HTTP semantics for visibility-scoped resources
+
+The per-row authorization rules above translate to the HTTP layer
+as follows. New endpoints touching a visibility-scoped resource
+MUST follow these conventions.
+
+**List endpoints** — `GET /<resource>` (e.g. `/specimens`,
+`/collectors`):
+
+- Always return **200** with a JSON list. Never return 401 or 403
+  for missing/insufficient auth.
+- The list is filtered to what the caller may see. Anonymous
+  callers see public items only; authenticated users additionally
+  see items they own and items shared with them; `devops_admin`
+  sees all. Filtering is enforced in SQL (the repo `List`
+  method's WHERE clause), not in the handler.
+- An empty result is a valid response — it means "nothing matches
+  your visibility, here, or there is nothing here."
+
+**Detail endpoints** — `GET /<resource>/<id>`:
+
+- Return **404** when the caller cannot see the resource. Do
+  **not** return 403 or 401, and do not differentiate between
+  "does not exist" and "exists but you can't see it." This avoids
+  leaking existence to anonymous or unauthorized callers.
+
+**Write endpoints** — `POST | PATCH | DELETE /<resource>[/<id>]`:
+
+- **401** when the request has no valid authentication (anonymous
+  or invalid token).
+- **403** when the caller is authenticated but lacks the required
+  role/ownership/share to perform the write.
+- **404** is also acceptable for `PATCH/DELETE` on a resource the
+  caller can't see, on the same don't-leak-existence principle as
+  detail endpoints.
+
+**Sub-resource list endpoints** — `GET /<resource>/<parent_id>/<sub>`
+(e.g. `/specimens/<id>/images`):
+
+- Resolve and visibility-check the **parent** first. If the caller
+  cannot see the parent, return **404** before evaluating the
+  sub-list at all. The sub-list is not "filter to nothing" in
+  this case — the URL is meaningless to the caller.
+- Once the parent is visible, the sub-list is returned in full.
+  Sub-resources inherit their parent's visibility; they do not
+  have their own per-row visibility column. If we ever add
+  per-image (or other per-sub-resource) visibility, this rule
+  needs revisiting.
+
 ## What this section is NOT
 
 This is the rule for **how user identity flows through the
