@@ -53,6 +53,18 @@ type Config struct {
 	// `minerals-config` ConfigMap (see CONFIG.md).
 	OIDCIssuerURL string
 	OIDCClientID  string
+
+	// OIDCJWKSURL, when non-empty, overrides OIDC discovery for
+	// locating the realm's JWKS endpoint (mi-dau). The verifier still
+	// checks the JWT's `iss` claim against OIDCIssuerURL — JWKSURL
+	// only changes where keys are fetched from. Set this when the
+	// canonical issuer URL (which must match the browser-issued
+	// token's `iss`) is not reachable from inside the backend
+	// container, as in the docker-compose dev stack where the issuer
+	// is `http://localhost:8081/realms/minerals` (host-side) but the
+	// in-container backend reaches Keycloak at `http://keycloak:8080`.
+	// Empty in prod — OIDC discovery handles it.
+	OIDCJWKSURL string
 }
 
 // Defaults for ENV=dev or unset. Mirrors the inventory in CONTRACT.md
@@ -112,6 +124,7 @@ func loadFrom(get func(string) string) (*Config, error) {
 	cfg.PublicOIDCRedirectURI = strings.TrimSpace(get("PUBLIC_OIDC_REDIRECT_URI"))
 	cfg.OIDCIssuerURL = orDefault(get("OIDC_ISSUER_URL"), defaultOIDCIssuerURL)
 	cfg.OIDCClientID = orDefault(get("OIDC_CLIENT_ID"), defaultOIDCClientID)
+	cfg.OIDCJWKSURL = strings.TrimSpace(get("OIDC_JWKS_URL"))
 
 	// Required-in-prod variables: in dev, fall back to the inventory
 	// default; in prod, leave the field empty so ValidateFor* can
