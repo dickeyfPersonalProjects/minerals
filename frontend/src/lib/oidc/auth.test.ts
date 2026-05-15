@@ -4,7 +4,9 @@ import {
   __resetAuthStore,
   authStore,
   beginLogin,
+  beginLogout,
   clearAuth,
+  decodeTokenClaims,
   getAccessToken,
   handleAuthCallback,
   setAccessToken,
@@ -109,6 +111,80 @@ describe('beginLogin', () => {
         locationAssign: vi.fn(),
       }),
     ).rejects.toThrow(/not configured/);
+  });
+});
+
+function makeJwt(payload: Record<string, unknown>): string {
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  return `${b64({ alg: 'RS256', typ: 'JWT' })}.${b64(payload)}.signature`;
+}
+
+describe('decodeTokenClaims', () => {
+  it('returns null for a missing token', () => {
+    expect(decodeTokenClaims(null)).toBeNull();
+  });
+
+  it('returns null for a structurally invalid token', () => {
+    expect(decodeTokenClaims('not-a-jwt')).toBeNull();
+    expect(decodeTokenClaims('only.two')).toBeNull();
+  });
+
+  it('returns null when the payload is not valid base64url JSON', () => {
+    expect(decodeTokenClaims('aaa.@@@.bbb')).toBeNull();
+  });
+
+  it('extracts the display claims from a well-formed token', () => {
+    const token = makeJwt({
+      name: 'Ada Lovelace',
+      preferred_username: 'ada',
+      email: 'ada@example.com',
+      sub: 'abc-123',
+    });
+    expect(decodeTokenClaims(token)).toEqual({
+      name: 'Ada Lovelace',
+      preferredUsername: 'ada',
+      email: 'ada@example.com',
+    });
+  });
+
+  it('coerces missing or non-string claims to null', () => {
+    const token = makeJwt({ preferred_username: 'ada', name: 42 });
+    expect(decodeTokenClaims(token)).toEqual({
+      name: null,
+      preferredUsername: 'ada',
+      email: null,
+    });
+  });
+
+  it('decodes multi-byte UTF-8 claims', () => {
+    const token = makeJwt({ name: 'Renée Müller' });
+    expect(decodeTokenClaims(token)?.name).toBe('Renée Müller');
+  });
+});
+
+describe('beginLogout', () => {
+  it('clears the token and redirects to the Keycloak end-session endpoint', async () => {
+    setAccessToken('tok-1', 600, () => 0);
+    const assign = vi.fn();
+    await beginLogout({ config, locationAssign: assign, appUrl: 'https://www.example.com/' });
+
+    expect(getAccessToken(() => 0)).toBeNull();
+    expect(assign).toHaveBeenCalledOnce();
+    const url = new URL(assign.mock.calls[0]![0] as string);
+    expect(url.origin + url.pathname).toBe(
+      'https://auth.example.com/realms/minerals/protocol/openid-connect/logout',
+    );
+    expect(url.searchParams.get('client_id')).toBe('minerals-frontend');
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe('https://www.example.com/');
+  });
+
+  it('still clears local state and navigates home when OIDC is unconfigured', async () => {
+    setAccessToken('tok-1', 600, () => 0);
+    const assign = vi.fn();
+    await beginLogout({ config: null, locationAssign: assign, appUrl: 'https://www.example.com/' });
+
+    expect(getAccessToken(() => 0)).toBeNull();
+    expect(assign).toHaveBeenCalledWith('https://www.example.com/');
   });
 });
 

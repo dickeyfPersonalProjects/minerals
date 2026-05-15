@@ -3,6 +3,7 @@
   import { link } from 'svelte-spa-router';
   import ThemeToggle from './ThemeToggle.svelte';
   import LoginButton from './LoginButton.svelte';
+  import ProfileMenu from './ProfileMenu.svelte';
   import { qrSheetState, refreshQrSheet } from './qrSheet';
   import { authStore } from './oidc/auth';
   import { loadOidcConfig, oidcConfigStore } from './oidc/config';
@@ -19,13 +20,14 @@
   const sheetState = $derived($qrSheetState);
   const showQrSheetLink = $derived(sheetState.status === 'loaded');
 
-  // Login button shows only once the runtime-config fetch has
-  // confirmed the backend has OIDC configured AND the user is
-  // unauthenticated.
+  // Authenticated users get the profile menu; everyone else gets the
+  // Login button, but only once the runtime-config fetch has
+  // confirmed the backend actually has OIDC configured.
   const auth = $derived($authStore);
   const oidcState = $derived($oidcConfigStore);
+  const showProfileMenu = $derived(auth.accessToken !== null);
   const showLoginButton = $derived(
-    oidcState.kind === 'ready' && oidcState.config !== null && auth.accessToken === null,
+    !showProfileMenu && oidcState.kind === 'ready' && oidcState.config !== null,
   );
 
   onMount(() => {
@@ -76,7 +78,9 @@
         >
           Collectors
         </a>
-        {#if showLoginButton}
+        {#if showProfileMenu}
+          <ProfileMenu />
+        {:else if showLoginButton}
           <LoginButton />
         {/if}
         <ThemeToggle />
