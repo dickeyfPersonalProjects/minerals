@@ -183,7 +183,6 @@ See `LICENSE` at the repo root. Required Notice: Copyright (c) 2026 Francois Dic
 - **CodeQL** — license is GitHub's own terms (not OSI); deferred until license posture is resolved (§3.13)
 - **Custom QR label templates** — deferred until real use cases are understood
 - **Mutation testing** (`gremlins`, `go-mutesting`) — too noisy at this stage; revisit post-coverage audit
-- **Renovate / Dependabot** — §16 defers to manual updates in v1
 - **SBOM generation** — not needed until distribution requirements change
 - **Strict `type_data` DB constraints** — app-side validation via Go structs is sufficient for v1
 - **Type reclassification** — API rejects type changes in v1; delete + re-create is the policy
