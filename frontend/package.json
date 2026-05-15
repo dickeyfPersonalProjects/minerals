@@ -49,6 +49,6 @@
     "openapi-fetch": "^0.17.0",
     "qrcode": "^1.5.4",
     "svelte-spa-router": "^5.1.0",
-    "zod": "^3.25.76"
+    "zod": "^4.4.3"
   }
 }
