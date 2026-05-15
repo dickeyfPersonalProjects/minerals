@@ -16,6 +16,7 @@ vi.mock('../lib/api', () => ({
 }));
 
 import SpecimenDetail from './SpecimenDetail.svelte';
+import { __resetAuthStore, setAccessToken } from '../lib/oidc/auth';
 
 const SPECIMEN_ID = '11111111-1111-1111-1111-111111111111';
 
@@ -180,10 +181,13 @@ beforeEach(() => {
   mockPatch.mockReset();
   mockDelete.mockReset();
   setupFetch({});
+  // Default-authed; the anonymous block at the bottom resets.
+  setAccessToken('test-token', 600);
 });
 
 afterEach(() => {
   cleanup();
+  __resetAuthStore();
 });
 
 describe('SpecimenDetail route', () => {
@@ -833,6 +837,53 @@ describe('SpecimenDetail route', () => {
 
       expect(mockPatch).not.toHaveBeenCalled();
       await waitFor(() => expect(screen.queryByTestId('edit-kind-modal')).toBeNull());
+    });
+  });
+
+  describe('when unauthenticated', () => {
+    const ANON_PHOTO_ID = 'pppppppp-0000-0000-0000-00000000bbbb';
+    it('renders the specimen without write affordances (mi-eec)', async () => {
+      __resetAuthStore();
+      setupFetch({
+        specimen: specimen({
+          name: 'Smoky quartz',
+          type: 'mineral',
+          visibility: 'public',
+          description: 'A lovely cluster.',
+        }),
+        photos: [photo({ id: ANON_PHOTO_ID, position: 1, kind: 'visible' })],
+        journal: [
+          {
+            id: 'jjjjjjjj-jjjj-jjjj-jjjj-jjjjjjjjjjjj',
+            specimen_id: SPECIMEN_ID,
+            author_id: '00000000-0000-0000-0000-000000000001',
+            body_md: 'An observation',
+            body_html: '<p>An observation</p>',
+            created_at: '2026-05-10T00:00:00Z',
+            updated_at: '2026-05-10T00:00:00Z',
+          },
+        ],
+      });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+
+      // Read-only content is still rendered.
+      await screen.findByTestId('specimen-detail');
+      expect(screen.getByTestId('description-body')).toHaveTextContent('A lovely cluster.');
+      expect(screen.getByTestId('hero-photo')).toBeInTheDocument();
+      expect(screen.getByTestId('journal-entry')).toBeInTheDocument();
+
+      // No write CTAs anywhere on the page.
+      expect(screen.queryByTestId('edit-specimen')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('hero-photo-edit-kind')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('hero-photo-crop')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('hero-photo-delete')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('hero-photo-set-main')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('photo-uploader')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('journal-add-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('journal-edit-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('journal-delete-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('edit-chain-button')).not.toBeInTheDocument();
     });
   });
 });

@@ -3,6 +3,7 @@
   import { client } from '../lib/api';
   import SpecimenForm from '../lib/SpecimenForm.svelte';
   import type { SpecimenFormSubmitResult } from '../lib/SpecimenForm.svelte';
+  import { isAuthenticated } from '../lib/oidc/auth';
   import { formToCreateBody, type SpecimenFormValues } from '../lib/schemas/specimen';
   import { toastSuccess } from '../lib/toasts';
 
@@ -64,7 +65,22 @@
     </h1>
   </header>
 
-  <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-    <SpecimenForm mode="create" submitLabel="Create" onSubmit={createSpecimen} onCancel={cancel} />
-  </div>
+  {#if $isAuthenticated}
+    <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <SpecimenForm
+        mode="create"
+        submitLabel="Create"
+        onSubmit={createSpecimen}
+        onCancel={cancel}
+      />
+    </div>
+  {:else}
+    <div
+      class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center"
+      data-testid="auth-required"
+      role="alert"
+    >
+      <p class="text-sm text-[var(--color-text)]">Log in to add a new specimen.</p>
+    </div>
+  {/if}
 </section>

@@ -20,15 +20,19 @@ vi.mock('svelte-spa-router', async () => {
 });
 
 import SpecimenNew from './SpecimenNew.svelte';
+import { __resetAuthStore, setAccessToken } from '../lib/oidc/auth';
 
 beforeEach(() => {
   mockPost.mockReset();
   mockPush.mockReset();
+  // Default-authed; the anonymous block at the bottom resets.
+  setAccessToken('test-token', 600);
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  __resetAuthStore();
 });
 
 describe('SpecimenNew route', () => {
@@ -99,5 +103,12 @@ describe('SpecimenNew route', () => {
     await waitFor(() => expect(screen.getByTestId('form-error')).toBeInTheDocument());
     expect(screen.getByTestId('form-error')).toHaveTextContent(/something is off/);
     expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('hides the create form when unauthenticated (mi-eec)', async () => {
+    __resetAuthStore();
+    render(SpecimenNew);
+    expect(screen.getByTestId('auth-required')).toBeInTheDocument();
+    expect(screen.queryByTestId('specimen-form')).not.toBeInTheDocument();
   });
 });

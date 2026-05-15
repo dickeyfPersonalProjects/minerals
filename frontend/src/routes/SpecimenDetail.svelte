@@ -13,6 +13,7 @@
   import ImageCropModal from '../lib/ImageCropModal.svelte';
   import Lightbox from '../lib/Lightbox.svelte';
   import PhotoUploader from '../lib/PhotoUploader.svelte';
+  import { isAuthenticated } from '../lib/oidc/auth';
   import { formatLocal } from '../lib/time';
   import { toastError, toastSuccess } from '../lib/toasts';
 
@@ -666,14 +667,16 @@
         >
           {specimen.name}
         </h1>
-        <a
-          href={`/specimens/${specimen.id}/edit`}
-          use:link
-          data-testid="edit-specimen"
-          class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
-        >
-          Edit
-        </a>
+        {#if $isAuthenticated}
+          <a
+            href={`/specimens/${specimen.id}/edit`}
+            use:link
+            data-testid="edit-specimen"
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+          >
+            Edit
+          </a>
+        {/if}
       </div>
       <div class="flex flex-wrap items-start gap-3">
         <div class="flex flex-wrap items-center gap-2 pt-2">
@@ -771,7 +774,7 @@
           >
             ★ Main
           </span>
-        {:else}
+        {:else if $isAuthenticated}
           <button
             type="button"
             onclick={() => setAsMain(heroPhoto.file_id)}
@@ -782,33 +785,35 @@
             ★ Set as main
           </button>
         {/if}
-        <button
-          type="button"
-          onclick={() => requestEditKind(heroPhoto.id)}
-          aria-label="Edit photo type"
-          data-testid="hero-photo-edit-kind"
-          class="absolute right-44 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
-        >
-          Edit type
-        </button>
-        <button
-          type="button"
-          onclick={() => requestCropPhoto(heroPhoto.id)}
-          aria-label="Crop / Rotate photo"
-          data-testid="hero-photo-crop"
-          class="absolute right-12 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
-        >
-          Crop / Rotate
-        </button>
-        <button
-          type="button"
-          onclick={() => requestDeletePhoto(heroPhoto.id)}
-          aria-label="Delete photo"
-          data-testid="hero-photo-delete"
-          class="absolute right-2 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-red-600 focus-visible:opacity-100 group-hover:opacity-100"
-        >
-          ✕
-        </button>
+        {#if $isAuthenticated}
+          <button
+            type="button"
+            onclick={() => requestEditKind(heroPhoto.id)}
+            aria-label="Edit photo type"
+            data-testid="hero-photo-edit-kind"
+            class="absolute right-44 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            Edit type
+          </button>
+          <button
+            type="button"
+            onclick={() => requestCropPhoto(heroPhoto.id)}
+            aria-label="Crop / Rotate photo"
+            data-testid="hero-photo-crop"
+            class="absolute right-12 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            Crop / Rotate
+          </button>
+          <button
+            type="button"
+            onclick={() => requestDeletePhoto(heroPhoto.id)}
+            aria-label="Delete photo"
+            data-testid="hero-photo-delete"
+            class="absolute right-2 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-red-600 focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            ✕
+          </button>
+        {/if}
       </div>
 
       {#if restPhotos.length > 0}
@@ -850,7 +855,7 @@
                   >
                     ★ Main
                   </span>
-                {:else}
+                {:else if $isAuthenticated}
                   <button
                     type="button"
                     onclick={() => setAsMain(photo.file_id)}
@@ -862,15 +867,17 @@
                     ★
                   </button>
                 {/if}
-                <button
-                  type="button"
-                  onclick={() => requestDeletePhoto(photo.id)}
-                  aria-label="Delete photo"
-                  data-testid="gallery-thumb-delete"
-                  class="absolute right-1 top-1 rounded-full bg-black/65 px-1.5 text-[11px] leading-5 text-white opacity-0 transition-opacity hover:bg-red-600 focus-visible:opacity-100 group-hover:opacity-100"
-                >
-                  ✕
-                </button>
+                {#if $isAuthenticated}
+                  <button
+                    type="button"
+                    onclick={() => requestDeletePhoto(photo.id)}
+                    aria-label="Delete photo"
+                    data-testid="gallery-thumb-delete"
+                    class="absolute right-1 top-1 rounded-full bg-black/65 px-1.5 text-[11px] leading-5 text-white opacity-0 transition-opacity hover:bg-red-600 focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    ✕
+                  </button>
+                {/if}
               </div>
             </li>
           {/each}
@@ -878,7 +885,9 @@
       {/if}
     {/if}
 
-    <PhotoUploader {specimenId} onUploaded={() => refetchPhotos(specimenId)} />
+    {#if $isAuthenticated}
+      <PhotoUploader {specimenId} onUploaded={() => refetchPhotos(specimenId)} />
+    {/if}
 
     <div class="grid gap-8 lg:grid-cols-[2fr_1fr]">
       <div class="space-y-8">
@@ -901,7 +910,7 @@
             <h2 class="font-serif text-lg font-semibold text-[var(--color-text)]">
               Observation journal
             </h2>
-            {#if !journalCreating}
+            {#if $isAuthenticated && !journalCreating}
               <button
                 type="button"
                 onclick={() => (journalCreating = true)}
@@ -913,7 +922,7 @@
             {/if}
           </div>
 
-          {#if journalCreating}
+          {#if $isAuthenticated && journalCreating}
             <div
               class="mb-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
               data-testid="journal-create-panel"
@@ -945,7 +954,7 @@
                       <span data-testid="edited-indicator" class="italic">· edited</span>
                     {/if}
                     <span class="ml-auto flex items-center gap-1">
-                      {#if editingEntryId !== entry.id}
+                      {#if $isAuthenticated && editingEntryId !== entry.id}
                         <button
                           type="button"
                           onclick={() => (editingEntryId = entry.id)}
@@ -1080,7 +1089,7 @@
             <h2 class="font-serif text-base font-semibold text-[var(--color-text)]">
               Provenance chain
             </h2>
-            {#if !editingChain}
+            {#if $isAuthenticated && !editingChain}
               <button
                 type="button"
                 onclick={() => (editingChain = true)}
@@ -1092,7 +1101,7 @@
             {/if}
           </div>
 
-          {#if editingChain}
+          {#if $isAuthenticated && editingChain}
             <CollectorChainEditor
               {specimenId}
               initial={collectors.map((l) => ({ id: l.collector.id, name: l.collector.name }))}
@@ -1139,8 +1148,8 @@
       photos={lightboxPhotos}
       startIndex={lightboxIndex}
       onClose={closeLightbox}
-      onDelete={requestDeletePhoto}
-      onCrop={requestCropPhoto}
+      onDelete={$isAuthenticated ? requestDeletePhoto : undefined}
+      onCrop={$isAuthenticated ? requestCropPhoto : undefined}
     />
   {/if}
 

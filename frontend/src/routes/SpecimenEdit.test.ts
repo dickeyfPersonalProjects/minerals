@@ -22,6 +22,7 @@ vi.mock('svelte-spa-router', async () => {
 });
 
 import SpecimenEdit from './SpecimenEdit.svelte';
+import { __resetAuthStore, setAccessToken } from '../lib/oidc/auth';
 
 const SPECIMEN_ID = '11111111-1111-1111-1111-111111111111';
 
@@ -61,11 +62,14 @@ beforeEach(() => {
   mockPatch.mockReset();
   mockDelete.mockReset();
   mockPush.mockReset();
+  // Default-authed; the anonymous block at the bottom resets.
+  setAccessToken('test-token', 600);
 });
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  __resetAuthStore();
 });
 
 describe('SpecimenEdit route', () => {
@@ -227,5 +231,17 @@ describe('SpecimenEdit route', () => {
 
     await waitFor(() => expect(screen.getByTestId('error')).toBeInTheDocument());
     expect(screen.getByText(/no such specimen/i)).toBeInTheDocument();
+  });
+
+  it('hides the edit form when unauthenticated (mi-eec)', async () => {
+    __resetAuthStore();
+    mockGet.mockResolvedValue({
+      data: specimen(),
+      error: undefined,
+      response: new Response(),
+    });
+    render(SpecimenEdit, { params: { id: SPECIMEN_ID } });
+    await waitFor(() => expect(screen.getByTestId('auth-required')).toBeInTheDocument());
+    expect(screen.queryByTestId('specimen-form')).not.toBeInTheDocument();
   });
 });

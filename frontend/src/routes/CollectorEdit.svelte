@@ -4,6 +4,7 @@
   import type { components } from '../lib/api/schema';
   import CollectorForm from '../lib/CollectorForm.svelte';
   import type { CollectorFormSubmitResult } from '../lib/CollectorForm.svelte';
+  import { isAuthenticated } from '../lib/oidc/auth';
   import { toastSuccess } from '../lib/toasts';
 
   type Collector = components['schemas']['CollectorView'];
@@ -118,13 +119,23 @@
       <p class="mt-1 text-xs text-[var(--color-text-muted)]">{loadState.message}</p>
     </div>
   {:else if collector}
-    <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <CollectorForm
-        initial={{ name: collector.name, notes: collector.notes ?? '' }}
-        submitLabel="Save"
-        onSubmit={saveCollector}
-        onCancel={cancel}
-      />
-    </div>
+    {#if $isAuthenticated}
+      <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <CollectorForm
+          initial={{ name: collector.name, notes: collector.notes ?? '' }}
+          submitLabel="Save"
+          onSubmit={saveCollector}
+          onCancel={cancel}
+        />
+      </div>
+    {:else}
+      <div
+        class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center"
+        data-testid="auth-required"
+        role="alert"
+      >
+        <p class="text-sm text-[var(--color-text)]">Log in to edit this collector.</p>
+      </div>
+    {/if}
   {/if}
 </section>
