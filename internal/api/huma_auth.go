@@ -24,7 +24,9 @@ import (
 //
 // Apply via Operation.Middlewares for protected operations — system
 // endpoints (healthz, readyz, openapi, docs, runtime-config) are
-// public and MUST NOT carry this middleware.
+// public and MUST NOT carry this middleware. Read-side operations
+// on visibility-scoped resources use makeHumaOptionalAuth instead
+// (CONTRACT.md §13 v2).
 func makeHumaAuth(v auth.TokenVerifier) func(huma.Context, func(huma.Context)) {
 	return func(ctx huma.Context, next func(huma.Context)) {
 		if v == nil {
@@ -35,6 +37,36 @@ func makeHumaAuth(v auth.TokenVerifier) func(huma.Context, func(huma.Context)) {
 		if !ok {
 			writeHumaError(ctx, http.StatusUnauthorized,
 				"unauthorized", "authentication required")
+			return
+		}
+		claims, err := v.Verify(ctx.Context(), tok)
+		if err != nil {
+			slog.WarnContext(ctx.Context(), "auth: token verification failed", "err", err)
+			writeHumaError(ctx, http.StatusUnauthorized,
+				"unauthorized", "invalid or expired token")
+			return
+		}
+		next(huma.WithContext(ctx, auth.WithUser(ctx.Context(), auth.UserFromClaims(claims))))
+	}
+}
+
+// makeHumaOptionalAuth is the anonymous-friendly analogue of
+// makeHumaAuth for read-side endpoints on visibility-scoped
+// resources (CONTRACT.md §13 v2). A missing Authorization header
+// does NOT 401 — the request continues with no User in context, and
+// downstream handlers (or the DB-level visibility scoping) decide
+// what an anonymous caller may see. An invalid token still 401s
+// (the caller deliberately presented a credential and verification
+// failed).
+func makeHumaOptionalAuth(v auth.TokenVerifier) func(huma.Context, func(huma.Context)) {
+	return func(ctx huma.Context, next func(huma.Context)) {
+		if v == nil {
+			next(huma.WithContext(ctx, auth.WithUser(ctx.Context(), auth.StubUser)))
+			return
+		}
+		tok, ok := auth.BearerToken(ctx.Header("Authorization"))
+		if !ok {
+			next(ctx)
 			return
 		}
 		claims, err := v.Verify(ctx.Context(), tok)
@@ -69,9 +101,14 @@ const ProfileSetupPath = "/profile/setup"
 // The profile setup endpoint omits step 3 so a pending user can
 // reach it; see profile.go.
 type authMiddlewares struct {
-	humaAuth        func(huma.Context, func(huma.Context))
-	resolveUser     func(huma.Context, func(huma.Context))
-	requireComplete func(huma.Context, func(huma.Context))
+	humaAuth         func(huma.Context, func(huma.Context))
+	humaOptionalAuth func(huma.Context, func(huma.Context))
+	resolveUser      func(huma.Context, func(huma.Context))
+	// optionalResolveUser no-ops on anonymous callers (no Sub in
+	// context) and otherwise behaves like resolveUser. Used by the
+	// Optional() chain on read-side endpoints (CONTRACT.md §13 v2).
+	optionalResolveUser func(huma.Context, func(huma.Context))
+	requireComplete     func(huma.Context, func(huma.Context))
 	// verifier is the same TokenVerifier humaAuth closes over,
 	// retained so the net/http download routes (photos, journal
 	// files) can build the auth.Auth chain with the identical
@@ -88,6 +125,20 @@ func (m authMiddlewares) Protected() huma.Middlewares {
 		return huma.Middlewares{m.humaAuth}
 	}
 	return huma.Middlewares{m.humaAuth, m.resolveUser, m.requireComplete}
+}
+
+// Optional returns the anonymous-friendly chain used by GET list
+// and detail endpoints on visibility-scoped resources (CONTRACT.md
+// §13 v2). The chain populates auth.User when a valid token is
+// present and leaves the context anonymous otherwise — handlers
+// MUST NOT 401 on a missing user; the DB scoping layer (or, for
+// detail endpoints, a 404-on-deny check in the handler) does the
+// filtering. An invalid token still 401s.
+func (m authMiddlewares) Optional() huma.Middlewares {
+	if m.optionalResolveUser == nil {
+		return huma.Middlewares{m.humaOptionalAuth}
+	}
+	return huma.Middlewares{m.humaOptionalAuth, m.optionalResolveUser, optionalRequireCompleteProfile}
 }
 
 // SetupAllowed returns the abbreviated chain used by the
@@ -108,15 +159,54 @@ func (m authMiddlewares) SetupAllowed() huma.Middlewares {
 // bearer-token validation.
 func newAuthMiddlewares(repo domain.UserRepo, verifier auth.TokenVerifier) authMiddlewares {
 	humaAuth := makeHumaAuth(verifier)
+	humaOptionalAuth := makeHumaOptionalAuth(verifier)
 	if repo == nil {
-		return authMiddlewares{humaAuth: humaAuth, verifier: verifier}
+		return authMiddlewares{
+			humaAuth:         humaAuth,
+			humaOptionalAuth: humaOptionalAuth,
+			verifier:         verifier,
+		}
 	}
+	resolve := makeResolveUserMiddleware(repo)
 	return authMiddlewares{
-		humaAuth:        humaAuth,
-		resolveUser:     makeResolveUserMiddleware(repo),
-		requireComplete: requireCompleteProfile,
-		verifier:        verifier,
+		humaAuth:            humaAuth,
+		humaOptionalAuth:    humaOptionalAuth,
+		resolveUser:         resolve,
+		optionalResolveUser: makeOptionalResolveUserMiddleware(resolve),
+		requireComplete:     requireCompleteProfile,
+		verifier:            verifier,
 	}
+}
+
+// makeOptionalResolveUserMiddleware wraps the standard resolver so
+// it no-ops on anonymous callers (no Sub in context) while behaving
+// identically for authenticated ones. The Optional() chain uses
+// this so a missing token reaches the handler with no User —
+// resolveUser would otherwise 401 the request.
+func makeOptionalResolveUserMiddleware(
+	resolve func(huma.Context, func(huma.Context)),
+) func(huma.Context, func(huma.Context)) {
+	return func(ctx huma.Context, next func(huma.Context)) {
+		u := auth.FromContext(ctx.Context())
+		if u.Sub == "" {
+			next(ctx)
+			return
+		}
+		resolve(ctx, next)
+	}
+}
+
+// optionalRequireCompleteProfile is the anonymous-friendly variant
+// of requireCompleteProfile: anonymous callers (no Sub) skip the
+// gate entirely; authenticated-but-pending users still 403 with the
+// SPA redirect path. Used by the Optional() chain.
+func optionalRequireCompleteProfile(ctx huma.Context, next func(huma.Context)) {
+	u := auth.FromContext(ctx.Context())
+	if u.Sub == "" {
+		next(ctx)
+		return
+	}
+	requireCompleteProfile(ctx, next)
 }
 
 // makeResolveUserMiddleware closes over repo and returns the

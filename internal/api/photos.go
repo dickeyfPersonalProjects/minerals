@@ -145,6 +145,7 @@ func registerPhotoOperations(api huma.API, mux *http.ServeMux, authMW authMiddle
 
 	s := &PhotoService{deps: *deps, authz: guard}
 	mws := authMW.Protected()
+	optionalMWs := authMW.Optional()
 
 	huma.Register(api, huma.Operation{
 		OperationID:   "upload-photo",
@@ -170,10 +171,11 @@ func registerPhotoOperations(api huma.API, mux *http.ServeMux, authMW authMiddle
 		Method:      http.MethodGet,
 		Path:        "/api/v1/specimens/{id}/photos",
 		Summary:     "List a specimen's photos",
-		Description: "Cursor-paginated list ordered by (position, created_at) ascending — the manual ordering the user controls.",
+		Description: "Cursor-paginated list ordered by (position, created_at) ascending — the manual ordering the user controls. " +
+			"Returns 404 when the caller cannot see the parent specimen — sub-resource visibility is inherited (CONTRACT.md §13 v2).",
 		Tags:        []string{"photos"},
-		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound},
-		Middlewares: mws,
+		Errors:      []int{http.StatusBadRequest, http.StatusNotFound},
+		Middlewares: optionalMWs,
 	}, s.list)
 
 	huma.Register(api, huma.Operation{
@@ -242,7 +244,11 @@ func (s *PhotoService) enforcePhoto(
 
 // enforcePhotoHTTP is the net/http analogue of enforcePhoto for the
 // raw download routes. It writes a §10 envelope and returns false
-// when access is denied (or the parent specimen is missing).
+// when access is denied (or the parent specimen is missing). The
+// view action is a detail-style read (CONTRACT.md §13 v2) — a
+// forbidden outcome is rewritten as 404 so existence is never
+// leaked, matching what GET /photos/{id} would produce for a
+// missing row. Non-view actions (edit, delete) keep 403 semantics.
 func (s *PhotoService) enforcePhotoHTTP(
 	w http.ResponseWriter, r *http.Request, specimenID, photoID uuid.UUID, act string,
 ) bool {
@@ -252,14 +258,18 @@ func (s *PhotoService) enforcePhotoHTTP(
 	sp, err := s.deps.Specimens.GetByID(r.Context(), specimenID)
 	if err != nil {
 		if errors.Is(err, domain.ErrSpecimenNotFound) {
-			writeError(w, http.StatusNotFound, "specimen_not_found", "no such specimen", nil)
+			writeError(w, http.StatusNotFound, "photo_not_found", "no such photo", nil)
 			return false
 		}
 		writeError(w, http.StatusInternalServerError, "internal_error",
 			"internal server error", nil)
 		return false
 	}
-	return s.authz.checkHTTP(w, r, photoResource(photoID, sp), act)
+	res := photoResource(photoID, sp)
+	if act == actView {
+		return s.authz.checkViewHTTP(w, r, res, "photo_not_found", "no such photo")
+	}
+	return s.authz.checkHTTP(w, r, res, act)
 }
 
 type uploadPhotoForm struct {
@@ -514,6 +524,19 @@ func (s *PhotoService) list(ctx context.Context, in *listPhotosInput) (*listPhot
 	if err != nil {
 		return nil, err
 	}
+	// CONTRACT.md §13 v2: resolve and visibility-check the parent
+	// before evaluating the sub-list. If the caller cannot see the
+	// parent, return 404 without touching the photos table.
+	if s.deps.Specimens != nil {
+		sp, sperr := s.deps.Specimens.GetByID(ctx, specimenID)
+		if sperr != nil {
+			return nil, mapSpecimenError(sperr)
+		}
+		if err := s.authz.checkView(ctx, specimenResource(sp),
+			"specimen_not_found", "no such specimen"); err != nil {
+			return nil, err
+		}
+	}
 	page := domain.Page{Limit: in.Limit, Cursor: in.Cursor}
 	rows, cursor, err := s.deps.Photos.ListBySpecimen(ctx, specimenID, page)
 	if err != nil {
@@ -646,9 +669,13 @@ func (s *PhotoService) delete(ctx context.Context, in *deletePhotoInput) (*delet
 }
 
 func registerPhotoDownloadRoutes(mux *http.ServeMux, s *PhotoService, verifier auth.TokenVerifier) {
-	// Wrap each download handler in the protected-bucket auth chain.
+	// CONTRACT.md §13 v2: photo bytes are a detail-style read of a
+	// visibility-scoped resource. Anonymous callers are admitted —
+	// the parent-specimen visibility check (enforcePhotoHTTP) does
+	// the gating and translates a denial into 404 so existence is
+	// never leaked. An invalid token still 401s.
 	wrap := func(h http.Handler) http.Handler {
-		return Chain(h, auth.Auth(verifier), auth.RequireUser)
+		return Chain(h, auth.OptionalAuth(verifier))
 	}
 	// Per the bead acceptance criteria (mi-jpu) GET /api/v1/photos/{id}
 	// returns the original bytes — not a JSON metadata view. Photo

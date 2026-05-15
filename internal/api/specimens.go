@@ -245,6 +245,7 @@ func registerSpecimenOperations(api huma.API, authMW authMiddlewares, guard auth
 	}
 	s := &SpecimenService{repo: repo, authz: guard}
 	mws := authMW.Protected()
+	optionalMWs := authMW.Optional()
 
 	huma.Register(api, huma.Operation{
 		OperationID: "list-specimens",
@@ -252,10 +253,11 @@ func registerSpecimenOperations(api huma.API, authMW authMiddlewares, guard auth
 		Path:        "/api/v1/specimens",
 		Summary:     "List specimens",
 		Description: "Cursor-paginated list of specimens. Default ordering is `created_at DESC, id DESC`. When `?q=` is present, ordering switches to `ts_rank DESC, created_at DESC, id DESC` and a cursor previously issued under default ordering is rejected (clients discard cursors when filters or `q` change). " +
-			"`?collector_id=` filters to specimens whose chain contains the given collector (mi-zv3).",
+			"`?collector_id=` filters to specimens whose chain contains the given collector (mi-zv3). " +
+			"Anonymous callers see public specimens only; the DB scope filter does the rest (CONTRACT.md §13 v2).",
 		Tags:        []string{"specimens"},
-		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized},
-		Middlewares: mws,
+		Errors:      []int{http.StatusBadRequest},
+		Middlewares: optionalMWs,
 	}, s.list)
 
 	huma.Register(api, huma.Operation{
@@ -275,9 +277,10 @@ func registerSpecimenOperations(api huma.API, authMW authMiddlewares, guard auth
 		Method:      http.MethodGet,
 		Path:        "/api/v1/specimens/{id}",
 		Summary:     "Get a specimen by id",
+		Description: "Returns 404 (not 403/401) when the caller cannot see the specimen — anonymous and unauthorized callers receive the same response as for a non-existent row (CONTRACT.md §13 v2).",
 		Tags:        []string{"specimens"},
-		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound},
-		Middlewares: mws,
+		Errors:      []int{http.StatusBadRequest, http.StatusNotFound},
+		Middlewares: optionalMWs,
 	}, s.get)
 
 	huma.Register(api, huma.Operation{
@@ -389,7 +392,8 @@ func (s *SpecimenService) get(ctx context.Context, in *getSpecimenInput) (*speci
 	if err != nil {
 		return nil, mapSpecimenError(err)
 	}
-	if err := s.authz.check(ctx, specimenResource(sp), actView); err != nil {
+	if err := s.authz.checkView(ctx, specimenResource(sp),
+		"specimen_not_found", "no such specimen"); err != nil {
 		return nil, err
 	}
 	return &specimenResponseOutput{Body: toSpecimenView(sp)}, nil

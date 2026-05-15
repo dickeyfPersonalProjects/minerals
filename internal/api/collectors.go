@@ -121,16 +121,18 @@ func registerCollectorOperations(api huma.API, authMW authMiddlewares, guard aut
 	}
 	s := &CollectorService{repo: repo, authz: guard}
 	mws := authMW.Protected()
+	optionalMWs := authMW.Optional()
 
 	huma.Register(api, huma.Operation{
 		OperationID: "list-collectors",
 		Method:      http.MethodGet,
 		Path:        "/api/v1/collectors",
 		Summary:     "List collectors",
-		Description: "Cursor-paginated list of collectors. Default ordering is `created_at DESC, id DESC`. Pass `?q=<text>` for substring match on name (case-insensitive).",
+		Description: "Cursor-paginated list of collectors. Default ordering is `created_at DESC, id DESC`. Pass `?q=<text>` for substring match on name (case-insensitive). " +
+			"Anonymous callers receive an empty list — collectors are owned per-user with no public tier (CONTRACT.md §13 v2).",
 		Tags:        []string{"collectors"},
-		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized},
-		Middlewares: mws,
+		Errors:      []int{http.StatusBadRequest},
+		Middlewares: optionalMWs,
 	}, s.list)
 
 	huma.Register(api, huma.Operation{
@@ -150,9 +152,10 @@ func registerCollectorOperations(api huma.API, authMW authMiddlewares, guard aut
 		Method:      http.MethodGet,
 		Path:        "/api/v1/collectors/{id}",
 		Summary:     "Get a collector by id",
+		Description: "Returns 404 (not 403/401) when the caller does not own the collector (CONTRACT.md §13 v2 don't-leak-existence rule).",
 		Tags:        []string{"collectors"},
-		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound},
-		Middlewares: mws,
+		Errors:      []int{http.StatusBadRequest, http.StatusNotFound},
+		Middlewares: optionalMWs,
 	}, s.get)
 
 	huma.Register(api, huma.Operation{
@@ -207,7 +210,8 @@ func (s *CollectorService) get(ctx context.Context, in *getCollectorInput) (*col
 	if err != nil {
 		return nil, mapDomainError(err)
 	}
-	if err := s.authz.check(ctx, collectorResource(c), actView); err != nil {
+	if err := s.authz.checkView(ctx, collectorResource(c),
+		"collector_not_found", "no such collector"); err != nil {
 		return nil, err
 	}
 	return &collectorResponseOutput{Body: toCollectorView(c)}, nil

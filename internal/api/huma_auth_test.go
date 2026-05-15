@@ -193,6 +193,11 @@ func TestHumaAuth_ValidTokenFirstLoginGatesOnRealSub(t *testing.T) {
 	}
 }
 
+// TestHumaAuth_RejectsMissingAndInvalidTokens drives the write-side
+// chain (POST /api/v1/collectors), which stays on Protected() — the
+// read-side now uses Optional() and admits anonymous callers (see
+// TestHumaOptionalAuth_AnonymousReadIs200). Per CONTRACT.md §13 v2
+// only writes 401 on missing-or-invalid credentials.
 func TestHumaAuth_RejectsMissingAndInvalidTokens(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -210,7 +215,9 @@ func TestHumaAuth_RejectsMissingAndInvalidTokens(t *testing.T) {
 			h := New(Deps{Users: repo, Verifier: newFakeVerifier(), Collectors: newStubCollectorRepo()})
 
 			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/collectors", nil)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/collectors",
+				strings.NewReader(`{"name":"new"}`))
+			req.Header.Set("Content-Type", "application/json")
 			if tc.header != "" {
 				req.Header.Set("Authorization", tc.header)
 			}
@@ -228,6 +235,71 @@ func TestHumaAuth_RejectsMissingAndInvalidTokens(t *testing.T) {
 				t.Errorf("resolver ran on rejected auth (createCalls = %d)", repo.createCalls)
 			}
 		})
+	}
+}
+
+// TestHumaOptionalAuth_AnonymousReadIs200 confirms read-side
+// endpoints on visibility-scoped resources admit anonymous callers
+// (CONTRACT.md §13 v2). The DB-level scoping is what filters; an
+// anonymous list MUST return 200 with whatever the caller may see
+// (here: empty, because collectors are owned per-user with no
+// public tier).
+func TestHumaOptionalAuth_AnonymousReadIs200(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		header string
+	}{
+		{"no header", ""},
+		{"wrong scheme", "Basic Zm9vOmJhcg=="},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo := newFakeUserRepo()
+			h := New(Deps{Users: repo, Verifier: newFakeVerifier(), Collectors: newStubCollectorRepo()})
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/collectors", nil)
+			if tc.header != "" {
+				req.Header.Set("Authorization", tc.header)
+			}
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+			}
+			// Anonymous never triggers the resolver — it has no Sub.
+			if atomic.LoadInt32(&repo.createCalls) != 0 {
+				t.Errorf("resolver ran on anonymous read (createCalls = %d)", repo.createCalls)
+			}
+		})
+	}
+}
+
+// TestHumaOptionalAuth_InvalidTokenStill401 verifies the
+// optional-auth chain still rejects a deliberately-presented but
+// invalid bearer token. Per CONTRACT.md §13 v2 only a *missing*
+// credential is treated as anonymous; an invalid one fails closed.
+func TestHumaOptionalAuth_InvalidTokenStill401(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	h := New(Deps{Users: repo, Verifier: newFakeVerifier(), Collectors: newStubCollectorRepo()})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/collectors", nil)
+	req.Header.Set("Authorization", "Bearer forged")
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	got := decodeError(t, rec.Body)
+	if got.Error.Code != "unauthorized" {
+		t.Errorf("code = %q, want unauthorized", got.Error.Code)
+	}
+	if atomic.LoadInt32(&repo.createCalls) != 0 {
+		t.Errorf("resolver ran on rejected token (createCalls = %d)", repo.createCalls)
 	}
 }
 

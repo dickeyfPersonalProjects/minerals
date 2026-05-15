@@ -68,6 +68,50 @@ func (g authzGuard) check(ctx context.Context, res *authz.Resource, act string) 
 	return nil
 }
 
+// checkView runs the §13 v2 view check and translates a forbidden
+// outcome into a 404 envelope — detail endpoints MUST NOT leak the
+// existence of a resource the caller cannot see (CONTRACT.md §13
+// v2). Non-403 errors propagate unchanged. The notFoundCode /
+// notFoundMsg arguments are the resource-specific envelope the
+// handler would have returned for an actually-missing row, so the
+// wire response is indistinguishable between "does not exist" and
+// "exists but you can't see it."
+func (g authzGuard) checkView(
+	ctx context.Context, res *authz.Resource, notFoundCode, notFoundMsg string,
+) error {
+	err := g.check(ctx, res, actView)
+	if err == nil {
+		return nil
+	}
+	var ae *apiError
+	if errors.As(err, &ae) && ae.Status == http.StatusForbidden {
+		return newAPIError(http.StatusNotFound, notFoundCode, notFoundMsg, nil)
+	}
+	return err
+}
+
+// checkViewHTTP is the net/http analogue of checkView for the raw
+// download routes. Writes a §10 envelope and returns false when the
+// caller cannot view the resource — a forbidden outcome is rewritten
+// as the supplied 404 envelope per CONTRACT.md §13 v2.
+func (g authzGuard) checkViewHTTP(
+	w http.ResponseWriter, r *http.Request, res *authz.Resource,
+	notFoundCode, notFoundMsg string,
+) bool {
+	err := g.checkView(r.Context(), res, notFoundCode, notFoundMsg)
+	if err == nil {
+		return true
+	}
+	var ae *apiError
+	if !errors.As(err, &ae) {
+		writeError(w, http.StatusInternalServerError, "internal_error",
+			"internal server error", nil)
+		return false
+	}
+	writeError(w, ae.Status, ae.Envelope.Code, ae.Envelope.Message, ae.Envelope.Details)
+	return false
+}
+
 // checkHTTP is the net/http analogue of check for the raw download
 // routes (photos, journal files) that stream bytes outside huma. It
 // writes a §10 403 envelope and returns false when access is denied.

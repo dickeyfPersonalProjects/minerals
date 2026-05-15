@@ -78,11 +78,13 @@ func TestIntegration_Authz_SpecimenEnforcement(t *testing.T) {
 	privID := mk(domain.VisibilityPrivate)
 	pubID := mk(domain.VisibilityPublic)
 
-	// The stub user is not the author: a private specimen is 403, a
-	// public one is permitted by the §13 v2 view shortcut.
+	// The stub user is not the author: a private specimen is 404
+	// (CONTRACT.md §13 v2 don't-leak-existence rule for detail
+	// endpoints), a public one is permitted by the §13 v2 view
+	// shortcut.
 	if status, body := doJSON(t, srv.Client(), http.MethodGet,
-		srv.URL+"/api/v1/specimens/"+privID.String(), nil); status != http.StatusForbidden {
-		t.Errorf("GET foreign private: status %d, want 403; body=%s", status, body)
+		srv.URL+"/api/v1/specimens/"+privID.String(), nil); status != http.StatusNotFound {
+		t.Errorf("GET foreign private: status %d, want 404; body=%s", status, body)
 	}
 	if status, body := doJSON(t, srv.Client(), http.MethodGet,
 		srv.URL+"/api/v1/specimens/"+pubID.String(), nil); status != http.StatusOK {
