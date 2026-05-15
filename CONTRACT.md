@@ -3495,8 +3495,13 @@ for React) MUST escalate.
   5) are contract changes. They warrant a dedicated PR with a
   release-notes read, a breaking-change review, and full test
   runs.
-- **Dependabot or Renovate** is deferred. Cheap to add later
-  when manual updates start feeling like toil.
+- **Automated version updates** are enabled via
+  `.github/dependabot.yml` (gomod, npm in `/frontend`,
+  github-actions, and docker — all weekly). Dependabot opens
+  PRs; a polecat or operator still reviews and merges per the
+  rules above (one bump per commit/PR, majors get their own
+  PR). GitHub's automated security alerts continue to work in
+  parallel.
 
 ## License policy
 
