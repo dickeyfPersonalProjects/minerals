@@ -21,7 +21,7 @@ require (
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/yuin/goldmark v1.8.2
-	golang.org/x/image v0.39.0
+	golang.org/x/image v0.40.0
 )
 
 require (
@@ -54,6 +54,6 @@ require (
 	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
