@@ -7,7 +7,7 @@
 # Image refs are fully qualified (docker.io/library/...) so the build
 # works under podman too — podman requires explicit registries unless
 # /etc/containers/registries.conf has unqualified-search-registries set.
-FROM docker.io/library/node:22-alpine AS frontend
+FROM docker.io/library/node:26-alpine AS frontend
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
