@@ -8,6 +8,11 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test-setup.ts'],
+    // Vitest's default include glob matches `**/*.spec.ts` everywhere
+    // in the project, which would otherwise sweep up the Playwright
+    // specs under `e2e/` and try to run them in jsdom. Playwright
+    // specs are invoked separately via `npm run e2e` (mi-dwx).
+    exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary'],
