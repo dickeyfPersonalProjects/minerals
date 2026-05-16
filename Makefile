@@ -168,20 +168,21 @@ test-cover-frontend:
 # ── CI parity targets (mi-c0v) ────────────────────────────────────
 # The two-tier model that lets polecats reproduce CI locally:
 #
-#   ci-quick  — fast subset for pre-push (lefthook wires this in).
-#               Skips slow gates (vuln/license, frontend typecheck,
-#               frontend tests). Catches most regressions in seconds.
+#   ci-quick  — 1:1 mirror of CI's Frontend + Backend lint/typecheck/test
+#               jobs. Run before `gt done` / opening a PR. Skips only the
+#               slow gates (vuln scan, license audit, coverage). Wired
+#               into the pre-push hook via lefthook.
 #
-#   ci-local  — full parity with .github/workflows/pr.yml. Run before
-#               `gt done` / opening a PR. Includes vuln scan, license
-#               audit, svelte-check, and frontend tests with coverage.
+#   ci-local  — full parity with .github/workflows/pr.yml. Adds the slow
+#               gates on top of ci-quick: govulncheck, SPDX license
+#               audit, and frontend tests with coverage.
 #
 # Integration tests and compose-smoke are intentionally excluded — they
 # need running Postgres/MinIO and aren't part of the gate "union" called
 # out in the bead. Run `make test-integration` separately when needed.
 .PHONY: ci-quick ci-local
 
-ci-quick: fmt-check vet lint test fmt-check-frontend lint-frontend
+ci-quick: fmt-check vet lint test fmt-check-frontend lint-frontend check-frontend
 	@echo "✓ Quick gates passed"
 
 ci-local: fmt-check vet lint license-check test vulncheck fmt-check-frontend lint-frontend check-frontend test-cover-frontend
