@@ -94,12 +94,14 @@ into `$GOPATH/bin` if missing and wires up the hooks in `lefthook.yml`.
 Two Makefile targets mirror the GitHub Actions workflow, so you can
 reproduce CI failures before pushing:
 
-- `make ci-quick` — fast subset (fmt-check, vet, lint, test, prettier
-  + eslint on the frontend). Used by the pre-push hook. Skips the slow
-  vuln/license/typecheck gates.
+- `make ci-quick` — 1:1 mirror of CI's Frontend + Backend
+  lint/typecheck/test jobs (fmt-check, vet, lint, test, prettier,
+  eslint, `svelte-check`). Used by the pre-push hook and the
+  recommended gate before `gt done` / opening a PR. Skips only the
+  slow gates (vuln scan, license audit, coverage).
 - `make ci-local` — full CI parity: adds `govulncheck`, the SPDX
-  license audit, `svelte-check`, and frontend tests with coverage.
-  Run before `gt done` / opening a PR.
+  license audit, and frontend tests with coverage on top of
+  `ci-quick`.
 
 Tool versions (golangci-lint, gotestsum, govulncheck, go-licenses) are
 pinned at the top of the `Makefile` to match CI and auto-install on
