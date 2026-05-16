@@ -266,47 +266,49 @@ jobs:
         if: always()
         run: docker compose down -v
 
-  # Backend JWT acceptance test against a real Keycloak (mi-ivk). The
-  # Backend job covers JWT verification with a mock JWKS — fast and
-  # deterministic. This job covers the other half: prove the backend
-  # accepts a token minted by a real Keycloak, brought up the way a
-  # contributor would (`--profile keycloak` + terraform/keycloak/).
+  # End-to-end Keycloak smoke covering BOTH halves of the auth path
+  # in one job (mi-ivk + mi-dwx + mi-9eq):
   #
-  # OUT OF SCOPE — browser-side behavior. This job uses curl + the
-  # password grant against a test-only client; it never loads the
-  # SPA, runs no JavaScript, and executes no PKCE redirect. That
-  # means it CANNOT catch: SPA routing bugs (e.g. mi-0ag), CSP
-  # directives that block the browser's cross-origin token POST
-  # (e.g. mi-cl1), the runtime-config gate the Login button depends
-  # on (mi-rvn — partially asserted below via curl, but the button
-  # itself is never rendered), the PKCE redirect handshake, or any
-  # cookie/storage/same-origin behavior. Those are covered by the
-  # real-browser smoke (mi-dwx). If a polecat is tempted to read
-  # this job's green status as "auth works end-to-end", it does not
-  # — it means "the backend accepts a Keycloak-issued JWT".
+  #   1. Backend JWT acceptance — curl + password grant against a
+  #      test-only client (mi-ivk). Proves the backend accepts a real
+  #      Keycloak-issued JWT.
+  #   2. Real-browser PKCE round-trip — Playwright drives a headless
+  #      Chromium through Login → Keycloak form → /auth/callback →
+  #      token exchange → logout (mi-dwx). Catches SPA routing
+  #      (mi-0ag), CSP (mi-cl1), runtime-config gating (mi-rvn), and
+  #      everything else only a real browser exercises.
   #
-  # Placement decision (bead asked for one): a standalone job that
-  # runs on EVERY PR — not folded into compose-smoke, not gated to
-  # auth paths. Rationale: it runs in parallel with backend /
-  # frontend / compose-smoke, so its ~1-2 min (keycloak cold start +
-  # terraform apply, on top of the app image build) never lands on
-  # the critical path. A `paths:` filter would save runner-minutes
-  # but trade away the always-green guarantee — for an auth path
-  # that's the wrong trade. Revisit if PR CI wall-clock regresses.
+  # Folded into one job so both halves share the compose stack
+  # (keycloak cold start + terraform apply happen once).
   #
-  # Why the compose override (.github/keycloak-ci.compose.yml): the
-  # app *container* must reach Keycloak on the same URL the token
-  # `iss` carries. See that file's header for the full explanation.
+  # Placement decision: a standalone job that runs on EVERY PR — not
+  # folded into compose-smoke, not gated to auth paths. Rationale: it
+  # runs in parallel with backend / frontend / compose-smoke, so its
+  # ~3-4 min wall-clock never lands on the critical path. A `paths:`
+  # filter would save runner-minutes but trade away the always-green
+  # guarantee — for an auth path that's the wrong trade. Revisit if
+  # PR CI wall-clock regresses.
+  #
+  # No compose override needed (mi-9eq). An earlier
+  # `.github/keycloak-ci.compose.yml` set `KC_HOSTNAME=http://keycloak:8080`
+  # so the app *container* could reach Keycloak for OIDC discovery —
+  # but that broke the browser PKCE flow because Keycloak then
+  # rendered login form actions pointing at the in-network hostname
+  # `keycloak:8080` that the browser cannot resolve. The override is
+  # also unnecessary now: docker-compose.yml sets
+  # `OIDC_JWKS_URL=http://keycloak:8080/.../certs`, which makes
+  # internal/oidc/verifier.go skip OIDC discovery entirely (string-
+  # only `iss` match against `OIDC_ISSUER_URL=http://localhost:8081/...`).
+  # Keeping the single compose hostname `http://localhost:8081` makes
+  # both browser and backend paths work simultaneously.
   keycloak-smoke:
-    name: Backend JWT acceptance
+    name: Keycloak auth smoke
     runs-on: ubuntu-latest
     # Bumped from 12 → 18 min when the Playwright PKCE round-trip
     # (mi-dwx) was added: + Chromium download on cache miss, + ~30 s
     # for the spec itself (login + token exchange + logout). The
     # spec's own per-test cap is 90 s.
     timeout-minutes: 18
-    env:
-      COMPOSE_FILES: -f docker-compose.yml -f .github/keycloak-ci.compose.yml
     steps:
       - uses: actions/checkout@v4
 
@@ -318,7 +320,7 @@ jobs:
           terraform_wrapper: false
 
       - name: docker compose up (with keycloak)
-        run: docker compose --profile keycloak $COMPOSE_FILES up -d
+        run: docker compose --profile keycloak up -d
 
       - name: Wait for Keycloak ready
         run: |
@@ -330,7 +332,7 @@ jobs:
             sleep 2
           done
           echo "Keycloak did not become ready in 180s" >&2
-          docker compose --profile keycloak $COMPOSE_FILES logs keycloak >&2 || true
+          docker compose --profile keycloak logs keycloak >&2 || true
           exit 1
 
       - name: Seed Keycloak realm + test users
@@ -355,8 +357,8 @@ jobs:
             sleep 1
           done
           echo "App did not respond ok on /healthz in 120s" >&2
-          docker compose --profile keycloak $COMPOSE_FILES ps >&2 || true
-          docker compose --profile keycloak $COMPOSE_FILES logs app >&2 || true
+          docker compose --profile keycloak ps >&2 || true
+          docker compose --profile keycloak logs app >&2 || true
           exit 1
 
       - name: Backend serves anonymous /api/v1/runtime-config with OIDC block (mi-rvn)
@@ -473,7 +475,7 @@ jobs:
           if [ "$code" != "200" ]; then
             echo "expected 200 for valid-token request, got $code" >&2
             cat /tmp/profile.json >&2 || true
-            docker compose --profile keycloak $COMPOSE_FILES logs app >&2 || true
+            docker compose --profile keycloak logs app >&2 || true
             exit 1
           fi
           echo "valid Keycloak token accepted with 200: $(cat /tmp/profile.json)"
@@ -556,4 +558,4 @@ jobs:
 
       - name: docker compose down
         if: always()
-        run: docker compose --profile keycloak $COMPOSE_FILES down -v
+        run: docker compose --profile keycloak down -v
