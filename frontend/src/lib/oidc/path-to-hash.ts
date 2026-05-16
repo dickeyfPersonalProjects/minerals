@@ -15,3 +15,5 @@ if (window.location.pathname === '/auth/callback') {
   const search = window.location.search;
   window.history.replaceState(null, '', `/#/auth/callback${search}`);
 }
+
+export {};
