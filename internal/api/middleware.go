@@ -159,25 +159,41 @@ func SecurityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// csp is the §17 Content-Security-Policy applied to every response.
-const csp = "default-src 'self'; " +
-	"script-src 'self'; " +
-	"style-src 'self' 'unsafe-inline'; " +
-	"img-src 'self' data:; " +
-	"font-src 'self'; " +
-	"connect-src 'self'; " +
-	"frame-ancestors 'none'; " +
-	"base-uri 'self'; " +
-	"form-action 'self'"
+// buildCSP returns the §17 Content-Security-Policy applied to every
+// response. When issuerOrigin is non-empty (PUBLIC_OIDC_ISSUER_URL
+// configured), it is added to `connect-src` so the SPA can POST to
+// the OIDC token endpoint during the PKCE flow (mi-cl1). The origin
+// MUST be a scheme://host[:port] value — never a path or wildcard
+// (§17 forbids wildcards).
+func buildCSP(issuerOrigin string) string {
+	connectSrc := "connect-src 'self'"
+	if issuerOrigin != "" {
+		connectSrc += " " + issuerOrigin
+	}
+	return "default-src 'self'; " +
+		"script-src 'self'; " +
+		"style-src 'self' 'unsafe-inline'; " +
+		"img-src 'self' data:; " +
+		"font-src 'self'; " +
+		connectSrc + "; " +
+		"frame-ancestors 'none'; " +
+		"base-uri 'self'; " +
+		"form-action 'self'"
+}
 
 // CSP applies the §17 Content-Security-Policy. Kept separate from
 // SecurityHeaders so a future per-route exception (e.g. relaxed CSP
 // for /docs) is a one-line override without touching the rest.
-func CSP(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", csp)
-		next.ServeHTTP(w, r)
-	})
+// issuerOrigin is the parsed PUBLIC_OIDC_ISSUER_URL origin; empty
+// disables the cross-origin allowance (no auth configured).
+func CSP(issuerOrigin string) func(http.Handler) http.Handler {
+	policy := buildCSP(issuerOrigin)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Security-Policy", policy)
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // Chain composes middlewares right-to-left so the first listed runs
