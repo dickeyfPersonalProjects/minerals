@@ -342,6 +342,30 @@ jobs:
           docker compose --profile keycloak $COMPOSE_FILES logs app >&2 || true
           exit 1
 
+      - name: Anonymous smoke — runtime-config exposes OIDC block (mi-rvn)
+        # The SPA's Login button is gated on an anonymous GET to
+        # /api/v1/runtime-config returning a non-null `oidc` object —
+        # this is what tells the navbar that login is wired up. If the
+        # endpoint either 401s anonymous callers or omits the oidc
+        # block, the Login button never renders and users have no way
+        # to authenticate. Assert both: 200 + `oidc` present.
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/rc.json -w '%{http_code}' \
+            http://localhost:8080/api/v1/runtime-config)
+          if [ "$code" != "200" ]; then
+            echo "expected 200 for anonymous runtime-config, got $code" >&2
+            cat /tmp/rc.json >&2 || true
+            exit 1
+          fi
+          if ! jq -e '.oidc.client_id and .oidc.issuer_url and .oidc.redirect_uri' \
+              /tmp/rc.json >/dev/null; then
+            echo "runtime-config missing oidc block; body:" >&2
+            cat /tmp/rc.json >&2
+            exit 1
+          fi
+          echo "anonymous runtime-config returned oidc block: $(cat /tmp/rc.json)"
+
       - name: Auth smoke — no token is rejected (401)
         # POST /api/v1/profile is a protected endpoint. Without a
         # bearer token the auth middleware MUST reject it before the
