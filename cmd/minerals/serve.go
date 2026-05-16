@@ -184,6 +184,7 @@ func runServe(_ []string) error {
 			ClientID:    cfg.PublicOIDCClientID,
 			RedirectURI: cfg.PublicOIDCRedirectURI,
 		},
+		CSPIssuerOrigin: cfg.PublicOIDCIssuerOrigin,
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        db.NewJournalEntryPostgres(pool),
 			Attachments:    db.NewJournalEntryFilePostgres(pool),

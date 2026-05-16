@@ -89,6 +89,12 @@ type Deps struct {
 	// disables the OIDC block in the response, which signals to the
 	// SPA that login is unavailable in this environment.
 	RuntimeOIDC RuntimeOIDCConfig
+	// CSPIssuerOrigin is the scheme://host[:port] of the OIDC issuer,
+	// added to the §17 CSP `connect-src` directive so the SPA can POST
+	// to the Keycloak token endpoint during the PKCE flow (mi-cl1).
+	// Empty when no OIDC is configured — CSP stays 'self'-only.
+	// Sourced from config.PublicOIDCIssuerOrigin (validated at load).
+	CSPIssuerOrigin string
 	// Users powers the first-login gate (mi-2hf): the auth chain
 	// resolves the JWT `sub` to a row here, auto-creates a pending
 	// row on first-login, and gates protected endpoints with a 403
@@ -203,7 +209,7 @@ func New(deps Deps) http.Handler {
 	// historical order: Recovery → RequestID → SecHeaders → CSP →
 	// Logging → [auth.Auth → auth.RequireUser →] handler.
 	publicMW := []func(http.Handler) http.Handler{
-		Recovery, RequestID, SecurityHeaders, CSP, Logging,
+		Recovery, RequestID, SecurityHeaders, CSP(deps.CSPIssuerOrigin), Logging,
 	}
 	return Chain(mux, publicMW...)
 }
@@ -457,6 +463,13 @@ const redocHTML = `<!doctype html>
 // docsCSP is the per-route CSP for /docs. It overrides the global
 // §17 CSP just for this endpoint to allow the Redoc bundle from the
 // pinned CDN. Inline styles and blob workers are required by Redoc.
+//
+// `connect-src 'self'` is intentionally tighter than the global CSP
+// (which appends the OIDC issuer origin when configured): the Redoc
+// page is a static spec viewer that only fetches /api/v1/openapi.json
+// from the same origin. It does NOT initiate the OIDC flow — login
+// happens on the SPA, not here — so widening connect-src to the
+// Keycloak origin would be unjustified cross-origin allow-listing.
 const docsCSP = "default-src 'self'; " +
 	"script-src 'self' https://cdn.redoc.ly; " +
 	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
