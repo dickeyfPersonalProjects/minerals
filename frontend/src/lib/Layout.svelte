@@ -21,14 +21,18 @@
   const showQrSheetLink = $derived(sheetState.status === 'loaded');
 
   // Authenticated users get the profile menu; everyone else gets the
-  // Login button, but only once the runtime-config fetch has
-  // confirmed the backend actually has OIDC configured.
+  // Login button. Show the button optimistically — hide it only when
+  // we have positive confirmation that OIDC is NOT configured in this
+  // environment ('ready' with a null config). Loading/error/unloaded
+  // states keep the button visible so anonymous users always have an
+  // affordance to log in; clicking before the config resolves awaits
+  // the in-flight fetch (or retries on prior error) and toasts a
+  // friendly message if OIDC really is unconfigured.
   const auth = $derived($authStore);
   const oidcState = $derived($oidcConfigStore);
   const showProfileMenu = $derived(auth.accessToken !== null);
-  const showLoginButton = $derived(
-    !showProfileMenu && oidcState.kind === 'ready' && oidcState.config !== null,
-  );
+  const oidcKnownDisabled = $derived(oidcState.kind === 'ready' && oidcState.config === null);
+  const showLoginButton = $derived(!showProfileMenu && !oidcKnownDisabled);
 
   onMount(() => {
     // Probe once on app load. The store ignores 404s and keeps the
