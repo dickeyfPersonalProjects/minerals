@@ -30,6 +30,16 @@ export default [
   },
   {
     // Generated API client (mi-cy4): rewritten by `make gen-api-client`.
-    ignores: ['dist/', 'node_modules/', 'coverage/', '.svelte-kit/', 'src/lib/api/schema.d.ts'],
+    // Playwright report/output dirs (mi-dwx) are gitignored and have
+    // no source to lint.
+    ignores: [
+      'dist/',
+      'node_modules/',
+      'coverage/',
+      '.svelte-kit/',
+      'playwright-report/',
+      'test-results/',
+      'src/lib/api/schema.d.ts',
+    ],
   },
 ];

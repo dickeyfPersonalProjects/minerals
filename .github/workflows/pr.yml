@@ -300,7 +300,11 @@ jobs:
   keycloak-smoke:
     name: Backend JWT acceptance
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    # Bumped from 12 → 18 min when the Playwright PKCE round-trip
+    # (mi-dwx) was added: + Chromium download on cache miss, + ~30 s
+    # for the spec itself (login + token exchange + logout). The
+    # spec's own per-test cap is 90 s.
+    timeout-minutes: 18
     env:
       COMPOSE_FILES: -f docker-compose.yml -f .github/keycloak-ci.compose.yml
     steps:
@@ -484,6 +488,71 @@ jobs:
             exit 1
           fi
           echo "malformed token rejected with 401"
+
+      # Real-browser PKCE round-trip (mi-dwx). The curl assertions
+      # above cover backend JWT verification and the structural CSP /
+      # runtime-config preconditions; this step covers the live SPA →
+      # Keycloak → token-exchange → logout path that those structural
+      # checks can only approximate. Three sequential P0 bugs
+      # (mi-rvn, mi-0ag, mi-cl1) all shipped past the curl-based smoke
+      # because each lives in a layer only a real browser exercises.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm ci (frontend)
+        working-directory: frontend
+        run: npm ci
+
+      # Cache Playwright's browser binaries (~200 MB for Chromium +
+      # ffmpeg) keyed on the resolved Playwright version. Re-download
+      # is automatic on cache miss; never silently use a stale binary.
+      - name: Resolve Playwright version
+        id: pw
+        working-directory: frontend
+        run: |
+          version=$(node -p "require('@playwright/test/package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: |
+          if [ "${{ steps.pw-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
+
+      - name: Playwright auth round-trip
+        working-directory: frontend
+        env:
+          CI: 'true'
+          E2E_BASE_URL: 'http://localhost:8080'
+        run: npm run e2e
+
+      # Upload the Playwright HTML report + traces / videos /
+      # screenshots when the spec fails. The bead's acceptance test:
+      # a failure must give enough context to triage without a local
+      # repro. The report includes the full timeline + DOM snapshots.
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: docker compose down
         if: always()

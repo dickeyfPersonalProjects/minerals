@@ -19,6 +19,9 @@ junit.xml
 node_modules/
 frontend/dist/
 frontend/coverage/
+# Playwright e2e (mi-dwx): HTML report + per-test artifact dirs.
+frontend/playwright-report/
+frontend/test-results/
 
 # Editor / OS
 .DS_Store
