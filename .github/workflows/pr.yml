@@ -266,11 +266,24 @@ jobs:
         if: always()
         run: docker compose down -v
 
-  # End-to-end auth smoke test against a real Keycloak (mi-ivk). The
+  # Backend JWT acceptance test against a real Keycloak (mi-ivk). The
   # Backend job covers JWT verification with a mock JWKS — fast and
-  # deterministic. This job covers the other half: prove the app
+  # deterministic. This job covers the other half: prove the backend
   # accepts a token minted by a real Keycloak, brought up the way a
   # contributor would (`--profile keycloak` + terraform/keycloak/).
+  #
+  # OUT OF SCOPE — browser-side behavior. This job uses curl + the
+  # password grant against a test-only client; it never loads the
+  # SPA, runs no JavaScript, and executes no PKCE redirect. That
+  # means it CANNOT catch: SPA routing bugs (e.g. mi-0ag), CSP
+  # directives that block the browser's cross-origin token POST
+  # (e.g. mi-cl1), the runtime-config gate the Login button depends
+  # on (mi-rvn — partially asserted below via curl, but the button
+  # itself is never rendered), the PKCE redirect handshake, or any
+  # cookie/storage/same-origin behavior. Those are covered by the
+  # real-browser smoke (mi-dwx). If a polecat is tempted to read
+  # this job's green status as "auth works end-to-end", it does not
+  # — it means "the backend accepts a Keycloak-issued JWT".
   #
   # Placement decision (bead asked for one): a standalone job that
   # runs on EVERY PR — not folded into compose-smoke, not gated to
@@ -285,7 +298,7 @@ jobs:
   # app *container* must reach Keycloak on the same URL the token
   # `iss` carries. See that file's header for the full explanation.
   keycloak-smoke:
-    name: Keycloak auth smoke
+    name: Backend JWT acceptance
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
@@ -342,7 +355,7 @@ jobs:
           docker compose --profile keycloak $COMPOSE_FILES logs app >&2 || true
           exit 1
 
-      - name: Anonymous smoke — runtime-config exposes OIDC block (mi-rvn)
+      - name: Backend serves anonymous /api/v1/runtime-config with OIDC block (mi-rvn)
         # The SPA's Login button is gated on an anonymous GET to
         # /api/v1/runtime-config returning a non-null `oidc` object —
         # this is what tells the navbar that login is wired up. If the
@@ -366,7 +379,7 @@ jobs:
           fi
           echo "anonymous runtime-config returned oidc block: $(cat /tmp/rc.json)"
 
-      - name: CSP smoke — connect-src includes Keycloak origin (mi-cl1)
+      - name: Backend CSP header allows OIDC issuer origin in connect-src (mi-cl1)
         # Regression guard for mi-cl1: the previous smoke minted tokens
         # via curl, which bypasses the browser CSP entirely — so a
         # CSP with `connect-src 'self'` (forbidding the cross-origin
@@ -413,7 +426,7 @@ jobs:
               ;;
           esac
 
-      - name: Auth smoke — no token is rejected (401)
+      - name: Backend rejects requests without a bearer token (401)
         # POST /api/v1/profile is a protected endpoint. Without a
         # bearer token the auth middleware MUST reject it before the
         # handler runs.
@@ -426,7 +439,7 @@ jobs:
           fi
           echo "no-token request rejected with 401"
 
-      - name: Auth smoke — real Keycloak token is accepted (200)
+      - name: Backend accepts a real Keycloak-issued JWT (200)
         # Mint a token for a seeded test user via the password grant
         # against the dev realm, then call the same protected endpoint
         # with it. A 200 proves the app discovered the realm JWKS,

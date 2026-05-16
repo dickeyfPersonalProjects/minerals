@@ -1,6 +1,7 @@
-# CI-only docker-compose override for the Keycloak auth smoke test
-# (mi-ivk). Layered on top of docker-compose.yml in the
-# `keycloak-smoke` job of pr.yml — NOT used for local dev.
+# CI-only docker-compose override for the Backend JWT acceptance
+# test (mi-ivk). Layered on top of docker-compose.yml in the
+# `keycloak-smoke` job (display name: "Backend JWT acceptance") of
+# pr.yml — NOT used for local dev.
 #
 # Why this override exists: split-horizon URLs.
 #
