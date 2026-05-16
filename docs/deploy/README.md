@@ -12,9 +12,12 @@ the hostname/namespace, regenerate the SealedSecrets, and have a
 working deployment.
 
 > **Pairs with** [`encrypt.md`](./encrypt.md) for the kubeseal workflow
-> used by the SealedSecret manifests in the example, and
+> used by the SealedSecret manifests in the example,
 > [`secrets.md`](./secrets.md) for the inventory of every Secret the
-> deployment consumes.
+> deployment consumes, [`keycloak.md`](./keycloak.md) for the full
+> Keycloak/OIDC setup that auth depends on, and
+> [`CONFIG.md`](../../CONFIG.md) for the canonical list of every env
+> var the app reads.
 
 ---
 
@@ -99,6 +102,103 @@ Flux re-pulling on the next reconcile (the base sets
 
 ---
 
+## Required configuration
+
+Every overlay must supply the values below. The base ConfigMap
+([`kustomize/base/configmap.yaml`](../../kustomize/base/configmap.yaml))
+ships sensible defaults for the env-agnostic keys (`PORT`, `LOG_LEVEL`,
+`S3_BUCKET`, `S3_REGION`, `MAX_UPLOAD_BYTES`, `S3_ENDPOINT`) and a default
+of `ENV: prod` — overlays MUST patch the hostname-dependent keys and
+SHOULD patch `ENV` explicitly (see [The ENV ConfigMap patch is in BOTH
+overlays](#the-env-configmap-patch-is-in-both-overlays)).
+
+[`CONFIG.md`](../../CONFIG.md) is the canonical inventory; the table
+here is the operator's per-env checklist, not a duplicate of the full
+contract.
+
+### Backend OIDC (ConfigMap patch — required for login)
+
+| Env var | Required | Example | Notes |
+|---|---|---|---|
+| `OIDC_ISSUER_URL` | **yes** | `https://auth.example.com/realms/minerals` | Keycloak realm URL. Backend uses it to discover JWKS and verify the `iss` claim. Must match the SPA's `iss`. |
+| `OIDC_CLIENT_ID` | **yes** | `minerals-frontend` | Expected `aud` on bearer tokens (audience check only — no client secret). |
+| `OIDC_JWKS_URL` | no | _(leave unset in prod)_ | Override discovery only when the in-cluster issuer differs from the public one (dev-only escape hatch). |
+
+### SPA OIDC (ConfigMap patch — required for login)
+
+These are read by the backend and served to the SPA via
+`/api/v1/runtime-config`. The `PUBLIC_` prefix marks them as safe to
+ship to the browser.
+
+| Env var | Required | Example | Notes |
+|---|---|---|---|
+| `PUBLIC_OIDC_ISSUER_URL` | **yes** | `https://auth.example.com/realms/minerals` | Same value as `OIDC_ISSUER_URL` today. SPA uses it to discover the authorization endpoint. |
+| `PUBLIC_OIDC_CLIENT_ID` | **yes** | `minerals-frontend` | Public client id for the auth-code-with-PKCE flow. |
+| `PUBLIC_OIDC_REDIRECT_URI` | **yes** | `https://www.example.com/auth/callback` | Absolute callback URL. MUST match a `valid_redirect_uris` entry on the `minerals-frontend` Keycloak client. |
+
+### Non-OIDC overlay-supplied config
+
+| Env var | Required | Example | Notes |
+|---|---|---|---|
+| `ENV` | **yes** (SHOULD patch) | `prod` / `staging` | Flips strictness checks. Base defaults to `prod`; patch explicitly to keep overlays symmetric. |
+| Image tag (`images[0].newTag`) | **yes** | `prod` / `staging` | Set on the Flux `Kustomization`, not the ConfigMap. |
+| Ingress hostname | **yes** | `mineral.example.com` | Lives on the `Ingress` + `Certificate`, not the ConfigMap. |
+
+### Required secrets
+
+Three Secrets, all consumed by the deployment via `envFrom` /
+`secretKeyRef`. The full inventory (including auto-generated ones)
+lives in [`secrets.md`](./secrets.md).
+
+- `minerals-minio-config` — MinIO root creds (key `config.env`).
+- `minerals-s3-creds` — `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
+- `minerals-pg-app` — CNPG-managed; supplies `DATABASE_URL` via the
+  `uri` key. Never committed.
+
+**No Secret is required for OIDC.** The backend is a pure resource
+server — it validates JWTs against Keycloak's public JWKS and holds
+no `client_secret`.
+
+---
+
+## Authentication setup
+
+**Keycloak is required for login to work in any env.** The OIDC env
+vars above are not optional decorations — without a working Keycloak
+realm and the five `OIDC_*` / `PUBLIC_OIDC_*` keys set in the overlay
+ConfigMap patch, users cannot sign in.
+
+Follow [`keycloak.md`](./keycloak.md) for the full setup:
+
+- Per-env base + overlay for the Keycloak operator
+  (`kustomize/base/keycloak/` + `example/<env>/keycloak/`).
+- Terraform module ([`terraform/keycloak/`](../../terraform/keycloak/))
+  that provisions the realm, the `minerals-frontend` client (with the
+  redirect URIs that must match `PUBLIC_OIDC_REDIRECT_URI`), the
+  `minerals-backend` client, and the devops roles.
+- Wiring Terraform outputs (`realm_issuer`, `frontend_client_id`,
+  redirect URI pattern) into the ConfigMap patch values above.
+
+### Failure mode if OIDC vars are unset
+
+If any of the five `OIDC_*` / `PUBLIC_OIDC_*` keys are missing from
+the overlay ConfigMap patch, the backend still starts (the keys are
+not "required in prod" in `CONFIG.md` — the app degrades rather than
+crashes), but:
+
+- `/api/v1/runtime-config` returns `{ oidc: null }`.
+- The SPA's `oidcState` becomes `{ kind: 'ready', config: null }`.
+- The Login button stays hidden — the SPA shows an "auth not
+  configured" hint in its place (added by mi-rvn so the broken state
+  is visible to operators instead of silently presenting a Login-less
+  page).
+
+If you deploy a new env and see no Login button, the OIDC ConfigMap
+patch is the first thing to check. The hint exists because this
+silent-failure mode (mi-rvn) burned a real operator.
+
+---
+
 ## Walkthrough: directory layout
 
 ```
@@ -106,6 +206,7 @@ docs/deploy/
 ├── README.md                 ← you are here
 ├── encrypt.md                ← kubeseal workflow
 ├── secrets.md                ← Secret inventory + new-secret workflow
+├── keycloak.md               ← Keycloak/OIDC setup (required for login)
 └── example/
     ├── kustomization.yaml    ← aggregates staging + prod
     ├── flux-source/
@@ -157,6 +258,8 @@ Only these things vary between staging and prod in the example:
 | `Kustomization.metadata.name`  | `mineral-staging`                    | `mineral-prod`                    |
 | `images[0].newTag`             | `staging`                            | `prod`                            |
 | ConfigMap `ENV` patch value    | `staging`                            | `prod`                            |
+| `OIDC_ISSUER_URL` / `PUBLIC_OIDC_ISSUER_URL` | `https://auth.staging.example.com/realms/minerals` | `https://auth.example.com/realms/minerals` |
+| `PUBLIC_OIDC_REDIRECT_URI`     | `https://www.staging.example.com/auth/callback` | `https://www.example.com/auth/callback` |
 | SealedSecret ciphertext        | encrypted to `mineral-staging` scope | encrypted to `mineral-prod` scope |
 
 Everything else is identical on purpose. Symmetric overlays make
@@ -193,10 +296,20 @@ that the overlay's behavior is obvious from the overlay itself.
 3. Generate fresh SealedSecrets for the new namespace — see
    [`encrypt.md`](./encrypt.md). The ciphertext is namespace-scoped, so
    you cannot reuse staging's.
-4. Add the new directory to the parent `kustomization.yaml`.
-5. Open a PR against the gitops repository (commits there require human
+4. Stand up Keycloak for the new env and apply the realm Terraform —
+   see [`keycloak.md`](./keycloak.md). The `minerals-frontend` client's
+   `valid_redirect_uris` must include the SPA's `/auth/callback`
+   on the new hostname.
+5. Edit the OIDC ConfigMap patch in the new overlay's `mineral.yaml`
+   to point `OIDC_ISSUER_URL`, `PUBLIC_OIDC_ISSUER_URL`,
+   `PUBLIC_OIDC_CLIENT_ID`, `OIDC_CLIENT_ID`, and
+   `PUBLIC_OIDC_REDIRECT_URI` at this env's Keycloak realm and SPA
+   hostname. Skipping this step leaves login silently broken — see
+   [Authentication setup](#authentication-setup).
+6. Add the new directory to the parent `kustomization.yaml`.
+7. Open a PR against the gitops repository (commits there require human
    approval).
-6. After merge, the cluster's flux-system reconciles the new env on
+8. After merge, the cluster's flux-system reconciles the new env on
    its next poll.
 
 ---
@@ -240,6 +353,8 @@ small:
 
 ## Cross-references
 
+- Canonical env var inventory (defaults, required-in-prod, source): [`CONFIG.md`](../../CONFIG.md).
+- Keycloak setup (operator base/overlay + realm Terraform + dev quickstart): [`keycloak.md`](./keycloak.md).
 - Secret inventory + new-secret workflow: [`secrets.md`](./secrets.md).
 - App contract / non-secret env vars / secret env vars: [`CONTRACT.md`](../../CONTRACT.md) §15.
 - IaC layout rule (base in app repo, overlay in GitOps repo): `CONTRACT.md` §2.
