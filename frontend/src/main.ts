@@ -1,18 +1,13 @@
+// OIDC path→hash rewrite — MUST be the first import. It runs before
+// svelte-spa-router loads so the router's one-shot URL read sees the
+// rewritten hash URL. See `lib/oidc/path-to-hash.ts` for the why.
+import './lib/oidc/path-to-hash';
 import './app.css';
 import { mount } from 'svelte';
 import App from './App.svelte';
 import { installToastMiddleware } from './lib/api/wrapper';
 import { installAuthHeaderMiddleware } from './lib/oidc/middleware';
 import { themeStore } from './lib/theme';
-
-// Keycloak redirects back to a path-based callback URL
-// (`/auth/callback?code=...&state=...`), but svelte-spa-router is
-// hash-based. Rewrite the location before mount so the SPA router
-// can match the `/auth/callback` route normally.
-if (window.location.pathname === '/auth/callback') {
-  const search = window.location.search;
-  window.history.replaceState(null, '', `/#/auth/callback${search}`);
-}
 
 // Initialise the theme store synchronously before mount so the
 // document gets the correct `.dark` class before first paint.
