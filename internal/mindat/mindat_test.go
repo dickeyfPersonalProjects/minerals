@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -176,6 +177,66 @@ func TestLookupByName_NormalizesHTMLFormula(t *testing.T) {
 		t.Errorf("formula still contains markup: %q", *rec.Data.ChemicalFormula)
 	}
 }
+
+// TestLookupByName_MagnetismMapping exercises the heuristic that
+// turns Mindat's free-text `magnetism` field into MineralData.Magnetic.
+// Anything non-empty and non-"diamagnetic" maps to true; empty and
+// diamagnetic stay nil (the UI checkbox default is unchecked, which
+// matches "unknown / not magnetic to the naked magnet").
+func TestLookupByName_MagnetismMapping(t *testing.T) {
+	cases := []struct {
+		name      string
+		magnetism string
+		want      *bool
+	}{
+		{"magnetite ferromagnetic", "ferromagnetic", ptrBool(true)},
+		{"paramagnetic", "Paramagnetic", ptrBool(true)},
+		{"antiferromagnetic", "antiferromagnetic", ptrBool(true)},
+		{"diamagnetic case-insensitive", "Diamagnetic", nil},
+		{"empty magnetism", "", nil},
+		{"whitespace only", "   ", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"results":[{"id":1,"name":"Sample","magnetism":` +
+				strconv.Quote(tc.magnetism) + `}]}`
+			_, c := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(body))
+			})
+			rec, err := c.LookupByName(context.Background(), "Sample")
+			if err != nil {
+				t.Fatalf("lookup: %v", err)
+			}
+			switch {
+			case tc.want == nil && rec.Data.Magnetic != nil:
+				t.Errorf("Magnetic = %v, want nil", *rec.Data.Magnetic)
+			case tc.want != nil && rec.Data.Magnetic == nil:
+				t.Errorf("Magnetic = nil, want *%v", *tc.want)
+			case tc.want != nil && rec.Data.Magnetic != nil && *rec.Data.Magnetic != *tc.want:
+				t.Errorf("Magnetic = *%v, want *%v", *rec.Data.Magnetic, *tc.want)
+			}
+		})
+	}
+}
+
+// TestLookupByName_MagnetismFieldRequested confirms the magnetism
+// column is in the `fields=` query — a regression here would silently
+// blank the magnetic checkbox for every lookup.
+func TestLookupByName_MagnetismFieldRequested(t *testing.T) {
+	var gotFields string
+	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotFields = r.URL.Query().Get("fields")
+		_, _ = w.Write([]byte(`{"results":[{"id":1,"name":"Quartz"}]}`))
+	})
+	if _, err := c.LookupByName(context.Background(), "Quartz"); err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if !strings.Contains(gotFields, "magnetism") {
+		t.Errorf("fields query missing magnetism: %q", gotFields)
+	}
+}
+
+func ptrBool(b bool) *bool { return &b }
 
 func TestLookupByName_HardnessRangeMidpoint(t *testing.T) {
 	const body = `{"results":[{"id":1,"name":"Talc","hardness_min":1,"hardness_max":2}]}`
