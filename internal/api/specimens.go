@@ -106,8 +106,8 @@ type SpecimenView struct {
 	Visibility    domain.Visibility   `json:"visibility" enum:"private,unlisted,public" doc:"Sharing visibility."`
 	AuthorID      uuid.UUID           `json:"author_id" doc:"UUID of the user who created the row (CONTRACT.md §13)."`
 	AcquiredAt    *time.Time          `json:"acquired_at" doc:"Acquisition date (RFC 3339, time component ignored)."`
-	AcquiredFrom  *string             `json:"acquired_from" doc:"Where the specimen was acquired (free text)."`
-	PriceCents    *int64              `json:"price_cents" doc:"Acquisition price in cents."`
+	AcquiredFrom  *string             `json:"acquired_from,omitempty" doc:"Where the specimen was acquired (free text). Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property."`
+	PriceCents    *int64              `json:"price_cents,omitempty" doc:"Acquisition price in cents. Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset'."`
 	SourceNotes   *string             `json:"source_notes" doc:"Free-form provenance notes."`
 	LocalityText  *string             `json:"locality_text" doc:"Free-form locality (primary display)."`
 	Locality      *domain.Locality    `json:"locality" doc:"Optional structured locality."`
@@ -236,14 +236,15 @@ type deleteSpecimenOutput struct{}
 // SpecimenService wires huma operations against a domain.SpecimenRepo.
 type SpecimenService struct {
 	repo  domain.SpecimenRepo
+	users domain.UserRepo
 	authz authzGuard
 }
 
-func registerSpecimenOperations(api huma.API, authMW authMiddlewares, guard authzGuard, repo domain.SpecimenRepo) {
+func registerSpecimenOperations(api huma.API, authMW authMiddlewares, guard authzGuard, repo domain.SpecimenRepo, users domain.UserRepo) {
 	if repo == nil {
 		return
 	}
-	s := &SpecimenService{repo: repo, authz: guard}
+	s := &SpecimenService{repo: repo, users: users, authz: guard}
 	mws := authMW.Protected()
 	optionalMWs := authMW.Optional()
 
@@ -371,9 +372,10 @@ func (s *SpecimenService) list(ctx context.Context, in *listSpecimensInput) (*li
 	if err != nil {
 		return nil, mapListError(err)
 	}
+	red := newRedactor(s.users, s.authz)
 	items := make([]SpecimenView, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, toSpecimenView(r))
+		items = append(items, red.redactSpecimen(ctx, r))
 	}
 	body := specimenListBody{Items: items}
 	if cursor != "" {
@@ -396,7 +398,8 @@ func (s *SpecimenService) get(ctx context.Context, in *getSpecimenInput) (*speci
 		"specimen_not_found", "no such specimen"); err != nil {
 		return nil, err
 	}
-	return &specimenResponseOutput{Body: toSpecimenView(sp)}, nil
+	red := newRedactor(s.users, s.authz)
+	return &specimenResponseOutput{Body: red.redactSpecimen(ctx, sp)}, nil
 }
 
 func (s *SpecimenService) create(ctx context.Context, in *createSpecimenInput) (*createSpecimenOutput, error) {
@@ -559,7 +562,8 @@ func (s *SpecimenService) patch(ctx context.Context, in *patchSpecimenInput) (*s
 	if err := s.repo.Update(ctx, nil, current); err != nil {
 		return nil, mapSpecimenError(err)
 	}
-	return &specimenResponseOutput{Body: toSpecimenView(current)}, nil
+	red := newRedactor(s.users, s.authz)
+	return &specimenResponseOutput{Body: red.redactSpecimen(ctx, current)}, nil
 }
 
 func (s *SpecimenService) delete(ctx context.Context, in *deleteSpecimenInput) (*deleteSpecimenOutput, error) {

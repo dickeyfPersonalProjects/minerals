@@ -44,6 +44,22 @@ func (r *UserPostgres) GetBySub(ctx context.Context, sub string) (domain.User, e
 	return u, nil
 }
 
+// GetByID returns the row whose id matches, or domain.ErrUserNotFound.
+// Used by the per-field visibility resolver (mi-fo8) to load a
+// specimen's owner so its FieldDefaults feed the resolution chain.
+func (r *UserPostgres) GetByID(ctx context.Context, id uuid.UUID) (domain.User, error) {
+	q := `SELECT ` + userColumns + ` FROM users WHERE id = $1`
+	row := r.pool.QueryRow(ctx, q, id)
+	u, err := scanUser(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.User{}, domain.ErrUserNotFound
+	}
+	if err != nil {
+		return domain.User{}, fmt.Errorf("user repo: get by id: %w", err)
+	}
+	return u, nil
+}
+
 // Create inserts a new user. Returns domain.ErrUserConflict when
 // keycloak_sub collides — the resolver maps that to "another request
 // won the race" and retries GetBySub.

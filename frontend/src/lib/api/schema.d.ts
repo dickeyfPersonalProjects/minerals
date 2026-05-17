@@ -13,7 +13,7 @@ export interface paths {
         };
         /**
          * List collectors
-         * @description Cursor-paginated list of collectors. Default ordering is `created_at DESC, id DESC`. Pass `?q=<text>` for substring match on name (case-insensitive).
+         * @description Cursor-paginated list of collectors. Default ordering is `created_at DESC, id DESC`. Pass `?q=<text>` for substring match on name (case-insensitive). Anonymous callers receive an empty list — collectors are owned per-user with no public tier (CONTRACT.md §13 v2).
          */
         get: operations["list-collectors"];
         put?: never;
@@ -35,7 +35,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get a collector by id */
+        /**
+         * Get a collector by id
+         * @description Returns 404 (not 403/401) when the caller does not own the collector (CONTRACT.md §13 v2 don't-leak-existence rule).
+         */
         get: operations["get-collector"];
         put?: never;
         post?: never;
@@ -80,7 +83,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get a journal entry by id */
+        /**
+         * Get a journal entry by id
+         * @description Returns 404 (not 403/401) when the caller does not own the entry (CONTRACT.md §13 v2 don't-leak-existence rule).
+         */
         get: operations["get-journal-entry"];
         put?: never;
         post?: never;
@@ -107,7 +113,7 @@ export interface paths {
         };
         /**
          * List a journal entry's attachments
-         * @description Returns attachments ordered by (position ASC, created_at ASC). v1 returns the full set in one response; pagination is deferred (entries have at most a handful of attachments in practice).
+         * @description Returns attachments ordered by (position ASC, created_at ASC). v1 returns the full set in one response; pagination is deferred (entries have at most a handful of attachments in practice). Returns 404 when the caller cannot see the parent journal entry — sub-resource visibility is inherited (CONTRACT.md §13 v2).
          */
         get: operations["list-journal-files"];
         put?: never;
@@ -345,7 +351,7 @@ export interface paths {
         };
         /**
          * List specimens
-         * @description Cursor-paginated list of specimens. Default ordering is `created_at DESC, id DESC`. When `?q=` is present, ordering switches to `ts_rank DESC, created_at DESC, id DESC` and a cursor previously issued under default ordering is rejected (clients discard cursors when filters or `q` change). `?collector_id=` filters to specimens whose chain contains the given collector (mi-zv3).
+         * @description Cursor-paginated list of specimens. Default ordering is `created_at DESC, id DESC`. When `?q=` is present, ordering switches to `ts_rank DESC, created_at DESC, id DESC` and a cursor previously issued under default ordering is rejected (clients discard cursors when filters or `q` change). `?collector_id=` filters to specimens whose chain contains the given collector (mi-zv3). Anonymous callers see public specimens only; the DB scope filter does the rest (CONTRACT.md §13 v2).
          */
         get: operations["list-specimens"];
         put?: never;
@@ -367,7 +373,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get a specimen by id */
+        /**
+         * Get a specimen by id
+         * @description Returns 404 (not 403/401) when the caller cannot see the specimen — anonymous and unauthorized callers receive the same response as for a non-existent row (CONTRACT.md §13 v2).
+         */
         get: operations["get-specimen"];
         put?: never;
         post?: never;
@@ -394,7 +403,7 @@ export interface paths {
         };
         /**
          * Get a specimen's collector chain
-         * @description Returns the ordered collector chain for the specimen. Empty array when the specimen has no collectors. 404 when the specimen does not exist.
+         * @description Returns the ordered collector chain for the specimen. Empty array when the specimen has no collectors. 404 when the specimen does not exist or the caller cannot see it — sub-resource visibility is inherited from the parent (CONTRACT.md §13 v2 don't-leak-existence rule).
          */
         get: operations["get-specimen-collectors"];
         /**
@@ -418,7 +427,7 @@ export interface paths {
         };
         /**
          * List a specimen's journal entries
-         * @description Cursor-paginated list ordered `created_at DESC, id DESC` (CONTRACT.md §10.3). Each entry includes `body_html` alongside `body_md`.
+         * @description Cursor-paginated list ordered `created_at DESC, id DESC` (CONTRACT.md §10.3). Each entry includes `body_html` alongside `body_md`. Returns 404 when the caller cannot see the parent specimen — sub-resource visibility is inherited (CONTRACT.md §13 v2).
          */
         get: operations["list-specimen-journal-entries"];
         put?: never;
@@ -442,7 +451,7 @@ export interface paths {
         };
         /**
          * List a specimen's photos
-         * @description Cursor-paginated list ordered by (position, created_at) ascending — the manual ordering the user controls.
+         * @description Cursor-paginated list ordered by (position, created_at) ascending — the manual ordering the user controls. Returns 404 when the caller cannot see the parent specimen — sub-resource visibility is inherited (CONTRACT.md §13 v2).
          */
         get: operations["list-specimen-photos"];
         put?: never;
@@ -1207,8 +1216,8 @@ export interface components {
              * @description Acquisition date (RFC 3339, time component ignored).
              */
             acquired_at: string | null;
-            /** @description Where the specimen was acquired (free text). */
-            acquired_from: string | null;
+            /** @description Where the specimen was acquired (free text). Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property. */
+            acquired_from?: string;
             /** @description UUID of the user who created the row (CONTRACT.md §13). */
             author_id: string;
             /** @description Optional human catalog number; unique across all specimens when set. */
@@ -1239,9 +1248,9 @@ export interface components {
             name: string;
             /**
              * Format: int64
-             * @description Acquisition price in cents.
+             * @description Acquisition price in cents. Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset'.
              */
-            price_cents: number | null;
+            price_cents?: number;
             /** @description Free-form provenance notes. */
             source_notes: string | null;
             /**
@@ -1298,15 +1307,6 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1427,15 +1427,6 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1724,15 +1715,6 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -1932,15 +1914,6 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2998,15 +2971,6 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -3120,15 +3084,6 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3351,15 +3306,6 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -3496,8 +3442,8 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description Unauthorized */
-            401: {
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3625,15 +3571,6 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
                 headers: {
                     [name: string]: unknown;
                 };

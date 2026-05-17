@@ -119,7 +119,14 @@ type PhotoServiceDeps struct {
 	// of their own — CONTRACT.md §13 v2). Required for per-resource
 	// enforcement; nil disables it (the unit-test path, alongside a
 	// nil Enforcer).
-	Specimens      domain.SpecimenRepo
+	Specimens domain.SpecimenRepo
+	// Users resolves the parent specimen's owner so the per-field
+	// visibility resolver (mi-fo8) can consult FieldDefaults when
+	// deciding which photos to redact from a list response or a
+	// download. nil disables redaction — the unit-test path,
+	// alongside a nil enforcer; redaction layers on top of, and
+	// requires, the §13 v2 enforcer.
+	Users          domain.UserRepo
 	MaxUploadBytes int64
 }
 
@@ -240,6 +247,39 @@ func (s *PhotoService) enforcePhoto(
 			"internal server error", nil)
 	}
 	return s.authz.check(ctx, photoResource(photoID, sp), act)
+}
+
+// canSeePhotoHTTP is the per-image visibility check for the raw
+// download routes (mi-fo8 / mi-9ww). It runs the photo-specific
+// resolution chain — image override, specimen VisibilityImages,
+// specimen overall, owner default, system default — and writes a
+// 404 envelope when the caller cannot see the resolved Visibility.
+// A nil enforcer or missing specimen repo makes the check a no-op,
+// matching the rest of the redaction surface and authzGuard's seam.
+//
+// A 404 (not 403) is deliberate: per CONTRACT.md §13 v2 a viewer
+// who is not allowed to see a photo MUST NOT be able to distinguish
+// "redacted" from "never existed."
+func (s *PhotoService) canSeePhotoHTTP(w http.ResponseWriter, r *http.Request, p domain.Photo) bool {
+	if !s.authz.active() || s.deps.Specimens == nil {
+		return true
+	}
+	sp, err := s.deps.Specimens.GetByID(r.Context(), p.SpecimenID)
+	if err != nil {
+		if errors.Is(err, domain.ErrSpecimenNotFound) {
+			writeError(w, http.StatusNotFound, "photo_not_found", "no such photo", nil)
+			return false
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "internal server error", nil)
+		return false
+	}
+	red := newRedactor(s.deps.Users, s.authz)
+	owner := red.loadOwner(r.Context(), sp.AuthorID)
+	if red.canSeePhoto(r.Context(), sp, owner, p) {
+		return true
+	}
+	writeError(w, http.StatusNotFound, "photo_not_found", "no such photo", nil)
+	return false
 }
 
 // enforcePhotoHTTP is the net/http analogue of enforcePhoto for the
@@ -526,16 +566,21 @@ func (s *PhotoService) list(ctx context.Context, in *listPhotosInput) (*listPhot
 	}
 	// CONTRACT.md §13 v2: resolve and visibility-check the parent
 	// before evaluating the sub-list. If the caller cannot see the
-	// parent, return 404 without touching the photos table.
+	// parent, return 404 without touching the photos table. The
+	// loaded specimen is reused for the per-field visibility
+	// redaction below (mi-fo8 / mi-9ww), which drives the per-photo
+	// drop predicate.
+	var sp domain.Specimen
 	if s.deps.Specimens != nil {
-		sp, sperr := s.deps.Specimens.GetByID(ctx, specimenID)
+		got, sperr := s.deps.Specimens.GetByID(ctx, specimenID)
 		if sperr != nil {
 			return nil, mapSpecimenError(sperr)
 		}
-		if err := s.authz.checkView(ctx, specimenResource(sp),
+		if err := s.authz.checkView(ctx, specimenResource(got),
 			"specimen_not_found", "no such specimen"); err != nil {
 			return nil, err
 		}
+		sp = got
 	}
 	page := domain.Page{Limit: in.Limit, Cursor: in.Cursor}
 	rows, cursor, err := s.deps.Photos.ListBySpecimen(ctx, specimenID, page)
@@ -543,8 +588,17 @@ func (s *PhotoService) list(ctx context.Context, in *listPhotosInput) (*listPhot
 		return nil, mapPhotoListError(err)
 	}
 
-	items := make([]PhotoView, 0, len(rows))
-	for _, p := range rows {
+	// Per-field visibility redaction (mi-fo8 / mi-9ww): drop photos
+	// the caller may not see. Done after the page is loaded so cursor
+	// pagination still walks the underlying ordering; the response
+	// can therefore contain fewer items than the page size. The
+	// caller MUST NOT learn how many photos were redacted (no count
+	// is exposed) — that is a deliberate privacy property.
+	red := newRedactor(s.deps.Users, s.authz)
+	visible := red.filterPhotos(ctx, sp, rows)
+
+	items := make([]PhotoView, 0, len(visible))
+	for _, p := range visible {
 		f, err := s.deps.Files.GetByID(ctx, p.FileID)
 		if err != nil {
 			return nil, newAPIError(http.StatusInternalServerError, "internal_error",
@@ -722,6 +776,14 @@ func (s *PhotoService) serveDownload(w http.ResponseWriter, r *http.Request, var
 	// CONTRACT.md §13 v2: viewing a photo's bytes requires view
 	// access to its parent specimen (public/unlisted shortcut applies).
 	if !s.enforcePhotoHTTP(w, r, p.SpecimenID, p.ID, actView) {
+		return
+	}
+	// mi-fo8 / mi-9ww: per-photo visibility resolution. A photo the
+	// parent-visibility check admitted may still be hidden by an
+	// image-level override or the specimen's VisibilityImages chain.
+	// Render the redacted state as 404 so existence is not leaked
+	// (matches what GET would have produced for a missing photo).
+	if !s.canSeePhotoHTTP(w, r, p) {
 		return
 	}
 	f, err := s.deps.Files.GetByID(ctx, p.FileID)

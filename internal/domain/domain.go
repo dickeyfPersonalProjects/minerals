@@ -707,6 +707,11 @@ type UserRepo interface {
 	// ErrUserNotFound. The lookup is the hot-path read used by the
 	// auth resolver on every authenticated request.
 	GetBySub(ctx context.Context, sub string) (User, error)
+	// GetByID returns the user whose id matches, or ErrUserNotFound.
+	// Used by the per-field visibility resolver (mi-fo8) to load a
+	// specimen's owner so the owner's FieldDefaults map can feed the
+	// resolution chain.
+	GetByID(ctx context.Context, id uuid.UUID) (User, error)
 	// Create inserts a new user. The caller has populated ID
 	// (UUIDv7), KeycloakSub, Email, Status, CreatedAt, UpdatedAt.
 	// Returns ErrUserConflict on (keycloak_sub) unique violation.

@@ -69,6 +69,20 @@ func (r *fakeUserRepo) GetBySub(_ context.Context, sub string) (domain.User, err
 	return u, nil
 }
 
+func (r *fakeUserRepo) GetByID(_ context.Context, id uuid.UUID) (domain.User, error) {
+	if r.getErr != nil {
+		return domain.User{}, r.getErr
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, u := range r.bySub {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return domain.User{}, domain.ErrUserNotFound
+}
+
 func (r *fakeUserRepo) Create(_ context.Context, _ domain.Tx, u domain.User) error {
 	atomic.AddInt32(&r.createCalls, 1)
 	if r.createErr != nil {
