@@ -84,13 +84,28 @@ resource "keycloak_openid_client_service_account_role" "backend_view_users" {
   role                    = data.keycloak_role.view_users.name
 }
 
-# Test-only clients (e.g. password-grant client for integration tests).
+# Test-only password-grant client (mi-6oa).
+#
+# Scope: BACKEND-ONLY. This client exists to let CI mint a real
+# Keycloak-issued JWT via the password grant so the curl-based half of
+# the keycloak-smoke job can answer one narrow question — "given a
+# syntactically valid Keycloak JWT, does the Go middleware accept it?"
+# (JWKS discovery, audience check, issuer match). It is NOT a model of
+# any user-facing flow.
+#
+# Real users hit `minerals-frontend` (PKCE) above. The user-facing path
+# is covered end-to-end by the Playwright PKCE smoke (mi-dwx); this
+# client must NEVER grow new assertions intended to cover that path.
+#
+# Created only when `test_environment = true` (CI sets
+# TF_VAR_test_environment=true via the keycloak-smoke job). Never
+# provisioned in staging/prod.
 resource "keycloak_openid_client" "test_password_grant" {
   count = var.test_environment ? 1 : 0
 
   realm_id  = keycloak_realm.minerals.id
   client_id = "minerals-test"
-  name      = "Minerals Test (password grant)"
+  name      = "Minerals Test (password grant, backend-only)"
   enabled   = true
 
   access_type = "PUBLIC"
