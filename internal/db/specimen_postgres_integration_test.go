@@ -635,6 +635,129 @@ func TestIntegration_Specimen_IDIsRecentUUIDv7(t *testing.T) {
 	}
 }
 
+// Per-field visibility round-trip (mi-y72 / mi-fo8 #1).
+// Covers Create+GetByID, sparse settings (only one of three columns),
+// and Update toggling values + clearing back to NULL. nil pointers
+// must round-trip as SQL NULL, not as empty-string Visibility.
+
+func TestIntegration_Specimen_FieldVisibilityNullByDefault(t *testing.T) {
+	pool := scopedDB(t)
+	repo := db.NewSpecimenPostgres(pool)
+	ctx := authedCtx()
+
+	s := mkSpecimen(domain.SpecimenMineral, "fv-null")
+	if err := repo.Create(ctx, nil, s); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := repo.GetByID(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.VisibilityPrice != nil || got.VisibilityAcquiredFrom != nil || got.VisibilityImages != nil {
+		t.Errorf("expected all-NULL field visibility; got price=%v acquired_from=%v images=%v",
+			got.VisibilityPrice, got.VisibilityAcquiredFrom, got.VisibilityImages)
+	}
+}
+
+func TestIntegration_Specimen_FieldVisibilityRoundtripFullAndSparse(t *testing.T) {
+	pool := scopedDB(t)
+	repo := db.NewSpecimenPostgres(pool)
+	ctx := authedCtx()
+
+	// Full: every per-field override set, each to a distinct value.
+	priv := domain.VisibilityPrivate
+	unl := domain.VisibilityUnlisted
+	pub := domain.VisibilityPublic
+	full := mkSpecimen(domain.SpecimenMineral, "fv-full")
+	full.VisibilityPrice = &priv
+	full.VisibilityAcquiredFrom = &unl
+	full.VisibilityImages = &pub
+	if err := repo.Create(ctx, nil, full); err != nil {
+		t.Fatalf("create full: %v", err)
+	}
+	got, err := repo.GetByID(ctx, full.ID)
+	if err != nil {
+		t.Fatalf("get full: %v", err)
+	}
+	if got.VisibilityPrice == nil || *got.VisibilityPrice != priv {
+		t.Errorf("price: got %v, want %v", got.VisibilityPrice, priv)
+	}
+	if got.VisibilityAcquiredFrom == nil || *got.VisibilityAcquiredFrom != unl {
+		t.Errorf("acquired_from: got %v, want %v", got.VisibilityAcquiredFrom, unl)
+	}
+	if got.VisibilityImages == nil || *got.VisibilityImages != pub {
+		t.Errorf("images: got %v, want %v", got.VisibilityImages, pub)
+	}
+
+	// Sparse: only VisibilityImages set; the other two stay NULL.
+	sparse := mkSpecimen(domain.SpecimenMineral, "fv-sparse")
+	sparse.VisibilityImages = &pub
+	if err := repo.Create(ctx, nil, sparse); err != nil {
+		t.Fatalf("create sparse: %v", err)
+	}
+	got, err = repo.GetByID(ctx, sparse.ID)
+	if err != nil {
+		t.Fatalf("get sparse: %v", err)
+	}
+	if got.VisibilityPrice != nil || got.VisibilityAcquiredFrom != nil {
+		t.Errorf("sparse: expected price/acquired_from NULL; got price=%v acquired_from=%v",
+			got.VisibilityPrice, got.VisibilityAcquiredFrom)
+	}
+	if got.VisibilityImages == nil || *got.VisibilityImages != pub {
+		t.Errorf("sparse images: got %v, want %v", got.VisibilityImages, pub)
+	}
+}
+
+func TestIntegration_Specimen_FieldVisibilityUpdateAndClear(t *testing.T) {
+	pool := scopedDB(t)
+	repo := db.NewSpecimenPostgres(pool)
+	ctx := authedCtx()
+
+	priv := domain.VisibilityPrivate
+	pub := domain.VisibilityPublic
+
+	s := mkSpecimen(domain.SpecimenMineral, "fv-upd")
+	s.VisibilityPrice = &priv
+	if err := repo.Create(ctx, nil, s); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Flip price to public, add images=public.
+	s.VisibilityPrice = &pub
+	s.VisibilityImages = &pub
+	s.UpdatedAt = time.Now().UTC()
+	if err := repo.Update(ctx, nil, s); err != nil {
+		t.Fatalf("update set: %v", err)
+	}
+	got, err := repo.GetByID(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("get after set: %v", err)
+	}
+	if got.VisibilityPrice == nil || *got.VisibilityPrice != pub {
+		t.Errorf("price after set: %v", got.VisibilityPrice)
+	}
+	if got.VisibilityImages == nil || *got.VisibilityImages != pub {
+		t.Errorf("images after set: %v", got.VisibilityImages)
+	}
+
+	// Clear all three back to NULL.
+	s.VisibilityPrice = nil
+	s.VisibilityAcquiredFrom = nil
+	s.VisibilityImages = nil
+	s.UpdatedAt = time.Now().UTC()
+	if err := repo.Update(ctx, nil, s); err != nil {
+		t.Fatalf("update clear: %v", err)
+	}
+	got, err = repo.GetByID(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("get after clear: %v", err)
+	}
+	if got.VisibilityPrice != nil || got.VisibilityAcquiredFrom != nil || got.VisibilityImages != nil {
+		t.Errorf("after clear: price=%v acquired_from=%v images=%v",
+			got.VisibilityPrice, got.VisibilityAcquiredFrom, got.VisibilityImages)
+	}
+}
+
 func specimenNames(rows []domain.Specimen) []string {
 	out := make([]string, 0, len(rows))
 	for _, r := range rows {

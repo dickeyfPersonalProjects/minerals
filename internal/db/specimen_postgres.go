@@ -29,10 +29,15 @@ func NewSpecimenPostgres(pool *pgxpool.Pool) *SpecimenPostgres {
 // *float64 — Postgres' native numeric type doesn't have a default
 // pgx codec into float64, and v1 doesn't need fractional precision
 // beyond what double affords (locked in design §2).
+//
+// visibility_price / visibility_acquired_from / visibility_images
+// are the per-field overrides added by migration 0013 (mi-fo8); all
+// three scan as *domain.Visibility (nullable).
 const specimenColumns = `id, type, catalog_number, name, description, visibility,
 		author_id, acquired_at, acquired_from, price_cents, source_notes,
 		locality_text, locality, mass_g::double precision, dimensions, type_data,
-		main_image_id, created_at, updated_at`
+		main_image_id, visibility_price, visibility_acquired_from, visibility_images,
+		created_at, updated_at`
 
 // Create inserts a new specimen. Caller has already populated s.ID
 // (UUIDv7), CreatedAt, UpdatedAt; author_id is taken from auth ctx
@@ -59,18 +64,21 @@ func (r *SpecimenPostgres) Create(ctx context.Context, tx domain.Tx, s domain.Sp
 			id, type, catalog_number, name, description, visibility,
 			author_id, acquired_at, acquired_from, price_cents, source_notes,
 			locality_text, locality, mass_g, dimensions, type_data,
-			main_image_id, created_at, updated_at
+			main_image_id, visibility_price, visibility_acquired_from, visibility_images,
+			created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10, $11,
 			$12, $13, $14, $15, $16,
-			$17, $18, $19
+			$17, $18, $19, $20,
+			$21, $22
 		)`
 	_, err = exec.Exec(ctx, q,
 		s.ID, string(s.Type), s.CatalogNumber, s.Name, s.Description, string(s.Visibility),
 		user.ID, s.AcquiredAt, s.AcquiredFrom, s.PriceCents, s.SourceNotes,
 		s.LocalityText, locality, s.MassG, dimensions, typeData,
-		s.MainImageID, s.CreatedAt, s.UpdatedAt,
+		s.MainImageID, visibilityArg(s.VisibilityPrice), visibilityArg(s.VisibilityAcquiredFrom), visibilityArg(s.VisibilityImages),
+		s.CreatedAt, s.UpdatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -118,27 +126,31 @@ func (r *SpecimenPostgres) Update(ctx context.Context, tx domain.Tx, s domain.Sp
 
 	const q = `
 		UPDATE specimens SET
-			catalog_number = $2,
-			name           = $3,
-			description    = $4,
-			visibility     = $5,
-			acquired_at    = $6,
-			acquired_from  = $7,
-			price_cents    = $8,
-			source_notes   = $9,
-			locality_text  = $10,
-			locality       = $11,
-			mass_g         = $12,
-			dimensions     = $13,
-			type_data      = $14,
-			main_image_id  = $15,
-			updated_at     = $16
-		 WHERE id = $1 AND type = $17`
+			catalog_number             = $2,
+			name                       = $3,
+			description                = $4,
+			visibility                 = $5,
+			acquired_at                = $6,
+			acquired_from              = $7,
+			price_cents                = $8,
+			source_notes               = $9,
+			locality_text              = $10,
+			locality                   = $11,
+			mass_g                     = $12,
+			dimensions                 = $13,
+			type_data                  = $14,
+			main_image_id              = $15,
+			visibility_price           = $16,
+			visibility_acquired_from   = $17,
+			visibility_images          = $18,
+			updated_at                 = $19
+		 WHERE id = $1 AND type = $20`
 	tag, err := exec.Exec(ctx, q,
 		s.ID, s.CatalogNumber, s.Name, s.Description, string(s.Visibility),
 		s.AcquiredAt, s.AcquiredFrom, s.PriceCents, s.SourceNotes,
 		s.LocalityText, locality, s.MassG, dimensions, typeData,
-		s.MainImageID, s.UpdatedAt, string(s.Type),
+		s.MainImageID, visibilityArg(s.VisibilityPrice), visibilityArg(s.VisibilityAcquiredFrom), visibilityArg(s.VisibilityImages),
+		s.UpdatedAt, string(s.Type),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -404,17 +416,22 @@ func applySharedFilters(
 func scanSpecimen(s rowScanner) (domain.Specimen, error) {
 	var sp domain.Specimen
 	var typeStr, visStr string
+	var visPrice, visAcq, visImg *string
 	var locality, dimensions, typeData []byte
 	if err := s.Scan(
 		&sp.ID, &typeStr, &sp.CatalogNumber, &sp.Name, &sp.Description, &visStr,
 		&sp.AuthorID, &sp.AcquiredAt, &sp.AcquiredFrom, &sp.PriceCents, &sp.SourceNotes,
 		&sp.LocalityText, &locality, &sp.MassG, &dimensions, &typeData,
-		&sp.MainImageID, &sp.CreatedAt, &sp.UpdatedAt,
+		&sp.MainImageID, &visPrice, &visAcq, &visImg,
+		&sp.CreatedAt, &sp.UpdatedAt,
 	); err != nil {
 		return domain.Specimen{}, err
 	}
 	sp.Type = domain.SpecimenType(typeStr)
 	sp.Visibility = domain.Visibility(visStr)
+	sp.VisibilityPrice = visibilityPtr(visPrice)
+	sp.VisibilityAcquiredFrom = visibilityPtr(visAcq)
+	sp.VisibilityImages = visibilityPtr(visImg)
 	if len(locality) > 0 && string(locality) != "null" {
 		var loc domain.Locality
 		if err := json.Unmarshal(locality, &loc); err != nil {
@@ -441,18 +458,23 @@ func scanSpecimen(s rowScanner) (domain.Specimen, error) {
 func scanSpecimenRanked(rs pgx.Rows) (domain.Specimen, float32, error) {
 	var sp domain.Specimen
 	var typeStr, visStr string
+	var visPrice, visAcq, visImg *string
 	var locality, dimensions, typeData []byte
 	var rank float32
 	if err := rs.Scan(
 		&sp.ID, &typeStr, &sp.CatalogNumber, &sp.Name, &sp.Description, &visStr,
 		&sp.AuthorID, &sp.AcquiredAt, &sp.AcquiredFrom, &sp.PriceCents, &sp.SourceNotes,
 		&sp.LocalityText, &locality, &sp.MassG, &dimensions, &typeData,
-		&sp.MainImageID, &sp.CreatedAt, &sp.UpdatedAt, &rank,
+		&sp.MainImageID, &visPrice, &visAcq, &visImg,
+		&sp.CreatedAt, &sp.UpdatedAt, &rank,
 	); err != nil {
 		return domain.Specimen{}, 0, err
 	}
 	sp.Type = domain.SpecimenType(typeStr)
 	sp.Visibility = domain.Visibility(visStr)
+	sp.VisibilityPrice = visibilityPtr(visPrice)
+	sp.VisibilityAcquiredFrom = visibilityPtr(visAcq)
+	sp.VisibilityImages = visibilityPtr(visImg)
 	if len(locality) > 0 && string(locality) != "null" {
 		var loc domain.Locality
 		if err := json.Unmarshal(locality, &loc); err != nil {
@@ -482,6 +504,29 @@ func marshalNullable[T any](v *T) ([]byte, error) {
 		return nil, nil
 	}
 	return json.Marshal(v)
+}
+
+// visibilityArg adapts a *domain.Visibility to the value pgx wants
+// for a nullable specimen_visibility column: a *string (NULL when
+// the source pointer is nil). Postgres' text-codec path for the
+// enum accepts the underlying string.
+func visibilityArg(v *domain.Visibility) any {
+	if v == nil {
+		return nil
+	}
+	s := string(*v)
+	return &s
+}
+
+// visibilityPtr is the read-side mirror of visibilityArg: a NULL
+// column (scanned as *string == nil) returns nil; otherwise the
+// enum text becomes a *domain.Visibility.
+func visibilityPtr(s *string) *domain.Visibility {
+	if s == nil {
+		return nil
+	}
+	v := domain.Visibility(*s)
+	return &v
 }
 
 // execer returns the Tx caller-supplied, falling back to the bound

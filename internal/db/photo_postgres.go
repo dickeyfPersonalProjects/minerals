@@ -37,9 +37,12 @@ func (r *PhotoPostgres) Create(ctx context.Context, tx domain.Tx, p domain.Photo
 		p.Kind = domain.PhotoKindVisible
 	}
 	const q = `
-		INSERT INTO photos (id, specimen_id, file_id, kind, taken_at, position, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	_, err := exec.Exec(ctx, q, p.ID, p.SpecimenID, p.FileID, p.Kind, p.TakenAt, p.Position, p.CreatedAt)
+		INSERT INTO photos (id, specimen_id, file_id, kind, taken_at, position, visibility, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	_, err := exec.Exec(ctx, q,
+		p.ID, p.SpecimenID, p.FileID, p.Kind, p.TakenAt, p.Position,
+		visibilityArg(p.Visibility), p.CreatedAt,
+	)
 	if err != nil {
 		if isFKViolation(err) {
 			// Either specimen_id or file_id didn't resolve. Return a
@@ -51,11 +54,14 @@ func (r *PhotoPostgres) Create(ctx context.Context, tx domain.Tx, p domain.Photo
 	return nil
 }
 
+// photoColumns is the canonical read column list shared by every
+// photo query. visibility is the nullable per-photo override added
+// by migration 0014 (mi-fo8 / mi-y72).
+const photoColumns = `id, specimen_id, file_id, kind, taken_at, position, visibility, created_at`
+
 // GetByID returns the photo with the given id, or domain.ErrPhotoNotFound.
 func (r *PhotoPostgres) GetByID(ctx context.Context, id uuid.UUID) (domain.Photo, error) {
-	const q = `
-		SELECT id, specimen_id, file_id, kind, taken_at, position, created_at
-		FROM photos WHERE id = $1`
+	q := `SELECT ` + photoColumns + ` FROM photos WHERE id = $1`
 	row := r.pool.QueryRow(ctx, q, id)
 	p, err := scanPhoto(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -77,9 +83,9 @@ func (r *PhotoPostgres) Update(ctx context.Context, tx domain.Tx, p domain.Photo
 	}
 	const q = `
 		UPDATE photos
-		   SET taken_at = $2, position = $3, kind = $4
+		   SET taken_at = $2, position = $3, kind = $4, visibility = $5
 		 WHERE id = $1`
-	tag, err := exec.Exec(ctx, q, p.ID, p.TakenAt, p.Position, p.Kind)
+	tag, err := exec.Exec(ctx, q, p.ID, p.TakenAt, p.Position, p.Kind, visibilityArg(p.Visibility))
 	if err != nil {
 		return fmt.Errorf("photo repo: update: %w", err)
 	}
@@ -122,7 +128,7 @@ func (r *PhotoPostgres) ListBySpecimen(
 
 	args := []any{specimenID, limit + 1}
 	sql := `
-		SELECT id, specimen_id, file_id, kind, taken_at, position, created_at
+		SELECT ` + photoColumns + `
 		FROM photos
 		WHERE specimen_id = $1`
 	if page.Cursor != "" {
@@ -188,11 +194,16 @@ func scanPhoto(s rowScanner) (domain.Photo, error) {
 	var takenAt *time.Time
 	var createdAt time.Time
 	var kind string
-	if err := s.Scan(&p.ID, &p.SpecimenID, &p.FileID, &kind, &takenAt, &p.Position, &createdAt); err != nil {
+	var visibility *string
+	if err := s.Scan(
+		&p.ID, &p.SpecimenID, &p.FileID, &kind, &takenAt, &p.Position,
+		&visibility, &createdAt,
+	); err != nil {
 		return domain.Photo{}, err
 	}
 	p.Kind = domain.PhotoKind(kind)
 	p.TakenAt = takenAt
+	p.Visibility = visibilityPtr(visibility)
 	p.CreatedAt = createdAt
 	return p, nil
 }
