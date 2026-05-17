@@ -1020,6 +1020,21 @@ export interface components {
              * @enum {string}
              */
             visibility?: "private" | "unlisted" | "public";
+            /**
+             * @description Per-field visibility for acquired_from. Same semantics as visibility_price.
+             * @enum {string|null}
+             */
+            visibility_acquired_from?: "private" | "unlisted" | "public" | null;
+            /**
+             * @description Specimen-level default visibility for photos that do not set their own. Same semantics as visibility_price.
+             * @enum {string|null}
+             */
+            visibility_images?: "private" | "unlisted" | "public" | null;
+            /**
+             * @description Per-field visibility for price. Omit to leave unchanged; pass null to clear (fall through to the owner default); pass an enum value to override.
+             * @enum {string|null}
+             */
+            visibility_price?: "private" | "unlisted" | "public" | null;
         };
         PhotoListBody: {
             /**
@@ -1309,6 +1324,21 @@ export interface components {
              * @enum {string}
              */
             visibility: "private" | "unlisted" | "public";
+            /**
+             * @description Per-field visibility override for acquired_from. Null/absent falls through to the owner's default.
+             * @enum {string}
+             */
+            visibility_acquired_from?: "private" | "unlisted" | "public";
+            /**
+             * @description Per-field visibility override governing photos that do not set their own visibility. Null/absent falls through to the specimen's overall visibility, then the owner's default.
+             * @enum {string}
+             */
+            visibility_images?: "private" | "unlisted" | "public";
+            /**
+             * @description Per-field visibility override for price. Null/absent falls through to the owner's default.
+             * @enum {string}
+             */
+            visibility_price?: "private" | "unlisted" | "public";
         };
     };
     responses: never;

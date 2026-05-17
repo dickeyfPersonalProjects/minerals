@@ -17,10 +17,20 @@
     resetTypeDataDefaults,
     specimenFormSchema,
     FLUORESCENCE_COLORS,
+    VISIBILITY_INHERIT,
     type FluorescenceColor,
     type SpecimenFormValues,
     type SpecimenType,
+    type VisibilityFieldValue,
   } from './schemas/specimen';
+  import {
+    resolveImage,
+    resolveScalar,
+    type OwnerLike,
+    type Resolution,
+    type SpecimenLike,
+    type Visibility,
+  } from './api/visibility';
   import MineralSpeciesLookup, { type MineralSpeciesView } from './MineralSpeciesLookup.svelte';
 
   interface Props {
@@ -32,6 +42,11 @@
     cancelLabel?: string;
     onDelete?: () => void;
     deleteLabel?: string;
+    // Owner profile (field_defaults) used by the per-field visibility
+    // selectors to render their 'currently: X' affordance. Absent on
+    // the create page (no specimen yet); the selectors degrade to the
+    // system default ('private') in that case. CONTRACT.md §13b.
+    ownerProfile?: OwnerLike | null;
   }
 
   const {
@@ -43,6 +58,7 @@
     cancelLabel = 'Cancel',
     onDelete,
     deleteLabel = 'Delete',
+    ownerProfile = null,
   }: Props = $props();
 
   // Capture initial values once at mount so the form owns its
@@ -148,6 +164,75 @@
     const e = $errors[name];
     if (Array.isArray(e) && e.length > 0) return e[0]!;
     return null;
+  }
+
+  // Per-field visibility selectors (mi-fo8 #7).
+  //
+  // Tooltip text shared by all three selectors — explains the
+  // resolution chain at a glance without redirecting to docs.
+  const VIS_TOOLTIP =
+    'This setting applies to this specimen. Your account default applies when no specimen-level value is set. ' +
+    'Individual images can override the specimen default.';
+
+  // formToSpecimenLike projects the live form's scalar overrides into
+  // the SpecimenLike shape the resolver consumes. Used only for the
+  // resolveImage chain, where the specimen.visibility column also
+  // participates and so the live `$data.visibility` matters.
+  function formToSpecimenLike(d: SpecimenFormValues): SpecimenLike {
+    return {
+      visibility: d.visibility as Visibility,
+      visibility_price: wireFromSelect(d.visibility_price),
+      visibility_acquired_from: wireFromSelect(d.visibility_acquired_from),
+      visibility_images: wireFromSelect(d.visibility_images),
+    };
+  }
+
+  function wireFromSelect(v: VisibilityFieldValue): Visibility | null {
+    return v === VISIBILITY_INHERIT ? null : v;
+  }
+
+  // resolveInherit computes what the chain would resolve to for
+  // `field` IF the user picks 'Use my account default' — i.e. with
+  // the specimen-level override CLEARED. That's the value rendered
+  // beside the inherit option as 'currently: X', so the user can
+  // see exactly what the SPA will display.
+  //
+  // For scalar fields the answer is `owner.field_defaults[field]
+  // ?? 'private'`. For images the chain still considers the
+  // specimen's overall visibility (CONTRACT.md §13b), so we resolve
+  // with visibility_images explicitly null and the rest from the
+  // live form.
+  function resolveInherit(field: 'price' | 'acquired_from' | 'images'): Resolution {
+    const owner = ownerProfile ?? {};
+    if (field === 'images') {
+      const specForResolve: SpecimenLike = {
+        ...formToSpecimenLike($data),
+        visibility_images: null,
+      };
+      return resolveImage(specForResolve, owner, {});
+    }
+    const specForResolve: SpecimenLike = {
+      visibility_price: null,
+      visibility_acquired_from: null,
+    };
+    return resolveScalar(field, specForResolve, owner);
+  }
+
+  // Three reactive snapshots — re-compute when the form's visibility
+  // changes (only relevant to images, but cheap for scalars too).
+  const inheritPrice = $derived(resolveInherit('price'));
+  const inheritAcquiredFrom = $derived(resolveInherit('acquired_from'));
+  const inheritImages = $derived(resolveInherit('images'));
+
+  function visibilityLabel(v: Visibility): string {
+    switch (v) {
+      case 'private':
+        return 'Private';
+      case 'unlisted':
+        return 'Unlisted';
+      case 'public':
+        return 'Public';
+    }
   }
 </script>
 
@@ -330,6 +415,28 @@
         type="text"
         class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
       />
+      <div class="mt-1.5">
+        <label
+          for="specimen-visibility-acquired-from"
+          class="mb-0.5 block text-xs text-[var(--color-text-muted)]"
+        >
+          Who can see this field?
+        </label>
+        <select
+          id="specimen-visibility-acquired-from"
+          name="visibility_acquired_from"
+          data-testid="visibility-acquired-from"
+          title={VIS_TOOLTIP}
+          class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+        >
+          <option value={VISIBILITY_INHERIT}>
+            Use my account default (currently: {visibilityLabel(inheritAcquiredFrom.visibility)})
+          </option>
+          <option value="private">Private</option>
+          <option value="unlisted">Unlisted</option>
+          <option value="public">Public</option>
+        </select>
+      </div>
     </div>
   </div>
 
@@ -354,6 +461,28 @@
       {#if showError('price_dollars')}
         <p class="mt-1 text-xs text-red-500">{showError('price_dollars')}</p>
       {/if}
+      <div class="mt-1.5">
+        <label
+          for="specimen-visibility-price"
+          class="mb-0.5 block text-xs text-[var(--color-text-muted)]"
+        >
+          Who can see this field?
+        </label>
+        <select
+          id="specimen-visibility-price"
+          name="visibility_price"
+          data-testid="visibility-price"
+          title={VIS_TOOLTIP}
+          class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+        >
+          <option value={VISIBILITY_INHERIT}>
+            Use my account default (currently: {visibilityLabel(inheritPrice.visibility)})
+          </option>
+          <option value="private">Private</option>
+          <option value="unlisted">Unlisted</option>
+          <option value="public">Public</option>
+        </select>
+      </div>
     </div>
 
     <div>
@@ -371,6 +500,36 @@
       />
     </div>
   </div>
+
+  <fieldset class="space-y-2" data-testid="image-privacy-fieldset">
+    <legend class="text-sm font-medium text-[var(--color-text)]">Image privacy</legend>
+    <p class="text-xs text-[var(--color-text-muted)]">
+      Controls the default visibility for this specimen's photos when an individual photo doesn't
+      set its own.
+    </p>
+    <div>
+      <label
+        for="specimen-visibility-images"
+        class="mb-0.5 block text-xs text-[var(--color-text-muted)]"
+      >
+        Default for new and uninherited photos
+      </label>
+      <select
+        id="specimen-visibility-images"
+        name="visibility_images"
+        data-testid="visibility-images"
+        title={VIS_TOOLTIP}
+        class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none sm:max-w-sm"
+      >
+        <option value={VISIBILITY_INHERIT}>
+          Use my account default (currently: {visibilityLabel(inheritImages.visibility)})
+        </option>
+        <option value="private">Private</option>
+        <option value="unlisted">Unlisted</option>
+        <option value="public">Public</option>
+      </select>
+    </div>
+  </fieldset>
 
   <fieldset class="space-y-3">
     <legend class="text-sm font-medium text-[var(--color-text)]">Locality</legend>

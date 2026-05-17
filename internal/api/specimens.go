@@ -22,6 +22,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -94,6 +95,61 @@ func (SpecimenTypeData) Schema(r huma.Registry) *huma.Schema {
 	}
 }
 
+// VisibilityPatch carries the raw JSON bytes for a single
+// visibility_* field in PatchSpecimenBody so the handler can
+// distinguish three input states:
+//
+//   - absent in JSON (len == 0): preserve current value
+//   - explicit JSON `null` (bytes "null"): clear (DB column → NULL,
+//     resolver falls through to the owner default)
+//   - JSON string ("private"|"unlisted"|"public"): set the override
+//
+// A `*Visibility` cannot encode all three because encoding/json
+// collapses "absent" and "null" both to a nil pointer. Mirrors the
+// FieldDefaultsPatch pattern from profile.go.
+type VisibilityPatch []byte
+
+// UnmarshalJSON captures the raw bytes verbatim. encoding/json invokes
+// it even for the JSON value `null`, so storing the raw bytes lets the
+// handler observe an explicit-null and treat it as "clear".
+func (p *VisibilityPatch) UnmarshalJSON(b []byte) error {
+	*p = append((*p)[:0], b...)
+	return nil
+}
+
+// MarshalJSON emits the stored bytes verbatim. Patches do not normally
+// round-trip back to the client (the response uses SpecimenView's
+// *Visibility), but the symmetric Marshal keeps the type printable in
+// logs / debug dumps.
+func (p VisibilityPatch) MarshalJSON() ([]byte, error) {
+	if len(p) == 0 {
+		return []byte("null"), nil
+	}
+	out := make([]byte, len(p))
+	copy(out, p)
+	return out, nil
+}
+
+// Schema renders the OpenAPI 3.1 schema for a visibility_* patch
+// field. Encoded as `Visibility | null` so codegen consumers
+// (schema.d.ts) can emit a nullable typed union; the actual three-way
+// absent/null/value disambiguation happens in the handler, not the
+// schema validator.
+func (VisibilityPatch) Schema(_ huma.Registry) *huma.Schema {
+	return &huma.Schema{
+		Type: "string",
+		Enum: []any{
+			string(domain.VisibilityPrivate),
+			string(domain.VisibilityUnlisted),
+			string(domain.VisibilityPublic),
+		},
+		Nullable: true,
+		Description: "Per-field visibility override. Omit the key to preserve the " +
+			"current value; pass `null` to clear (chain falls through to the " +
+			"owner default); pass a Visibility enum value to set the override.",
+	}
+}
+
 // SpecimenView is the wire shape of a specimen resource. Field names
 // are snake_case and match column names; the frontend client is
 // regenerated from this type's OpenAPI schema.
@@ -115,31 +171,42 @@ type SpecimenView struct {
 	Dimensions    *domain.Dimensions  `json:"dimensions" doc:"Optional structured dimensions."`
 	TypeData      SpecimenTypeData    `json:"type_data" doc:"Type-specific fields; shape governed by the parent type field."`
 	MainImageID   *uuid.UUID          `json:"main_image_id" nullable:"true" doc:"File id of the photo designated as this specimen's main image (mi-m8q). Null means fall back to the first photo by position."`
-	CreatedAt     time.Time           `json:"created_at" doc:"RFC 3339 creation timestamp."`
-	UpdatedAt     time.Time           `json:"updated_at" doc:"RFC 3339 last-update timestamp."`
+	// Per-field visibility overrides (CONTRACT.md §13b, mi-fo8). Each
+	// is the specimen-level layer of the per-field resolution chain;
+	// null/absent falls through to the owner's field_defaults, then
+	// the system default (`private`). Owner-facing affordance — the
+	// SPA edit screen reads these to prefill the per-field selectors.
+	VisibilityPrice        *domain.Visibility `json:"visibility_price,omitempty" enum:"private,unlisted,public" doc:"Per-field visibility override for price. Null/absent falls through to the owner's default."`
+	VisibilityAcquiredFrom *domain.Visibility `json:"visibility_acquired_from,omitempty" enum:"private,unlisted,public" doc:"Per-field visibility override for acquired_from. Null/absent falls through to the owner's default."`
+	VisibilityImages       *domain.Visibility `json:"visibility_images,omitempty" enum:"private,unlisted,public" doc:"Per-field visibility override governing photos that do not set their own visibility. Null/absent falls through to the specimen's overall visibility, then the owner's default."`
+	CreatedAt              time.Time          `json:"created_at" doc:"RFC 3339 creation timestamp."`
+	UpdatedAt              time.Time          `json:"updated_at" doc:"RFC 3339 last-update timestamp."`
 }
 
 func toSpecimenView(s domain.Specimen) SpecimenView {
 	return SpecimenView{
-		ID:            s.ID,
-		Type:          s.Type,
-		CatalogNumber: s.CatalogNumber,
-		Name:          s.Name,
-		Description:   s.Description,
-		Visibility:    s.Visibility,
-		AuthorID:      s.AuthorID,
-		AcquiredAt:    s.AcquiredAt,
-		AcquiredFrom:  s.AcquiredFrom,
-		PriceCents:    s.PriceCents,
-		SourceNotes:   s.SourceNotes,
-		LocalityText:  s.LocalityText,
-		Locality:      s.Locality,
-		MassG:         s.MassG,
-		Dimensions:    s.Dimensions,
-		TypeData:      SpecimenTypeData(s.TypeData),
-		MainImageID:   s.MainImageID,
-		CreatedAt:     s.CreatedAt,
-		UpdatedAt:     s.UpdatedAt,
+		ID:                     s.ID,
+		Type:                   s.Type,
+		CatalogNumber:          s.CatalogNumber,
+		Name:                   s.Name,
+		Description:            s.Description,
+		Visibility:             s.Visibility,
+		AuthorID:               s.AuthorID,
+		AcquiredAt:             s.AcquiredAt,
+		AcquiredFrom:           s.AcquiredFrom,
+		PriceCents:             s.PriceCents,
+		SourceNotes:            s.SourceNotes,
+		LocalityText:           s.LocalityText,
+		Locality:               s.Locality,
+		MassG:                  s.MassG,
+		Dimensions:             s.Dimensions,
+		TypeData:               SpecimenTypeData(s.TypeData),
+		MainImageID:            s.MainImageID,
+		VisibilityPrice:        s.VisibilityPrice,
+		VisibilityAcquiredFrom: s.VisibilityAcquiredFrom,
+		VisibilityImages:       s.VisibilityImages,
+		CreatedAt:              s.CreatedAt,
+		UpdatedAt:              s.UpdatedAt,
 	}
 }
 
@@ -225,6 +292,12 @@ type patchSpecimenBody struct {
 	Dimensions    *domain.Dimensions   `json:"dimensions,omitempty" doc:"Omit to leave unchanged."`
 	TypeData      *SpecimenTypeData    `json:"type_data,omitempty" doc:"Top-level merge: present keys overwrite, explicit null clears, omitted keys preserved."`
 	MainImageID   *uuid.UUID           `json:"main_image_id,omitempty" doc:"File id of the photo to designate as the specimen's main image (mi-m8q). Must be the file_id of an existing photo on this specimen, or the request is rejected with 422. To revert to the first-by-position fallback, delete the underlying photo — ON DELETE SET NULL handles the cleanup."`
+	// Per-field visibility overrides (CONTRACT.md §13b, mi-fo8). Raw
+	// JSON bytes so the handler can distinguish "absent" (preserve)
+	// from "explicit null" (clear) — a pointer-to-Visibility can't.
+	VisibilityPrice        VisibilityPatch `json:"visibility_price,omitempty" doc:"Per-field visibility for price. Omit to leave unchanged; pass null to clear (fall through to the owner default); pass an enum value to override."`
+	VisibilityAcquiredFrom VisibilityPatch `json:"visibility_acquired_from,omitempty" doc:"Per-field visibility for acquired_from. Same semantics as visibility_price."`
+	VisibilityImages       VisibilityPatch `json:"visibility_images,omitempty" doc:"Specimen-level default visibility for photos that do not set their own. Same semantics as visibility_price."`
 }
 
 type deleteSpecimenInput struct {
@@ -555,6 +628,16 @@ func (s *SpecimenService) patch(ctx context.Context, in *patchSpecimenInput) (*s
 		current.TypeData = canonical
 	}
 
+	if err := applyVisibilityPatch(b.VisibilityPrice, "visibility_price", &current.VisibilityPrice); err != nil {
+		return nil, err
+	}
+	if err := applyVisibilityPatch(b.VisibilityAcquiredFrom, "visibility_acquired_from", &current.VisibilityAcquiredFrom); err != nil {
+		return nil, err
+	}
+	if err := applyVisibilityPatch(b.VisibilityImages, "visibility_images", &current.VisibilityImages); err != nil {
+		return nil, err
+	}
+
 	current.UpdatedAt = time.Now().UTC()
 	if err := s.repo.Update(ctx, nil, current); err != nil {
 		return nil, mapSpecimenError(err)
@@ -710,6 +793,35 @@ func validVisibility(v domain.Visibility) bool {
 		return true
 	}
 	return false
+}
+
+// applyVisibilityPatch interprets a VisibilityPatch and writes the
+// result into dst per the three-way absent/null/value semantics
+// (CONTRACT.md §13b, mi-fo8). Returns a 400 envelope error on a
+// non-null, non-Visibility-enum value; the field name is interpolated
+// into the message and the error details for SPA-side highlighting.
+func applyVisibilityPatch(p VisibilityPatch, field string, dst **domain.Visibility) error {
+	if len(p) == 0 {
+		return nil // absent — preserve current value
+	}
+	trimmed := bytes.TrimSpace([]byte(p))
+	if string(trimmed) == "null" {
+		*dst = nil // explicit null — clear the override
+		return nil
+	}
+	var v domain.Visibility
+	if err := json.Unmarshal(trimmed, &v); err != nil {
+		return newAPIError(http.StatusBadRequest, "invalid_visibility",
+			fmt.Sprintf("%s: value must be a Visibility string or null", field),
+			map[string]any{"field": field})
+	}
+	if !validVisibility(v) {
+		return newAPIError(http.StatusBadRequest, "invalid_visibility",
+			fmt.Sprintf("%s: %q is not a valid Visibility; allowed values are private, unlisted, public", field, v),
+			map[string]any{"field": field})
+	}
+	*dst = &v
+	return nil
 }
 
 // mapSpecimenError translates specimen repo sentinels into §10

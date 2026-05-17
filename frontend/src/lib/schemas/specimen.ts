@@ -133,6 +133,16 @@ export const fossilDataSchema = z.object({
 
 // --- base schema --------------------------------------------------
 
+// Sentinel for the per-field visibility selectors: the user has not
+// set a specimen-level override, so the chain falls through to the
+// owner's account default. On the wire this maps to JSON null; in the
+// form it's stored as a literal string because <select value> can't
+// represent null and an empty string risks colliding with a future
+// enum value.
+export const VISIBILITY_INHERIT = '__inherit__' as const;
+export const visibilityFieldSchema = z.enum([VISIBILITY_INHERIT, 'private', 'unlisted', 'public']);
+export type VisibilityFieldValue = z.infer<typeof visibilityFieldSchema>;
+
 export const specimenBaseSchema = z.object({
   type: z.enum(['mineral', 'rock', 'meteorite', 'fossil']),
   name: trimmed.pipe(z.string().min(1, 'Name is required').max(200, 'Name is too long')),
@@ -156,6 +166,12 @@ export const specimenBaseSchema = z.object({
   length_mm: optionalNumber('Must be a positive number', (n) => n >= 0),
   width_mm: optionalNumber('Must be a positive number', (n) => n >= 0),
   height_mm: optionalNumber('Must be a positive number', (n) => n >= 0),
+
+  // Per-field visibility overrides (mi-fo8 #7). __inherit__ means
+  // "no specimen-level override — fall through to the owner default".
+  visibility_price: visibilityFieldSchema,
+  visibility_acquired_from: visibilityFieldSchema,
+  visibility_images: visibilityFieldSchema,
 });
 
 // Full schema = base + all per-type fields. We always validate the
@@ -234,6 +250,9 @@ export function emptyFormValues(type: SpecimenType = 'mineral'): SpecimenFormVal
     f_completeness: '',
     f_prepared: false,
     f_prep_notes: '',
+    visibility_price: VISIBILITY_INHERIT,
+    visibility_acquired_from: VISIBILITY_INHERIT,
+    visibility_images: VISIBILITY_INHERIT,
   };
 }
 
@@ -288,6 +307,9 @@ export function specimenToFormValues(s: SpecimenView): SpecimenFormValues {
   v.catalog_number = s.catalog_number ?? '';
   v.description = s.description;
   v.visibility = s.visibility;
+  v.visibility_price = s.visibility_price ?? VISIBILITY_INHERIT;
+  v.visibility_acquired_from = s.visibility_acquired_from ?? VISIBILITY_INHERIT;
+  v.visibility_images = s.visibility_images ?? VISIBILITY_INHERIT;
   v.acquired_at = s.acquired_at ? toDateInputValue(s.acquired_at) : '';
   v.acquired_from = s.acquired_from ?? '';
   v.price_dollars = s.price_cents == null ? '' : (s.price_cents / 100).toString();
@@ -447,7 +469,40 @@ export function formToPatchBody(initial: SpecimenView, values: SpecimenFormValue
     body.type_data = td;
   }
 
+  // Per-field visibility overrides (mi-fo8 #7). __inherit__ in the
+  // form maps to JSON null on the wire (clear the override; chain
+  // falls through to the owner default). Explicit enum maps to the
+  // value. Unchanged keys are omitted so the backend leaves them
+  // alone.
+  const priceDiff = diffVisibilityField(values.visibility_price, initial.visibility_price ?? null);
+  if (priceDiff !== UNCHANGED) body.visibility_price = priceDiff;
+  const afDiff = diffVisibilityField(
+    values.visibility_acquired_from,
+    initial.visibility_acquired_from ?? null,
+  );
+  if (afDiff !== UNCHANGED) body.visibility_acquired_from = afDiff;
+  const imgDiff = diffVisibilityField(values.visibility_images, initial.visibility_images ?? null);
+  if (imgDiff !== UNCHANGED) body.visibility_images = imgDiff;
+
   return body;
+}
+
+// Sentinel for "no change" so the diff helper can distinguish it from
+// the wire shape (`null | enum`). Using a Symbol keeps it
+// indistinguishable from any valid wire value.
+const UNCHANGED: unique symbol = Symbol('unchanged');
+
+// diffVisibilityField returns the value to send on the wire for one
+// visibility_* PATCH key. UNCHANGED skips the key in the body
+// entirely; null clears the override; an enum value sets it.
+function diffVisibilityField(
+  current: VisibilityFieldValue,
+  initial: 'private' | 'unlisted' | 'public' | null,
+): 'private' | 'unlisted' | 'public' | null | typeof UNCHANGED {
+  const currentWire: 'private' | 'unlisted' | 'public' | null =
+    current === VISIBILITY_INHERIT ? null : current;
+  if (currentWire === initial) return UNCHANGED;
+  return currentWire;
 }
 
 // --- private helpers ---------------------------------------------

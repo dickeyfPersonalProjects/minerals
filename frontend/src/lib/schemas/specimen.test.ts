@@ -342,6 +342,73 @@ describe('formToPatchBody', () => {
     expect(formToPatchBody(initial, values)).toEqual({ visibility: 'public' });
   });
 
+  // Per-field visibility overrides (mi-fo8 #7 / CONTRACT §13b).
+  // Wire shape:
+  //   absent       → preserve current value (omit the key)
+  //   null         → clear the override (chain falls through)
+  //   enum value   → set the override
+  // The form's __inherit__ sentinel maps to wire null; an enum
+  // option maps to its literal value.
+  describe('per-field visibility patch diff', () => {
+    it('omits unchanged visibility keys', () => {
+      const initial = mineralView({ visibility_price: 'private' });
+      const values = specimenToFormValues(initial);
+      const patch = formToPatchBody(initial, values);
+      expect(patch).not.toHaveProperty('visibility_price');
+      expect(patch).not.toHaveProperty('visibility_acquired_from');
+      expect(patch).not.toHaveProperty('visibility_images');
+    });
+
+    it('sends enum value when the override is newly set', () => {
+      const initial = mineralView({}); // no overrides on the wire
+      const values: SpecimenFormValues = {
+        ...specimenToFormValues(initial),
+        visibility_price: 'unlisted',
+      };
+      const patch = formToPatchBody(initial, values);
+      expect(patch.visibility_price).toBe('unlisted');
+    });
+
+    it('sends null when an existing override is cleared back to inherit', () => {
+      const initial = mineralView({ visibility_acquired_from: 'public' });
+      const values: SpecimenFormValues = {
+        ...specimenToFormValues(initial),
+        visibility_acquired_from: '__inherit__',
+      };
+      const patch = formToPatchBody(initial, values);
+      // hasOwnProperty check: null must be present in the body, not
+      // omitted — wire semantics differ (omit = preserve, null = clear).
+      expect(Object.prototype.hasOwnProperty.call(patch, 'visibility_acquired_from')).toBe(true);
+      expect(patch.visibility_acquired_from).toBeNull();
+    });
+
+    it('sends a different enum value when changed between overrides', () => {
+      const initial = mineralView({ visibility_images: 'private' });
+      const values: SpecimenFormValues = {
+        ...specimenToFormValues(initial),
+        visibility_images: 'public',
+      };
+      const patch = formToPatchBody(initial, values);
+      expect(patch.visibility_images).toBe('public');
+    });
+
+    it('omits keys that round-trip equal even when other fields change', () => {
+      const initial = mineralView({
+        visibility_price: 'private',
+        visibility_images: 'public',
+      });
+      // Only acquired_from is changed; price + images must not appear.
+      const values: SpecimenFormValues = {
+        ...specimenToFormValues(initial),
+        visibility_acquired_from: 'unlisted',
+      };
+      const patch = formToPatchBody(initial, values);
+      expect(patch.visibility_acquired_from).toBe('unlisted');
+      expect(patch).not.toHaveProperty('visibility_price');
+      expect(patch).not.toHaveProperty('visibility_images');
+    });
+  });
+
   it('emits price_cents only when changed and non-null', () => {
     const initial = mineralView({ price_cents: 1000 });
     // No change in dollars value.
