@@ -267,16 +267,21 @@ jobs:
         run: docker compose down -v
 
   # End-to-end Keycloak smoke covering BOTH halves of the auth path
-  # in one job (mi-ivk + mi-dwx + mi-9eq):
+  # in one job (mi-ivk + mi-dwx + mi-9eq + mi-6oa):
   #
   #   1. Backend JWT acceptance — curl + password grant against a
   #      test-only client (mi-ivk). Proves the backend accepts a real
-  #      Keycloak-issued JWT.
+  #      Keycloak-issued JWT. BACKEND-ONLY: this path does not exercise
+  #      the SPA, the router, the CSP, or PKCE. Keep it because it
+  #      isolates a real failure mode (JWKS / aud / iss) without the
+  #      browser flow's flakiness budget — but it is NOT primary auth
+  #      coverage. See mi-6oa for the keep-and-scope decision.
   #   2. Real-browser PKCE round-trip — Playwright drives a headless
   #      Chromium through Login → Keycloak form → /auth/callback →
-  #      token exchange → logout (mi-dwx). Catches SPA routing
-  #      (mi-0ag), CSP (mi-cl1), runtime-config gating (mi-rvn), and
-  #      everything else only a real browser exercises.
+  #      token exchange → logout (mi-dwx). PRIMARY user-facing-flow
+  #      coverage. Catches SPA routing (mi-0ag), CSP (mi-cl1),
+  #      runtime-config gating (mi-rvn), and everything else only a
+  #      real browser exercises.
   #
   # Folded into one job so both halves share the compose stack
   # (keycloak cold start + terraform apply happen once).
@@ -339,8 +344,11 @@ jobs:
         working-directory: terraform/keycloak
         env:
           # Creates the `minerals-test` public direct-access-grant
-          # client so the smoke test below can mint a realm token via
-          # the password grant.
+          # client (see terraform/keycloak/clients.tf) so the
+          # backend-JWT-acceptance step below can mint a realm token
+          # via the password grant. Backend-only scope — the PKCE smoke
+          # uses `minerals-frontend` like real users do. Never set in
+          # staging/prod.
           TF_VAR_test_environment: "true"
         run: bash dev-seed.sh
 
@@ -446,11 +454,20 @@ jobs:
           echo "no-token request rejected with 401"
 
       - name: Backend accepts a real Keycloak-issued JWT (200)
-        # Mint a token for a seeded test user via the password grant
-        # against the dev realm, then call the same protected endpoint
-        # with it. A 200 proves the app discovered the realm JWKS,
-        # verified the signature, and accepted the `iss` + `aud`
-        # claims — the full real-Keycloak path.
+        # BACKEND-ONLY assertion (mi-6oa). Mint a token for a seeded
+        # test user via the password grant against the dev realm, then
+        # call the same protected endpoint with it. A 200 proves the
+        # app discovered the realm JWKS, verified the signature, and
+        # accepted the `iss` + `aud` claims — the full real-Keycloak
+        # backend path.
+        #
+        # This step intentionally does NOT exercise the SPA, router,
+        # CSP, or PKCE redirect; user-facing-flow coverage is the
+        # Playwright PKCE round-trip below (mi-dwx). The password grant
+        # lives on for one reason only: it isolates JWT-verification
+        # regressions cheaply, without the browser-flow's flakiness
+        # budget. Do NOT add user-facing-flow assertions here — they
+        # belong in the Playwright spec.
         run: |
           set -euo pipefail
           token=$(curl -fsS -X POST \

@@ -3069,6 +3069,43 @@ MUST follow these conventions.
   per-image (or other per-sub-resource) visibility, this rule
   needs revisiting.
 
+## CI auth coverage: two tracks, one job (mi-6oa)
+
+The `keycloak-smoke` job in `.github/workflows/pr.yml` has two
+complementary halves that share a compose stack. Both run on every PR.
+
+- **Primary — real-browser PKCE round-trip (mi-dwx).** Playwright
+  drives headless Chromium through `Login → Keycloak form →
+  /auth/callback → token exchange → logout`. This is the authoritative
+  user-facing-flow coverage: it exercises the SPA, the router, the CSP,
+  and the cross-origin token POST that real users hit. Three sequential
+  P0 bugs (mi-rvn, mi-0ag, mi-cl1) all shipped past the prior smoke
+  because each lived in a layer only a real browser exercises.
+
+- **Secondary — backend JWT acceptance via the password grant
+  (mi-ivk).** A curl step mints a token via `grant_type=password`
+  against a test-only Keycloak client (`minerals-test`, provisioned
+  by `terraform/keycloak/clients.tf` only when `test_environment =
+  true`) and POSTs to a protected endpoint. This isolates a narrow
+  failure mode — JWKS discovery, audience check, issuer match — at
+  curl speed with no browser flakiness budget. **It is not a model
+  of any user-facing flow**, and `minerals-test` MUST NOT be used
+  outside CI.
+
+Rules for polecats touching auth CI:
+
+- The Playwright spec is the authority for user-facing-flow
+  assertions. New "does the SPA do X under real auth" checks belong
+  there.
+- The password-grant curl step is allowed to grow only assertions
+  about *backend* JWT handling (verification, claim checks, route
+  authorization). Adding browser-flow assertions there is forbidden —
+  they would pass while the real flow is broken.
+- The `minerals-test` Keycloak client is gated on
+  `var.test_environment` and never provisioned in staging/prod. Do
+  not remove the gate; do not introduce a second password-grant
+  client.
+
 ## What this section is NOT
 
 This is the rule for **how user identity flows through the
