@@ -9,10 +9,10 @@ resource "random_password" "admin" {
 }
 
 resource "keycloak_user" "admin" {
-  realm_id   = keycloak_realm.minerals.id
-  username   = "admin"
-  email      = "admin@${var.env_domain}"
-  enabled    = true
+  realm_id       = keycloak_realm.minerals.id
+  username       = "admin"
+  email          = "admin@${var.env_domain}"
+  enabled        = true
   email_verified = true
 
   first_name = "Realm"
@@ -38,5 +38,6 @@ resource "keycloak_user_roles" "admin" {
 
   role_ids = [
     data.keycloak_role.realm_admin.id,
+    keycloak_role.user.id,
   ]
 }
