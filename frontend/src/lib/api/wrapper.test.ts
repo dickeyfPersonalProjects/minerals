@@ -11,6 +11,7 @@ import { client } from './index';
 import {
   envelopeMessage,
   installToastMiddleware,
+  isProfileSetupRedirect,
   readPostSetupReturn,
   SUPPRESS_TOAST_HEADERS,
 } from './wrapper';
@@ -59,6 +60,15 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   _clearToasts();
+});
+
+describe('isProfileSetupRedirect', () => {
+  it('returns true only when the envelope code is profile_setup_required', () => {
+    expect(isProfileSetupRedirect({ error: { code: 'profile_setup_required' } })).toBe(true);
+    expect(isProfileSetupRedirect({ error: { code: 'forbidden' } })).toBe(false);
+    expect(isProfileSetupRedirect({})).toBe(false);
+    expect(isProfileSetupRedirect(undefined)).toBe(false);
+  });
 });
 
 describe('envelopeMessage', () => {

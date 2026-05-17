@@ -1,6 +1,7 @@
 <script lang="ts">
   import { link, replace, router } from 'svelte-spa-router';
   import { client } from '../lib/api';
+  import { isProfileSetupRedirect } from '../lib/api/wrapper';
   import type { components } from '../lib/api/schema';
   import SpecimenCard from '../lib/SpecimenCard.svelte';
   import SpecimenFilters, {
@@ -105,6 +106,12 @@
         params: { query: buildQuery(active, cursor) },
       });
       if (error) {
+        // First-login profile gate (mi-4p4): the wrapper middleware
+        // already fired `push(/profile/setup)`. Stay in `loading`
+        // instead of switching to the error UI so the placeholder
+        // skeleton — not an "access forbidden" banner — is what the
+        // user sees during the async hash-route navigation.
+        if (isProfileSetupRedirect(error)) return;
         const body = error.error;
         loadState = {
           kind: 'error',
