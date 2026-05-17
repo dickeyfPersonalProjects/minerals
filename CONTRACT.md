@@ -3069,6 +3069,159 @@ MUST follow these conventions.
   per-image (or other per-sub-resource) visibility, this rule
   needs revisiting.
 
+## §13b — Per-field visibility
+
+This subsection extends §13 from whole-specimen visibility to
+**per-field visibility** on three named fields. It is the canonical
+contract: a polecat MUST be able to implement and audit the
+behavior from §13b alone. The reasoning lives in the mi-fo8 EPIC.
+
+### Fields covered
+
+Per-field visibility applies to exactly three fields on a specimen:
+
+1. `price` — scalar (`specimens.price_cents`)
+2. `acquired_from` — scalar (`specimens.acquired_from`)
+3. `images` — the photos collection attached to the specimen
+
+This list is the **contract, not a starting point.** Adding a
+fourth field is a contract amendment, not a free addition. It
+requires extending all of:
+
+- The resolution helper in `internal/visibility/` (the chain
+  added by mi-37w must learn the new field).
+- The handler wiring (mi-9ww — every GET path that returns
+  specimens or images runs the chain and omits redacted keys).
+- The user-facing surfaces — profile field-defaults UI (mi-fo8
+  #6), specimen-edit per-field selector (mi-fo8 #7), and
+  per-image selector (mi-fo8 #8) if the new field is a
+  collection.
+
+Until all three layers ship for a candidate field, do NOT
+serialize per-field visibility for it on the wire.
+
+### Visibility values
+
+Per-field visibility reuses the existing `domain.Visibility`
+enum from §13's RBAC subsection: `{public, unlisted, private}`.
+The wire format also reuses these strings. No new values are
+introduced.
+
+The EPIC text refers to `owner-only` as the conservative
+default; in the shipped enum this maps onto `private`. Treat
+`owner-only` and `private` as synonyms in any prose imported
+from the EPIC.
+
+### Resolution chains
+
+Both chains stop at the **first non-null layer**. There is no
+merging, no most-restrictive-of, no intersection. Every step
+uses the EXACT visibility value from that layer.
+
+**Scalar fields (`price`, `acquired_from`):**
+
+1. Specimen's per-field visibility (if set):
+   `specimens.visibility_price` / `specimens.visibility_acquired_from`.
+2. Otherwise: owner's per-field default
+   (`users.field_defaults.<field>`).
+3. Otherwise: the system default — `private` (see below).
+
+The scalar chain does **not** consult `specimens.visibility`
+(the overall whole-specimen value). A specimen marked
+`visibility = public` does not make its `price` public; the
+chain must reach an explicit `public` value at the field or
+user-default layer for the field to be exposed.
+
+**Images (collection):**
+
+1. The image's own visibility (if set on that specific image):
+   `photos.visibility`.
+2. Otherwise: the specimen's "images default":
+   `specimens.visibility_images`.
+3. Otherwise: the specimen's overall visibility:
+   `specimens.visibility` (the column governed by §13's RBAC
+   subsection).
+4. Otherwise: the owner's default for images
+   (`users.field_defaults.images`).
+5. Otherwise: the system default — `private`.
+
+The image chain consults the overall `specimens.visibility` as
+layer 3 deliberately: a `public` specimen with no per-image or
+per-collection override exposes its photos as `public`. An
+image-level override can LOOSEN against the specimen overall
+(e.g. `public` photo on a `private` specimen) — that is allowed
+by design and is what the chain implements. If this policy ever
+reverses, the change happens in this chain — not in the
+handler.
+
+### System default — and why it is `private`
+
+When every layer of a chain is null, the resolver returns
+`private` (the most-restrictive value). This is the
+**conservative-by-default rule**: an unset visibility never
+makes data more public than the user explicitly chose.
+
+This default also protects the V1→V2 migration: rows created
+under V1 with no per-field visibility columns fall through the
+chain to `private` after V2 ships. Data becomes more private on
+the wire post-V2, not less. The user can relax it from the
+profile page.
+
+A polecat MUST NOT change this default to "inherit from the
+specimen" or "public if the specimen is public" without
+amending this contract. The independence of the scalar chain
+from `specimens.visibility` is the central privacy property.
+
+### Redaction wire-format contract
+
+When the resolved visibility does NOT permit the viewer to see
+a field, the backend **omits the field entirely** from the
+response JSON. The contract has three distinct states and they
+MUST stay distinguishable on the wire:
+
+| State                     | Wire shape           | Meaning to viewer                                |
+|---------------------------|----------------------|--------------------------------------------------|
+| field absent              | key not in object    | no signal — viewer cannot tell if a value exists |
+| field present, value null | `"price": null`      | viewer is allowed to see; owner left it blank    |
+| field present, value set  | `"price": 12345`     | viewer is allowed to see; value is the truth     |
+
+**`field absent ≠ field null ≠ field present-with-null-value`.**
+Encoding a redacted field as `null` would leak existence; the
+viewer would be able to distinguish "owner hid this from you"
+from "no value set." Both states MUST present as "field
+absent." This is a privacy property — preserve it.
+
+For the images collection: a redacted image is **omitted from
+the array**. The viewer sees a shorter array; no count of
+hidden images is exposed. Adding an opt-in "N hidden" surface
+is a separate contract amendment.
+
+### Enforcement layer
+
+Per-field redaction is enforced by the **BACKEND**, in every
+handler that returns specimens or images. The SPA may also
+hide field editors based on local knowledge (anonymous viewers
+do not see the price input, etc.), but the backend MUST NOT
+trust the SPA to filter — every protected GET handler runs the
+chain and strips redacted keys before serializing.
+
+The redaction layer sits **on top of** the §13 RBAC layer:
+RBAC decides whether the viewer can see the row at all (404
+when not); §13b decides which fields of an otherwise-visible
+row appear in the response. A field that fails the chain check
+is dropped regardless of how the row itself was authorized.
+
+### Cross-references
+
+- §13 (whole-specimen visibility, RBAC, HTTP semantics) still
+  applies in full. §13b extends it to per-field granularity;
+  it does not replace any §13 rule.
+- The visibility enum, the `visibility` column, and the
+  list/detail/write HTTP status conventions all come from §13.
+- The resolution helper lives in `internal/visibility/`
+  (mi-37w). Handlers MUST call into it; they MUST NOT
+  re-implement the chain inline.
+
 ## CI auth coverage: two tracks, one job (mi-6oa)
 
 The `keycloak-smoke` job in `.github/workflows/pr.yml` has two
