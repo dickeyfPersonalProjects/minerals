@@ -97,6 +97,19 @@ export function envelopeMessage(error: ErrorEnvelope | undefined, status: number
   return error?.error?.message || error?.error?.code || `HTTP ${status}`;
 }
 
+// isProfileSetupRedirect returns true when an openapi-fetch error
+// envelope is the backend's "pending-profile" signal — i.e. the
+// auto-redirect middleware above already fired `push(/profile/setup)`.
+// Page-level fetchers should consult this in their error path and
+// stay in their loading state instead of flipping to an error UI,
+// because the redirect is async (svelte-spa-router's `push`) and an
+// error banner would flash for a frame before the route changes
+// (mi-4p4). Toast suppression is handled in the middleware; this
+// helper is the per-call-site equivalent for inline error UI.
+export function isProfileSetupRedirect(error: ErrorEnvelope | undefined): boolean {
+  return error?.error?.code === 'profile_setup_required';
+}
+
 async function safeReadEnvelope(response: Response): Promise<ErrorEnvelope | undefined> {
   // Only attempt JSON parse for typical envelope payloads. We
   // clone so the original response body remains readable by

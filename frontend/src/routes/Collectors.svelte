@@ -1,6 +1,7 @@
 <script lang="ts">
   import { link } from 'svelte-spa-router';
   import { client } from '../lib/api';
+  import { isProfileSetupRedirect } from '../lib/api/wrapper';
   import type { components } from '../lib/api/schema';
   import CollectorForm from '../lib/CollectorForm.svelte';
   import type { CollectorFormSubmitResult } from '../lib/CollectorForm.svelte';
@@ -47,6 +48,10 @@
         params: { query },
       });
       if (error) {
+        // mi-4p4: wrapper is mid-redirect to /profile/setup; stay
+        // in `loading` to avoid an error-banner flash before the
+        // hash route swaps.
+        if (isProfileSetupRedirect(error)) return;
         loadState = { kind: 'error', message: envelopeMessage(error, response.status) };
         return;
       }

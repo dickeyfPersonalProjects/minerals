@@ -274,6 +274,44 @@ describe('Specimens route', () => {
     expect(mockReplace).toHaveBeenCalledWith('/specimens');
   });
 
+  it('does NOT render the error UI on a profile_setup_required 403 (mi-4p4)', async () => {
+    // Backend gate: first-login user with no profile row. The
+    // wrapper middleware is responsible for the redirect; this
+    // component should stay in `loading` so the user never sees an
+    // "access forbidden" banner before the route navigates away.
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/specimens') {
+        return {
+          data: undefined,
+          error: {
+            error: {
+              code: 'profile_setup_required',
+              message: 'profile setup required',
+              details: { redirect: '/profile/setup' },
+            },
+          },
+          response: new Response(null, { status: 403 }),
+        };
+      }
+      return { data: { items: [], next_cursor: null }, error: undefined };
+    });
+
+    render(Specimens);
+
+    // Let the fetch resolve and any pending microtasks settle.
+    await waitFor(() => expect(mockGet).toHaveBeenCalled());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // No error UI of any kind — the page stays on the skeleton so
+    // the redirect lands without a visible flash of an error.
+    expect(screen.queryByTestId('error')).not.toBeInTheDocument();
+    expect(screen.queryByText(/access forbidden/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/profile setup required/i)).not.toBeInTheDocument();
+    // The skeleton (loading) is still showing.
+    expect(screen.getByTestId('loading')).toBeInTheDocument();
+  });
+
   describe('when unauthenticated', () => {
     it('renders the grid without write buttons (mi-eec)', async () => {
       __resetAuthStore();

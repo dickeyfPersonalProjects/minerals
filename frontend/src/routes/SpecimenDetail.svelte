@@ -1,7 +1,7 @@
 <script lang="ts">
   import { link } from 'svelte-spa-router';
   import { client } from '../lib/api';
-  import { SUPPRESS_TOAST_HEADERS } from '../lib/api/wrapper';
+  import { isProfileSetupRedirect, SUPPRESS_TOAST_HEADERS } from '../lib/api/wrapper';
   import type { components } from '../lib/api/schema';
   import CollectorChainEditor from '../lib/CollectorChainEditor.svelte';
   import ConfirmModal from '../lib/ConfirmModal.svelte';
@@ -158,6 +158,9 @@
     try {
       const [s, p, j, c] = await Promise.all([specimenP, photosP, journalP, collectorsP]);
       if (s.error) {
+        // mi-4p4: wrapper is redirecting to /profile/setup; stay
+        // in `loading` so no "access forbidden" banner flashes.
+        if (isProfileSetupRedirect(s.error)) return;
         loadState = { kind: 'error', message: errorMessage(s.error, s.response.status) };
         return;
       }
