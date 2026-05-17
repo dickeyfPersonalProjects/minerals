@@ -491,6 +491,217 @@ jobs:
           fi
           echo "malformed token rejected with 401"
 
+      # --- Default-shaped Keycloak user smoke (mi-2xa4) ---------------
+      #
+      # The steps above use the fixture-shaped `user1@localhost` —
+      # seeded by terraform/keycloak/dev-seed.sh on every CI run, with
+      # whatever roles/attributes/audience the realm config grants. That
+      # path covers "realm with full V2 config applied" and is kept on
+      # purpose (devops-* roles, custom attributes, anything fixtures
+      # provision).
+      #
+      # The block below covers the complementary failure mode that has
+      # shipped two P0/P1 auth bugs already (mi-cl1 audience-mapper,
+      # mi-2eg6 missing 'user' role): a user that came out of Keycloak
+      # with default realm config — no role assignments, no group
+      # memberships, no attribute pre-fill — must be able to log in,
+      # complete profile setup, and write through the protected API
+      # against the SAME backend the fixture user uses. Reverting either
+      # fix locally MUST cause one of these steps to fail.
+      #
+      # The smoke is intentionally provisioned via the Admin API in this
+      # job (not via dev-seed.sh) so the staging-vs-dev configuration
+      # drift the original bugs lived in cannot hide here either.
+      - name: Default-shaped user — provision via Keycloak Admin API (mi-2xa4)
+        id: default_user
+        env:
+          DEFAULT_USERNAME: smoke-default@localhost
+          DEFAULT_PASSWORD: MineralsDev123!
+        run: |
+          set -euo pipefail
+          admin_token=$(curl -fsS -X POST \
+            http://localhost:8081/realms/master/protocol/openid-connect/token \
+            -d grant_type=password \
+            -d client_id=admin-cli \
+            -d username=admin \
+            -d password=admin \
+            | jq -r '.access_token')
+          if [ -z "$admin_token" ] || [ "$admin_token" = "null" ]; then
+            echo "failed to obtain Keycloak master-realm admin token" >&2
+            exit 1
+          fi
+
+          # Bare-minimum body: only the fields Keycloak's user profile
+          # marks as required (username/email, firstName/lastName — same
+          # reason dev-seed.sh sets them, otherwise the password grant
+          # fails with invalid_grant) and the password. No roles, no
+          # groups, no attributes.
+          body=$(jq -n \
+            --arg u "$DEFAULT_USERNAME" \
+            --arg p "$DEFAULT_PASSWORD" \
+            '{
+               username: $u,
+               email: $u,
+               enabled: true,
+               emailVerified: true,
+               firstName: "Default",
+               lastName:  "Shape",
+               credentials: [{type: "password", value: $p, temporary: false}]
+             }')
+          code=$(curl -sS -o /tmp/admin-create.out -w '%{http_code}' \
+            -H "Authorization: Bearer ${admin_token}" \
+            -H 'Content-Type: application/json' \
+            -X POST http://localhost:8081/admin/realms/minerals/users \
+            -d "$body")
+          # 201 = created, 409 = already exists (re-run of the job on a
+          # warm volume); both are acceptable starting points.
+          if [ "$code" != "201" ] && [ "$code" != "409" ]; then
+            echo "Admin-API user creation failed: HTTP $code" >&2
+            cat /tmp/admin-create.out >&2 || true
+            exit 1
+          fi
+          echo "default-shaped user provisioned: $DEFAULT_USERNAME (HTTP $code)"
+          echo "username=$DEFAULT_USERNAME" >> "$GITHUB_OUTPUT"
+          echo "password=$DEFAULT_PASSWORD" >> "$GITHUB_OUTPUT"
+
+      - name: Default-shaped user — token claims match snapshot (mi-2xa4)
+        # Mint a token via the same minerals-test password-grant client
+        # the fixture smoke uses, decode the payload, log roles + aud
+        # (so future drift is visible at a glance in CI output), and
+        # diff `realm_access.roles` against the committed snapshot.
+        # The snapshot lives at internal/oidc/testdata/keycloak-default-token-claims.json
+        # and is documented in docs/design/08-keycloak-default-token-shape.md.
+        env:
+          DEFAULT_USERNAME: ${{ steps.default_user.outputs.username }}
+          DEFAULT_PASSWORD: ${{ steps.default_user.outputs.password }}
+        run: |
+          set -euo pipefail
+          token=$(curl -fsS -X POST \
+            http://localhost:8081/realms/minerals/protocol/openid-connect/token \
+            -d grant_type=password \
+            -d client_id=minerals-test \
+            -d "username=${DEFAULT_USERNAME}" \
+            -d "password=${DEFAULT_PASSWORD}" \
+            -d scope=openid \
+            | jq -r '.access_token')
+          if [ -z "$token" ] || [ "$token" = "null" ]; then
+            echo "default-shaped user could not obtain a token from Keycloak" >&2
+            exit 1
+          fi
+          # Persist the token for the steps below — only readable by
+          # this job's runner.
+          printf '%s' "$token" > /tmp/default-token.txt
+
+          # Decode the JWT payload (base64url, no signature check —
+          # already verified above by trusting Keycloak's reply on
+          # localhost). `tr` rewrites the URL-safe alphabet and pads
+          # the body before `base64 -d`.
+          payload_b64=$(printf '%s' "$token" | cut -d. -f2 \
+            | tr '_-' '/+')
+          # Pad to a multiple of 4 (some base64 decoders are strict).
+          pad=$(( (4 - ${#payload_b64} % 4) % 4 ))
+          payload=$(printf '%s%s' "$payload_b64" "$(printf '%0.s=' $(seq 1 $pad))" \
+            | base64 -d 2>/dev/null)
+          echo "default-shaped token claims (realm_access + aud + azp):"
+          echo "$payload" | jq '{realm_access, aud, azp}'
+
+          actual=$(echo "$payload" | jq -c '.realm_access.roles | sort | unique')
+          expected=$(jq -c '.realm_access.roles | sort | unique' \
+            internal/oidc/testdata/keycloak-default-token-claims.json)
+          if [ "$actual" != "$expected" ]; then
+            echo "FAIL: default Keycloak realm_access.roles drifted from snapshot" >&2
+            echo "  expected: $expected" >&2
+            echo "  actual:   $actual"   >&2
+            echo "If this drift is intentional (Keycloak version bump," >&2
+            echo "realm-config change, etc.) update the snapshot at" >&2
+            echo "internal/oidc/testdata/keycloak-default-token-claims.json" >&2
+            echo "in the SAME PR — see docs/design/08-keycloak-default-token-shape.md." >&2
+            exit 1
+          fi
+          echo "default-shaped realm_access.roles matches snapshot: $actual"
+
+          # Audience must contain minerals-frontend — the backend
+          # rejects on `aud`, not `azp` (mi-cl1 family). The
+          # minerals-test client carries the same audience mapper as
+          # the SPA client; if a future TF change drops it, this
+          # assertion catches it before staging does.
+          if ! echo "$payload" | jq -e '
+              (.aud | if type=="array" then index("minerals-frontend") else . == "minerals-frontend" end)
+            ' >/dev/null; then
+            echo "FAIL: default-shaped token aud claim missing 'minerals-frontend'" >&2
+            echo "$payload" | jq '.aud' >&2
+            exit 1
+          fi
+
+      - name: Default-shaped user — profile setup + write succeeds (mi-2xa4)
+        # The core mi-2eg6 regression net: a user whose JWT does NOT
+        # carry the `user` realm role MUST still be able to write
+        # through the protected API. authzUser injects `user`
+        # implicitly for every authenticated caller; if that fallback
+        # is removed or narrowed, POST /api/v1/specimens below 403s.
+        run: |
+          set -euo pipefail
+          token=$(cat /tmp/default-token.txt)
+
+          # 1. Lift the first-login profile gate. The endpoint runs
+          #    without authzGuard but proves the resolve-user middleware
+          #    accepts a default-shaped JWT (it must derive a stable
+          #    user id from `sub` without help from custom claims).
+          code=$(curl -sS -o /tmp/default-profile.json -w '%{http_code}' \
+            -X POST http://localhost:8080/api/v1/profile \
+            -H "Authorization: Bearer ${token}" \
+            -H 'Content-Type: application/json' \
+            -d '{"display_name":"Default-Shaped Smoke"}')
+          if [ "$code" != "200" ]; then
+            echo "FAIL: default-shaped user could not complete profile setup (HTTP $code)" >&2
+            cat /tmp/default-profile.json >&2 || true
+            docker compose --profile keycloak logs app >&2 || true
+            exit 1
+          fi
+          echo "default-shaped profile setup: $(cat /tmp/default-profile.json)"
+
+          # 2. The actual mi-2eg6 regression catch: a write that
+          #    requires the `user` role via Casbin. POST /api/v1/specimens
+          #    goes through authzGuard.check with actCreate — a default
+          #    Keycloak user without the implicit `user` role would 403.
+          create_body='{
+            "type": "mineral",
+            "name": "Default-shape smoke specimen",
+            "visibility": "private"
+          }'
+          code=$(curl -sS -o /tmp/default-specimen.json -w '%{http_code}' \
+            -X POST http://localhost:8080/api/v1/specimens \
+            -H "Authorization: Bearer ${token}" \
+            -H 'Content-Type: application/json' \
+            -d "$create_body")
+          if [ "$code" != "201" ]; then
+            echo "FAIL: default-shaped user could not create a specimen (HTTP $code)" >&2
+            echo "This is the mi-2eg6 regression mode — see authzUser in internal/api/authz.go" >&2
+            cat /tmp/default-specimen.json >&2 || true
+            docker compose --profile keycloak logs app >&2 || true
+            exit 1
+          fi
+          specimen_id=$(jq -r '.id' /tmp/default-specimen.json)
+          echo "default-shaped user created specimen $specimen_id"
+
+          # 3. And the same caller can read its own write back through
+          #    the list endpoint — closes the round-trip the bead spec'd.
+          code=$(curl -sS -o /tmp/default-list.json -w '%{http_code}' \
+            -X GET http://localhost:8080/api/v1/specimens \
+            -H "Authorization: Bearer ${token}")
+          if [ "$code" != "200" ]; then
+            echo "FAIL: default-shaped user could not list specimens (HTTP $code)" >&2
+            cat /tmp/default-list.json >&2 || true
+            exit 1
+          fi
+          if ! jq -e --arg id "$specimen_id" '.items[]?.id | select(. == $id)' \
+              /tmp/default-list.json >/dev/null; then
+            echo "FAIL: default-shaped user's specimen $specimen_id not visible in list" >&2
+            cat /tmp/default-list.json >&2 || true
+            exit 1
+          fi
+          echo "default-shaped user can list own specimen — round-trip OK"
+
       # Real-browser PKCE round-trip (mi-dwx). The curl assertions
       # above cover backend JWT verification and the structural CSP /
       # runtime-config preconditions; this step covers the live SPA →
@@ -534,11 +745,29 @@ jobs:
             npx playwright install --with-deps chromium
           fi
 
-      - name: Playwright auth round-trip
+      - name: Playwright auth round-trip (seeded fixture user)
         working-directory: frontend
         env:
           CI: 'true'
           E2E_BASE_URL: 'http://localhost:8080'
+        run: npm run e2e
+
+      # Same Playwright spec, default-shaped user (mi-2xa4). Covers the
+      # browser layer where mi-cl1 lived — CSP and the SPA's
+      # cross-origin token POST cannot be exercised by curl. The
+      # spec body is identical; the only difference is the credentials
+      # belong to a user provisioned via the Admin API earlier in this
+      # job with NO fixture role/group/attribute customisation. If a
+      # future regression assumes a fixture-only property in the
+      # browser flow (id token shape, account-management redirect,
+      # etc.), this run fails while the seeded run above still passes.
+      - name: Playwright auth round-trip (default-shaped user)
+        working-directory: frontend
+        env:
+          CI: 'true'
+          E2E_BASE_URL: 'http://localhost:8080'
+          E2E_USERNAME: smoke-default@localhost
+          E2E_PASSWORD: MineralsDev123!
         run: npm run e2e
 
       # Upload the Playwright HTML report + traces / videos /
