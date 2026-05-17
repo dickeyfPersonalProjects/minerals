@@ -3742,6 +3742,7 @@ style-src 'self' 'unsafe-inline';
 img-src 'self' data:;
 font-src 'self';
 connect-src 'self' <PUBLIC_OIDC_ISSUER_URL origin, if configured>;
+frame-src 'self' <PUBLIC_OIDC_ISSUER_URL origin, if configured>;
 frame-ancestors 'none';
 base-uri 'self';
 form-action 'self';
@@ -3765,6 +3766,17 @@ when `PUBLIC_OIDC_ISSUER_URL` is set, the **origin** portion
 variable is unset, the policy stays exactly as the baseline
 above — no auth, no cross-origin.
 
+#### `frame-src` and silent renewal (mi-ct2)
+
+The SPA mounts a hidden iframe pointed at the OIDC `/auth?prompt=none`
+endpoint to silently re-mint an access token on page load (so a
+refresh keeps the user logged in) and a few seconds before expiry.
+`'self'` alone forbids that frame, so when `PUBLIC_OIDC_ISSUER_URL`
+is set, the same origin appended to `connect-src` is also appended
+to `frame-src`. When the variable is unset, `frame-src` stays
+`'self'`. `frame-ancestors 'none'` remains in force regardless —
+it controls who may frame US and is orthogonal to what we may frame.
+
 Hard rules:
 
 - The configured value is the **origin only** — never the full
@@ -3773,14 +3785,14 @@ Hard rules:
 - The origin is derived from `PUBLIC_OIDC_ISSUER_URL` by URL
   parsing in `internal/config`. A malformed value fails startup
   rather than silently emitting a broken policy.
-- Adding any other cross-origin source to `connect-src` (or any
-  other directive) is a contract amendment, not a one-off
-  change. Today's allow-list is `'self'` + the one OIDC origin
-  the SPA already uses. Nothing else.
-- `frame-src`, `script-src`, `form-action` stay `'self'`. The
-  SPA does not use Keycloak's session-check iframe, does not
-  load Keycloak JS, and does not POST HTML forms to Keycloak —
-  if any of those changes, that's a new bead.
+- Adding any other cross-origin source to `connect-src`,
+  `frame-src`, or any other directive is a contract amendment,
+  not a one-off change. Today's allow-list is `'self'` + the one
+  OIDC origin the SPA already uses, in those two directives only.
+  Nothing else.
+- `script-src` and `form-action` stay `'self'`. The SPA does not
+  load Keycloak JS and does not POST HTML forms to Keycloak — if
+  either changes, that's a new bead.
 
 ### File-serving response hygiene
 
