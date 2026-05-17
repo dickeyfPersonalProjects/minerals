@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 
 	"github.com/casbin/casbin/v2"
 	"github.com/google/uuid"
@@ -133,18 +134,24 @@ func (g authzGuard) checkHTTP(
 }
 
 // authzUser projects the request-scoped auth.User onto the
-// authorization-side authz.User. A caller with no roles is treated as
-// `anonymous` when it has no application identity, otherwise as the
-// base `user` role — defensive only; production auth always populates
-// Roles from the JWT realm-roles claim.
+// authorization-side authz.User. Every authenticated caller
+// (u.ID != uuid.Nil) implicitly has the base `user` role — the role
+// CONTRACT.md §13 v2 base policies grant. Holding this assignment in
+// the backend keeps Casbin enforcement independent of Keycloak realm
+// configuration drift (default Keycloak users carry only
+// offline_access / uma_authorization / default-roles-* — none of which
+// would otherwise match a `user`-keyed policy). Higher-privilege roles
+// from the JWT (devops-viewer, devops-admin, admin) coexist with
+// `user`; Casbin OR-evaluates roles, so this never downgrades anyone.
+// Callers with no application identity remain `anonymous`.
 func authzUser(u auth.User) authz.User {
-	roles := u.Roles
-	if len(roles) == 0 {
-		if u.ID == uuid.Nil {
-			roles = []string{"anonymous"}
-		} else {
-			roles = []string{"user"}
+	roles := append([]string(nil), u.Roles...)
+	if u.ID != uuid.Nil {
+		if !slices.Contains(roles, "user") {
+			roles = append(roles, "user")
 		}
+	} else if len(roles) == 0 {
+		roles = []string{"anonymous"}
 	}
 	id := ""
 	if u.ID != uuid.Nil {
