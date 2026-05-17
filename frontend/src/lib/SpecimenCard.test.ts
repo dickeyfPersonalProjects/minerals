@@ -40,7 +40,10 @@ function specimen(
     visibility: overrides.visibility ?? 'private',
     locality_text: overrides.locality_text ?? null,
     acquired_at: null,
-    acquired_from: null,
+    // acquired_from and price_cents are now optional in the response
+    // shape (mi-fo8 / mi-9ww — per-field visibility redaction omits
+    // the key when the viewer can't see it). Tests that don't care
+    // about the value omit the key.
     author_id: '00000000-0000-0000-0000-000000000001',
     catalog_number: null,
     created_at: '2026-05-01T12:00:00Z',
@@ -49,7 +52,6 @@ function specimen(
     dimensions: {},
     locality: {},
     mass_g: null,
-    price_cents: null,
     source_notes: null,
     type_data: {},
     main_image_id: null,

@@ -150,6 +150,7 @@ func runServe(_ []string) error {
 		Files:          db.NewFilePostgres(pool),
 		Storage:        store,
 		Specimens:      db.NewSpecimenPostgres(pool),
+		Users:          db.NewUserPostgres(pool),
 		MaxUploadBytes: cfg.MaxUploadBytes,
 		RunInTx: func(ctx context.Context, fn func(tx domain.Tx) error) error {
 			return db.RunInTx(ctx, pool, func(pgxTx pgx.Tx) error {
