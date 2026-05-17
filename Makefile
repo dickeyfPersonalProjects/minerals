@@ -143,26 +143,39 @@ install-govulncheck:
 	}
 
 # ── Frontend (mi-p5h) ─────────────────────────────────────────────
-.PHONY: test-frontend test-cover-frontend check-frontend
+.PHONY: test-frontend test-cover-frontend check-frontend install-frontend
 
-fmt-frontend:
+# Idempotent npm dependency install — mirrors the pinned-tool pattern
+# used for Go tools above. Runs `npm ci` only when node_modules is
+# missing or older than package-lock.json. Closes the stale-deps
+# footgun where `make ci-quick` would surface bogus "rule not found"
+# errors after a package.json bump landed without a local reinstall
+# (mi-zmg8 — eslint 9→10 upgrade added svelte/prefer-svelte-reactivity).
+install-frontend:
+	@if [ ! -f frontend/node_modules/.package-lock.json ] || \
+	    [ frontend/package-lock.json -nt frontend/node_modules/.package-lock.json ]; then \
+		echo "Installing frontend deps (npm ci)..."; \
+		cd frontend && npm ci; \
+	fi
+
+fmt-frontend: install-frontend
 	cd frontend && npx prettier --write .
 
-fmt-check-frontend:
+fmt-check-frontend: install-frontend
 	cd frontend && npx prettier --check .
 
-lint-frontend:
+lint-frontend: install-frontend
 	cd frontend && npx eslint .
 
 # Svelte/TypeScript typecheck — mirrors CI's `svelte-check (typecheck)`
 # step (.github/workflows/pr.yml).
-check-frontend:
+check-frontend: install-frontend
 	cd frontend && npm run check
 
-test-frontend:
+test-frontend: install-frontend
 	cd frontend && npm test
 
-test-cover-frontend:
+test-cover-frontend: install-frontend
 	cd frontend && npm run test:cover
 
 # ── CI parity targets (mi-c0v) ────────────────────────────────────
@@ -201,7 +214,7 @@ openapi-spec:
 	@mkdir -p $(dir $(OPENAPI_SPEC))
 	go run $(PKG) openapi > $(OPENAPI_SPEC)
 
-gen-api-client: openapi-spec
+gen-api-client: openapi-spec install-frontend
 	cd frontend && npx openapi-typescript src/lib/api/openapi.json -o src/lib/api/schema.d.ts
 
 # ── Compose lifecycle (mi-8ky) ────────────────────────────────────
