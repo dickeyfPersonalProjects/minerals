@@ -557,6 +557,142 @@ func TestSpecimensPatchMainImageIDRejectsForeignFile(t *testing.T) {
 	}
 }
 
+// TestSpecimensPatchVisibilityOverrides exercises the three-way
+// absent / explicit-null / value semantics of the visibility_*
+// override fields added for the per-field visibility surface
+// (CONTRACT.md §13b, mi-fo8 / mi-xx6). Each sub-test issues a focused
+// PATCH and asserts the SpecimenView response carries (or doesn't
+// carry) the expected override.
+func TestSpecimensPatchVisibilityOverrides(t *testing.T) {
+	t.Run("set then clear via explicit null", func(t *testing.T) {
+		repo := newFakeSpecimenRepo()
+		h := newServerWithSpecimens(t, repo)
+		created := mustCreateMineral(t, h, "Q", map[string]any{})
+
+		// Set all three.
+		raw := []byte(`{
+			"visibility_price": "private",
+			"visibility_acquired_from": "unlisted",
+			"visibility_images": "public"
+		}`)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/specimens/"+created.ID.String(), bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("set status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		var got SpecimenView
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+		if got.VisibilityPrice == nil || *got.VisibilityPrice != domain.VisibilityPrivate {
+			t.Errorf("VisibilityPrice = %v, want private", got.VisibilityPrice)
+		}
+		if got.VisibilityAcquiredFrom == nil || *got.VisibilityAcquiredFrom != domain.VisibilityUnlisted {
+			t.Errorf("VisibilityAcquiredFrom = %v, want unlisted", got.VisibilityAcquiredFrom)
+		}
+		if got.VisibilityImages == nil || *got.VisibilityImages != domain.VisibilityPublic {
+			t.Errorf("VisibilityImages = %v, want public", got.VisibilityImages)
+		}
+
+		// Explicit null clears just one — the others must survive.
+		raw = []byte(`{"visibility_price": null}`)
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPatch, "/api/v1/specimens/"+created.ID.String(), bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("clear status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		got = SpecimenView{}
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+		if got.VisibilityPrice != nil {
+			t.Errorf("VisibilityPrice should be cleared, got %v", *got.VisibilityPrice)
+		}
+		if got.VisibilityAcquiredFrom == nil || *got.VisibilityAcquiredFrom != domain.VisibilityUnlisted {
+			t.Errorf("VisibilityAcquiredFrom must survive null on price, got %v", got.VisibilityAcquiredFrom)
+		}
+		if got.VisibilityImages == nil || *got.VisibilityImages != domain.VisibilityPublic {
+			t.Errorf("VisibilityImages must survive null on price, got %v", got.VisibilityImages)
+		}
+	})
+
+	t.Run("omitted key preserves stored override", func(t *testing.T) {
+		repo := newFakeSpecimenRepo()
+		h := newServerWithSpecimens(t, repo)
+		created := mustCreateMineral(t, h, "Q", map[string]any{})
+
+		// Seed an override on price.
+		raw := []byte(`{"visibility_price": "private"}`)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/specimens/"+created.ID.String(), bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("seed status = %d body=%s", rec.Code, rec.Body.String())
+		}
+
+		// A PATCH that omits visibility_price entirely must leave it
+		// alone (changing only the description).
+		raw = []byte(`{"description": "updated"}`)
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPatch, "/api/v1/specimens/"+created.ID.String(), bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("preserve status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		var got SpecimenView
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+		if got.VisibilityPrice == nil || *got.VisibilityPrice != domain.VisibilityPrivate {
+			t.Errorf("VisibilityPrice must survive omission, got %v", got.VisibilityPrice)
+		}
+	})
+
+	t.Run("rejects invalid enum value", func(t *testing.T) {
+		repo := newFakeSpecimenRepo()
+		h := newServerWithSpecimens(t, repo)
+		created := mustCreateMineral(t, h, "Q", map[string]any{})
+
+		raw := []byte(`{"visibility_price": "secret"}`)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/specimens/"+created.ID.String(), bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(rec, req)
+		// The schema validator's enum check pre-empts the handler's
+		// defensive `applyVisibilityPatch` check — either layer is a
+		// hard reject. 422 (huma schema validation) is the path that
+		// fires in the happy case; 400 (handler) is the defense-in-
+		// depth path if the schema is ever loosened.
+		if rec.Code != http.StatusUnprocessableEntity && rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 422 or 400 — body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("absent on GET when never set", func(t *testing.T) {
+		repo := newFakeSpecimenRepo()
+		h := newServerWithSpecimens(t, repo)
+		created := mustCreateMineral(t, h, "Q", map[string]any{})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/specimens/"+created.ID.String(), nil)
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d", rec.Code)
+		}
+		// The three keys must be absent (not `null`) on the wire when
+		// no override has ever been written — preserves the "key absent
+		// means fall through to the owner default" semantics for the
+		// SPA's resolveScalar/resolveImage helpers.
+		var raw map[string]json.RawMessage
+		_ = json.Unmarshal(rec.Body.Bytes(), &raw)
+		for _, k := range []string{"visibility_price", "visibility_acquired_from", "visibility_images"} {
+			if _, present := raw[k]; present {
+				t.Errorf("key %s should be absent on a never-set specimen, got %s", k, string(raw[k]))
+			}
+		}
+	})
+}
+
 func TestSpecimensDeleteOK(t *testing.T) {
 	repo := newFakeSpecimenRepo()
 	h := newServerWithSpecimens(t, repo)

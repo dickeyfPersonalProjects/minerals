@@ -15,6 +15,7 @@
   import { toastError, toastSuccess } from '../lib/toasts';
 
   type Specimen = components['schemas']['SpecimenView'];
+  type Profile = components['schemas']['ProfileBody'];
 
   interface Props {
     params?: { id?: string };
@@ -28,6 +29,11 @@
     | { kind: 'error'; message: string };
 
   let specimen: Specimen | null = $state(null);
+  // Owner profile drives the 'Use my account default (currently: X)'
+  // affordance on the per-field visibility selectors (mi-fo8 #7). A
+  // load failure is non-blocking — the selectors degrade to showing
+  // the system default ('private') and we still save normally.
+  let ownerProfile: Profile | null = $state(null);
   let loadState: LoadState = $state({ kind: 'idle' });
   let confirmingDelete = $state(false);
   let deleting = $state(false);
@@ -42,14 +48,23 @@
   async function load(id: string): Promise<void> {
     loadState = { kind: 'loading' };
     try {
-      const { data, error, response } = await client.GET('/api/v1/specimens/{id}', {
-        params: { path: { id } },
-      });
-      if (error) {
-        loadState = { kind: 'error', message: envelopeMessage(error, response.status) };
+      // Load the specimen and owner profile concurrently — the
+      // profile carries the field_defaults the visibility selectors
+      // use to render their 'currently: X' affordance, but a profile
+      // failure must not block editing the specimen.
+      const [specimenRes, profileRes] = await Promise.all([
+        client.GET('/api/v1/specimens/{id}', { params: { path: { id } } }),
+        client.GET('/api/v1/profile'),
+      ]);
+      if (specimenRes.error) {
+        loadState = {
+          kind: 'error',
+          message: envelopeMessage(specimenRes.error, specimenRes.response.status),
+        };
         return;
       }
-      specimen = data ?? null;
+      specimen = specimenRes.data ?? null;
+      ownerProfile = profileRes.data ?? null;
       loadState = { kind: 'loaded' };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -214,6 +229,7 @@
           onSubmit={saveSpecimen}
           onCancel={cancel}
           onDelete={requestDelete}
+          {ownerProfile}
         />
       </div>
 

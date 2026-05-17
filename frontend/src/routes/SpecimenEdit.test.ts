@@ -33,9 +33,12 @@ function specimen(
     description: string;
     catalog_number: string | null;
     visibility: 'private' | 'unlisted' | 'public';
+    visibility_price: 'private' | 'unlisted' | 'public' | null;
+    visibility_acquired_from: 'private' | 'unlisted' | 'public' | null;
+    visibility_images: 'private' | 'unlisted' | 'public' | null;
   }> = {},
 ) {
-  return {
+  const base: Record<string, unknown> = {
     id: SPECIMEN_ID,
     name: overrides.name ?? 'Galena',
     type: overrides.type ?? ('mineral' as const),
@@ -55,6 +58,31 @@ function specimen(
     type_data: {},
     updated_at: '2026-05-01T12:00:00Z',
   };
+  // Per-field visibility overrides are absent on the wire when unset
+  // (CONTRACT.md §13b). Only set the keys when the test seeds them
+  // explicitly, so the rendered selectors see undefined (the
+  // "inherit" state) by default.
+  if (overrides.visibility_price !== undefined) base.visibility_price = overrides.visibility_price;
+  if (overrides.visibility_acquired_from !== undefined)
+    base.visibility_acquired_from = overrides.visibility_acquired_from;
+  if (overrides.visibility_images !== undefined)
+    base.visibility_images = overrides.visibility_images;
+  return base;
+}
+
+// mockGetByPath routes the typed openapi-fetch GET mock to a per-path
+// handler. The route now loads both /specimens/{id} and /profile in
+// parallel; tests need to supply distinct responses for each.
+function mockGetByPath(handlers: { specimen?: unknown; profile?: unknown }): void {
+  mockGet.mockImplementation(async (path: string) => {
+    if (path === '/api/v1/specimens/{id}') {
+      return handlers.specimen ?? { data: undefined, error: undefined, response: new Response() };
+    }
+    if (path === '/api/v1/profile') {
+      return handlers.profile ?? { data: undefined, error: undefined, response: new Response() };
+    }
+    return { data: undefined, error: undefined, response: new Response(null, { status: 404 }) };
+  });
 }
 
 beforeEach(() => {
@@ -243,5 +271,126 @@ describe('SpecimenEdit route', () => {
     render(SpecimenEdit, { params: { id: SPECIMEN_ID } });
     await waitFor(() => expect(screen.getByTestId('auth-required')).toBeInTheDocument());
     expect(screen.queryByTestId('specimen-form')).not.toBeInTheDocument();
+  });
+
+  describe('per-field visibility selectors (mi-fo8 #7)', () => {
+    function profile(
+      field_defaults?: Partial<{
+        price: 'private' | 'unlisted' | 'public';
+        acquired_from: 'private' | 'unlisted' | 'public';
+        images: 'private' | 'unlisted' | 'public';
+      }>,
+    ) {
+      return {
+        id: '00000000-0000-0000-0000-000000000001',
+        email: 'owner@example.com',
+        display_name: 'Owner',
+        pending: false,
+        field_defaults: field_defaults ?? null,
+      };
+    }
+
+    it('renders inherit option with the resolved owner-default chip text', async () => {
+      mockGetByPath({
+        specimen: { data: specimen(), error: undefined, response: new Response() },
+        profile: {
+          data: profile({ price: 'public', acquired_from: 'unlisted', images: 'private' }),
+          error: undefined,
+          response: new Response(),
+        },
+      });
+
+      render(SpecimenEdit, { params: { id: SPECIMEN_ID } });
+
+      const priceSel = (await screen.findByTestId('visibility-price')) as HTMLSelectElement;
+      const afSel = screen.getByTestId('visibility-acquired-from') as HTMLSelectElement;
+      const imgSel = screen.getByTestId('visibility-images') as HTMLSelectElement;
+      // First option is the 'Use my account default' inherit sentinel;
+      // its label embeds the resolution result so the user sees what
+      // will actually apply if they keep the default.
+      expect(priceSel.options[0]?.textContent).toMatch(/currently: public/i);
+      expect(afSel.options[0]?.textContent).toMatch(/currently: unlisted/i);
+      expect(imgSel.options[0]?.textContent).toMatch(/currently: private/i);
+    });
+
+    it('falls back to system default (private) when owner has no field_defaults', async () => {
+      mockGetByPath({
+        specimen: { data: specimen(), error: undefined, response: new Response() },
+        profile: { data: profile(), error: undefined, response: new Response() },
+      });
+
+      render(SpecimenEdit, { params: { id: SPECIMEN_ID } });
+
+      const priceSel = (await screen.findByTestId('visibility-price')) as HTMLSelectElement;
+      // No owner default for price → chain ends at SystemDefault
+      // (CONTRACT §13b system-default = private).
+      expect(priceSel.options[0]?.textContent).toMatch(/currently: private/i);
+    });
+
+    it('prefills the selector from the specimen override when set', async () => {
+      mockGetByPath({
+        specimen: {
+          data: specimen({ visibility_price: 'unlisted' }),
+          error: undefined,
+          response: new Response(),
+        },
+        profile: { data: profile(), error: undefined, response: new Response() },
+      });
+
+      render(SpecimenEdit, { params: { id: SPECIMEN_ID } });
+
+      const priceSel = (await screen.findByTestId('visibility-price')) as HTMLSelectElement;
+      expect(priceSel.value).toBe('unlisted');
+    });
+
+    it('PATCH sends the changed visibility_* fields with the right wire shape', async () => {
+      mockGetByPath({
+        specimen: {
+          data: specimen({ visibility_price: 'private' }),
+          error: undefined,
+          response: new Response(),
+        },
+        profile: { data: profile(), error: undefined, response: new Response() },
+      });
+      mockPatch.mockResolvedValue({
+        data: specimen(),
+        error: undefined,
+        response: new Response(),
+      });
+
+      render(SpecimenEdit, { params: { id: SPECIMEN_ID } });
+      const priceSel = (await screen.findByTestId('visibility-price')) as HTMLSelectElement;
+      const imgSel = screen.getByTestId('visibility-images') as HTMLSelectElement;
+
+      // 1) clear the price override back to inherit → wire null
+      // 2) set the images override → wire enum value
+      await fireEvent.change(priceSel, { target: { value: '__inherit__' } });
+      await fireEvent.change(imgSel, { target: { value: 'public' } });
+      await fireEvent.submit(screen.getByTestId('specimen-form'));
+
+      await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
+      const body = mockPatch.mock.calls[0]?.[1].body;
+      expect(body.visibility_price).toBeNull();
+      expect(body.visibility_images).toBe('public');
+      // Unchanged key — must not be sent so the backend leaves it alone.
+      expect(body).not.toHaveProperty('visibility_acquired_from');
+    });
+
+    it('still renders selectors when the profile load fails', async () => {
+      mockGetByPath({
+        specimen: { data: specimen(), error: undefined, response: new Response() },
+        profile: {
+          data: undefined,
+          error: { error: { code: 'unauthorized', message: 'no profile' } },
+          response: new Response(null, { status: 401 }),
+        },
+      });
+
+      render(SpecimenEdit, { params: { id: SPECIMEN_ID } });
+
+      const priceSel = (await screen.findByTestId('visibility-price')) as HTMLSelectElement;
+      // No profile → no field_defaults → system default applies.
+      expect(priceSel.options[0]?.textContent).toMatch(/currently: private/i);
+    });
   });
 });
