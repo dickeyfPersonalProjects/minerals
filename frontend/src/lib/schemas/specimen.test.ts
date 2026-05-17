@@ -33,8 +33,10 @@ function mineralView(overrides: Partial<SpecimenView> = {}): SpecimenView {
     description: '',
     catalog_number: null,
     acquired_at: null,
-    acquired_from: null,
-    price_cents: null,
+    // acquired_from / price_cents are now optional in the response
+    // shape (mi-fo8 / mi-9ww — per-field visibility redaction omits
+    // the key entirely when the viewer can't see it). The fixture
+    // can still set them via overrides.
     source_notes: null,
     locality_text: null,
     mass_g: null,
@@ -589,7 +591,7 @@ describe('specimenToFormValues', () => {
   it('converts price_cents to a dollars string', () => {
     expect(specimenToFormValues(mineralView({ price_cents: 1234 })).price_dollars).toBe('12.34');
     expect(specimenToFormValues(mineralView({ price_cents: 0 })).price_dollars).toBe('0');
-    expect(specimenToFormValues(mineralView({ price_cents: null })).price_dollars).toBe('');
+    expect(specimenToFormValues(mineralView({ price_cents: undefined })).price_dollars).toBe('');
   });
 
   it('extracts YYYY-MM-DD from RFC3339 acquired_at', () => {

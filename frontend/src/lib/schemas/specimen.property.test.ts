@@ -35,8 +35,11 @@ function bodyAsView(body: CreateBody): SpecimenView {
     description: body.description ?? '',
     catalog_number: body.catalog_number ?? null,
     acquired_at: body.acquired_at ?? null,
-    acquired_from: body.acquired_from ?? null,
-    price_cents: body.price_cents ?? null,
+    // acquired_from / price_cents are optional in the response shape
+    // (mi-fo8 / mi-9ww — per-field visibility redaction). Round-trip
+    // them as undefined when the body didn't supply a value.
+    acquired_from: body.acquired_from ?? undefined,
+    price_cents: body.price_cents ?? undefined,
     source_notes: body.source_notes ?? null,
     locality_text: body.locality_text ?? null,
     mass_g: body.mass_g ?? null,

@@ -1283,8 +1283,8 @@ export interface components {
              * @description Acquisition date (RFC 3339, time component ignored).
              */
             acquired_at: string | null;
-            /** @description Where the specimen was acquired (free text). */
-            acquired_from: string | null;
+            /** @description Where the specimen was acquired (free text). Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property. */
+            acquired_from?: string;
             /** @description UUID of the user who created the row (CONTRACT.md §13). */
             author_id: string;
             /** @description Optional human catalog number; unique across all specimens when set. */
@@ -1315,9 +1315,9 @@ export interface components {
             name: string;
             /**
              * Format: int64
-             * @description Acquisition price in cents.
+             * @description Acquisition price in cents. Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset'.
              */
-            price_cents: number | null;
+            price_cents?: number;
             /** @description Free-form provenance notes. */
             source_notes: string | null;
             /**

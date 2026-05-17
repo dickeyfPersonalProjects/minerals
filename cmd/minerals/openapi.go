@@ -205,6 +205,9 @@ type specStubUserRepo struct{}
 func (specStubUserRepo) GetBySub(context.Context, string) (domain.User, error) {
 	return domain.User{}, domain.ErrUserNotFound
 }
+func (specStubUserRepo) GetByID(context.Context, uuid.UUID) (domain.User, error) {
+	return domain.User{}, domain.ErrUserNotFound
+}
 func (specStubUserRepo) Create(context.Context, domain.Tx, domain.User) error {
 	return domain.ErrUserNotFound
 }
