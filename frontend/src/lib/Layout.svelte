@@ -5,7 +5,7 @@
   import LoginButton from './LoginButton.svelte';
   import ProfileMenu from './ProfileMenu.svelte';
   import { qrSheetState, refreshQrSheet } from './qrSheet';
-  import { authStore } from './oidc/auth';
+  import { authStore, attemptSilentRenewal, getAccessToken } from './oidc/auth';
   import { loadOidcConfig, oidcConfigStore } from './oidc/config';
 
   interface Props {
@@ -40,7 +40,15 @@
     void refreshQrSheet();
     // Resolve the OIDC config so the Login button can appear if
     // configured. Errors are swallowed — the button just stays hidden.
-    void loadOidcConfig();
+    // After the config is known, fire a silent renewal (mi-ct2): on a
+    // refresh the in-memory token is gone but Keycloak's SSO cookie
+    // may still be alive, so the user can be re-authenticated without
+    // any UI interaction. Failure (SSO expired, OIDC unconfigured) is
+    // a no-op — the Login button stays visible.
+    void loadOidcConfig().then((config) => {
+      if (!config || getAccessToken() !== null) return;
+      void attemptSilentRenewal({ config });
+    });
   });
 </script>
 

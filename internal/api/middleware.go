@@ -161,14 +161,21 @@ func SecurityHeaders(next http.Handler) http.Handler {
 
 // buildCSP returns the §17 Content-Security-Policy applied to every
 // response. When issuerOrigin is non-empty (PUBLIC_OIDC_ISSUER_URL
-// configured), it is added to `connect-src` so the SPA can POST to
-// the OIDC token endpoint during the PKCE flow (mi-cl1). The origin
-// MUST be a scheme://host[:port] value — never a path or wildcard
-// (§17 forbids wildcards).
+// configured), it is added to both `connect-src` and `frame-src`:
+//   - connect-src (mi-cl1): the SPA POSTs to the OIDC token endpoint
+//     during the PKCE flow.
+//   - frame-src (mi-ct2): the SPA mounts a hidden iframe pointed at
+//     the OIDC `/auth?prompt=none` endpoint for silent token renewal
+//     on page load and before expiry.
+//
+// The origin MUST be a scheme://host[:port] value — never a path or
+// wildcard (§17 forbids wildcards).
 func buildCSP(issuerOrigin string) string {
 	connectSrc := "connect-src 'self'"
+	frameSrc := "frame-src 'self'"
 	if issuerOrigin != "" {
 		connectSrc += " " + issuerOrigin
+		frameSrc += " " + issuerOrigin
 	}
 	return "default-src 'self'; " +
 		"script-src 'self'; " +
@@ -176,6 +183,7 @@ func buildCSP(issuerOrigin string) string {
 		"img-src 'self' data:; " +
 		"font-src 'self'; " +
 		connectSrc + "; " +
+		frameSrc + "; " +
 		"frame-ancestors 'none'; " +
 		"base-uri 'self'; " +
 		"form-action 'self'"

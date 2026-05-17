@@ -8,9 +8,10 @@ import (
 )
 
 // TestCSP_DefaultSelfOnly asserts that with no OIDC issuer origin
-// configured, the CSP `connect-src` directive is `'self'` only — the
-// original §17 baseline. This is the path for environments without
-// auth (dev without OIDC, anonymous-only deployments).
+// configured, the CSP `connect-src` and `frame-src` directives are
+// `'self'` only — the original §17 baseline. This is the path for
+// environments without auth (dev without OIDC, anonymous-only
+// deployments).
 func TestCSP_DefaultSelfOnly(t *testing.T) {
 	t.Parallel()
 	h := New(Deps{})
@@ -24,6 +25,9 @@ func TestCSP_DefaultSelfOnly(t *testing.T) {
 	}
 	if !strings.Contains(csp, "connect-src 'self';") {
 		t.Errorf("expected connect-src 'self' only; CSP = %q", csp)
+	}
+	if !strings.Contains(csp, "frame-src 'self';") {
+		t.Errorf("expected frame-src 'self' only; CSP = %q", csp)
 	}
 	// Sanity: no stray origin leaked into the policy.
 	if strings.Contains(csp, "http://") || strings.Contains(csp, "https://") {
@@ -51,7 +55,8 @@ func TestCSP_IssuerOriginAppendedToConnectSrc(t *testing.T) {
 	if !strings.Contains(csp, want) {
 		t.Errorf("expected %q in CSP; got %q", want, csp)
 	}
-	// No other directive should be widened.
+	// No other directive should be widened beyond the documented two
+	// (connect-src and frame-src); the rest must stay 'self'.
 	for _, d := range []string{
 		"default-src 'self'",
 		"script-src 'self'",
@@ -61,6 +66,34 @@ func TestCSP_IssuerOriginAppendedToConnectSrc(t *testing.T) {
 		if !strings.Contains(csp, d) {
 			t.Errorf("expected %q untouched in CSP; got %q", d, csp)
 		}
+	}
+}
+
+// TestCSP_IssuerOriginAppendedToFrameSrc is the regression test for
+// mi-ct2: when PUBLIC_OIDC_ISSUER_URL is configured, the issuer origin
+// MUST appear in `frame-src` so the SPA can mount a hidden iframe to
+// Keycloak's authorize endpoint for silent renewal on page load.
+func TestCSP_IssuerOriginAppendedToFrameSrc(t *testing.T) {
+	t.Parallel()
+	const origin = "https://auth.example.com"
+	h := New(Deps{CSPIssuerOrigin: origin})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	h.ServeHTTP(rec, req)
+
+	csp := rec.Header().Get("Content-Security-Policy")
+	if csp == "" {
+		t.Fatal("CSP header missing")
+	}
+	want := "frame-src 'self' " + origin + ";"
+	if !strings.Contains(csp, want) {
+		t.Errorf("expected %q in CSP; got %q", want, csp)
+	}
+	// `frame-ancestors 'none'` (blocking our app from being framed by
+	// others) is orthogonal to `frame-src` (what WE may frame) and
+	// MUST stay locked down even when frame-src widens.
+	if !strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Errorf("frame-ancestors must remain 'none'; CSP = %q", csp)
 	}
 }
 
