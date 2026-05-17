@@ -126,6 +126,8 @@ type geomaterial struct {
 	CrystalSystem string  `json:"csystem"`
 	Colour        string  `json:"colour"`
 	Lustretype    string  `json:"lustretype"`
+	Elements      string  `json:"elements"`
+	Strunz10ed1   string  `json:"strunz10ed1"`
 }
 
 // LookupByName performs an exact-name lookup against Mindat's
@@ -148,7 +150,7 @@ func (c *Client) LookupByName(ctx context.Context, name string) (*MineralRecord,
 	// not requested. MineralData stores UV fluorescence as three
 	// structured per-wavelength color lists (mi-qas); Mindat's
 	// prose answer can't be safely mapped into that enum.
-	q.Set("fields", "id,name,ima_formula,mindat_formula,hardness_min,hardness_max,csystem,colour,lustretype")
+	q.Set("fields", "id,name,ima_formula,mindat_formula,hardness_min,hardness_max,csystem,colour,lustretype,elements,strunz10ed1")
 	endpoint := c.baseURL + "geomaterials/?" + q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -240,6 +242,19 @@ func toMineralRecord(g geomaterial) *MineralRecord {
 	}
 	if l := strings.TrimSpace(g.Lustretype); l != "" {
 		rec.Data.Luster = &l
+	}
+	// Mindat does not expose 'radioactive' or 'reacts to acid' as
+	// first-class booleans (mi-8pcs). Derive them from structured
+	// chemistry instead — see hasRadioactiveElement and isCarbonate
+	// for the rules and caveats. The form remains the source of truth
+	// for the specific specimen; this is a starting point.
+	if hasRadioactiveElement(g.Elements) {
+		t := true
+		rec.Data.Radioactive = &t
+	}
+	if isCarbonate(g.Strunz10ed1) {
+		t := true
+		rec.Data.ReactsToAcid = &t
 	}
 	rec.Data.MindatID = &rec.MindatID
 	return rec

@@ -177,6 +177,127 @@ func TestLookupByName_NormalizesHTMLFormula(t *testing.T) {
 	}
 }
 
+// TestLookupByName_DerivesRadioactiveAndAcidReactive proves the end-
+// to-end path: Mindat geomaterial → MineralData with Radioactive /
+// ReactsToAcid set from the derivation rules (mi-8pcs). Unit-level
+// tests for the helpers themselves live in derive_test.go; this is
+// the integration guard against a future refactor that drops the
+// wiring or forgets to request `elements` / `strunz10ed1`.
+func TestLookupByName_DerivesRadioactiveAndAcidReactive(t *testing.T) {
+	cases := []struct {
+		name             string
+		body             string
+		wantRadioactive  *bool
+		wantReactsToAcid *bool
+	}{
+		{
+			name:             "uraninite — U in elements ticks radioactive",
+			body:             `{"results":[{"id":1,"name":"Uraninite","elements":"U O","strunz10ed1":"4.DL.05"}]}`,
+			wantRadioactive:  boolPtr(true),
+			wantReactsToAcid: nil,
+		},
+		{
+			name:             "calcite — Strunz class 5 ticks reacts-to-acid",
+			body:             `{"results":[{"id":2,"name":"Calcite","elements":"Ca C O","strunz10ed1":"5.AB.05"}]}`,
+			wantRadioactive:  nil,
+			wantReactsToAcid: boolPtr(true),
+		},
+		{
+			name:             "quartz — neither",
+			body:             `{"results":[{"id":3,"name":"Quartz","elements":"Si O","strunz10ed1":"4.DA.05"}]}`,
+			wantRadioactive:  nil,
+			wantReactsToAcid: nil,
+		},
+		{
+			name:             "microcline — K-40 deliberately excluded",
+			body:             `{"results":[{"id":4,"name":"Microcline","elements":"K Al Si O","strunz10ed1":"9.FA.30"}]}`,
+			wantRadioactive:  nil,
+			wantReactsToAcid: nil,
+		},
+		{
+			name:             "malachite — both U absent, Strunz 5 present",
+			body:             `{"results":[{"id":5,"name":"Malachite","elements":"Cu C O H","strunz10ed1":"5.BA.10"}]}`,
+			wantRadioactive:  nil,
+			wantReactsToAcid: boolPtr(true),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, c := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			})
+			// Extract the name from the body for the lookup arg —
+			// each fixture is single-result so the inner name is
+			// the lookup query.
+			lookup := lookupNameFromBody(t, tc.body)
+			rec, err := c.LookupByName(context.Background(), lookup)
+			if err != nil {
+				t.Fatalf("lookup: %v", err)
+			}
+			if !boolPtrEqual(rec.Data.Radioactive, tc.wantRadioactive) {
+				t.Errorf("Radioactive = %v, want %v", fmtBoolPtr(rec.Data.Radioactive), fmtBoolPtr(tc.wantRadioactive))
+			}
+			if !boolPtrEqual(rec.Data.ReactsToAcid, tc.wantReactsToAcid) {
+				t.Errorf("ReactsToAcid = %v, want %v", fmtBoolPtr(rec.Data.ReactsToAcid), fmtBoolPtr(tc.wantReactsToAcid))
+			}
+		})
+	}
+}
+
+// TestLookupByName_RequestsDerivationFields guards the fields= query
+// — the derivation is pointless if we don't ask Mindat for the
+// inputs.
+func TestLookupByName_RequestsDerivationFields(t *testing.T) {
+	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		got := r.URL.Query().Get("fields")
+		for _, f := range []string{"elements", "strunz10ed1"} {
+			if !strings.Contains(got, f) {
+				t.Errorf("fields=%q is missing %q", got, f)
+			}
+		}
+		_, _ = w.Write([]byte(`{"results":[{"id":1,"name":"Quartz"}]}`))
+	})
+	if _, err := c.LookupByName(context.Background(), "Quartz"); err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+func boolPtrEqual(a, b *bool) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func fmtBoolPtr(p *bool) string {
+	if p == nil {
+		return "<nil>"
+	}
+	if *p {
+		return "*true"
+	}
+	return "*false"
+}
+
+// lookupNameFromBody yanks the first "name" value out of a fixture
+// JSON body so each table entry stays self-describing.
+func lookupNameFromBody(t *testing.T, body string) string {
+	t.Helper()
+	const tag = `"name":"`
+	i := strings.Index(body, tag)
+	if i < 0 {
+		t.Fatalf("fixture has no name: %s", body)
+	}
+	rest := body[i+len(tag):]
+	j := strings.Index(rest, `"`)
+	if j < 0 {
+		t.Fatalf("fixture name not terminated: %s", body)
+	}
+	return rest[:j]
+}
+
 func TestLookupByName_HardnessRangeMidpoint(t *testing.T) {
 	const body = `{"results":[{"id":1,"name":"Talc","hardness_min":1,"hardness_max":2}]}`
 	_, c := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {

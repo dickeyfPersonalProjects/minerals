@@ -132,6 +132,80 @@ func superscriptRune(r rune) (rune, bool) {
 	return 0, false
 }
 
+// hasRadioactiveElement reports whether the Mindat `elements` field
+// contains uranium or thorium — the rule for deriving the Radioactive
+// boolean (mi-8pcs). Mindat returns `elements` as a whitespace- and/or
+// comma-separated list of element symbols (e.g. "U O", "K,Al,Si,O,H").
+// We split, trim, and exact-match against U/Th — never substring —
+// so e.g. "Pu" does not falsely match "U".
+//
+// What this catches: uraninite, autunite, torbernite, monazite, and
+// the rest of the field-collectible radioactives.
+//
+// What this deliberately misses:
+//   - K-40 radioactivity (orthoclase, microcline). Real but not field-
+//     meaningful, and most users would be surprised to find feldspar
+//     ticked. Potassium is excluded by design.
+//   - Trace U/Th in otherwise non-radioactive species (e.g. smoky
+//     quartz with trace U). Mindat's `elements` reflects the species
+//     formula, not specific specimens, so trace contributions never
+//     appear here anyway.
+func hasRadioactiveElement(elements string) bool {
+	if elements == "" {
+		return false
+	}
+	for _, tok := range elementSplitRe.Split(elements, -1) {
+		switch strings.ToUpper(strings.TrimSpace(tok)) {
+		case "U", "TH":
+			return true
+		}
+	}
+	return false
+}
+
+// isCarbonate reports whether the Strunz 10th-edition classification
+// code names a carbonate (or nitrate) — the rule for deriving the
+// ReactsToAcid boolean (mi-8pcs). Strunz class 05 covers carbonates
+// and nitrates: calcite, dolomite, malachite, azurite, smithsonite,
+// rhodochrosite, witherite — all of which fizz reproducibly in cold
+// dilute HCl (dolomite more weakly, but still observably). Nitrates
+// are field-rare in non-arid environments but also under class 05.
+//
+// The input may look like "5.AB.05", "05.AB.05", or just "5" — we
+// parse the leading class number and ignore the rest of the dotted
+// hierarchy.
+//
+// Why this rule is narrow:
+//   - Phosphates (08.*) are acid-soluble but don't fizz in cold HCl.
+//   - Sulfides (02.*) react to produce H2S but it isn't the visible
+//     fizz the checkbox implies.
+//   - Silicates need HF, not the field-test HCl this boolean stands
+//     for.
+//
+// Operator override on the form always wins; this is a starting
+// point, not the truth about the specific specimen.
+func isCarbonate(strunz string) bool {
+	strunz = strings.TrimSpace(strunz)
+	if strunz == "" {
+		return false
+	}
+	end := 0
+	for end < len(strunz) && strunz[end] >= '0' && strunz[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return false
+	}
+	// Leading digits — accept "5" or "05" as class 5.
+	switch strunz[:end] {
+	case "5", "05":
+		return true
+	}
+	return false
+}
+
+var elementSplitRe = regexp.MustCompile(`[\s,]+`)
+
 // mapRunes applies mapper to every rune in s. Returns (mapped, true)
 // only when every rune mapped successfully; on any miss the caller
 // keeps the original input so we don't silently drop information.
