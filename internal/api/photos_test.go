@@ -836,6 +836,157 @@ func TestPhotoPatch_RejectsInvalidKind(t *testing.T) {
 	}
 }
 
+// seedPatchablePhoto inserts a specimen+file+photo trio the patch tests
+// can mutate. Returns the photo id so the caller can issue the PATCH
+// against the right URL.
+func seedPatchablePhoto(t *testing.T, photos *fakePhotoRepo, files *fakeFileRepo, vis *domain.Visibility) uuid.UUID {
+	t.Helper()
+	specimenID := uuid.New()
+	photos.specimens[specimenID] = true
+	now := time.Now().UTC().Truncate(time.Second)
+	fileID := uuid.New()
+	files.rows[fileID] = domain.File{
+		ID: fileID, S3Key: "files/" + fileID.String(),
+		ContentType: "image/jpeg", ByteSize: 1, SHA256: strings.Repeat("c", 64),
+		UploadedAt: now,
+	}
+	photoID := uuid.New()
+	photos.rows[photoID] = domain.Photo{
+		ID: photoID, SpecimenID: specimenID, FileID: fileID,
+		Kind: domain.PhotoKindVisible, Position: 1, Visibility: vis,
+		CreatedAt: now,
+	}
+	return photoID
+}
+
+// TestPhotoPatch_VisibilitySetClearOmit covers the three wire states of
+// the visibility_* patch helper applied to a photo (mi-fo8 #8): omit
+// preserves, null clears, an enum value sets the override. Each path
+// asserts the stored domain.Photo and the response PhotoView agree on
+// the post-state.
+func TestPhotoPatch_VisibilitySetClearOmit(t *testing.T) {
+	private := domain.VisibilityPrivate
+	public := domain.VisibilityPublic
+
+	tests := []struct {
+		name     string
+		initial  *domain.Visibility
+		body     string
+		wantPtr  *domain.Visibility
+		wantJSON string // expected value of `visibility` in response; "" means key absent
+	}{
+		{
+			name:     "set from unset",
+			initial:  nil,
+			body:     `{"visibility": "unlisted"}`,
+			wantPtr:  ptrVis(domain.VisibilityUnlisted),
+			wantJSON: "unlisted",
+		},
+		{
+			name:     "change existing",
+			initial:  &private,
+			body:     `{"visibility": "public"}`,
+			wantPtr:  ptrVis(domain.VisibilityPublic),
+			wantJSON: "public",
+		},
+		{
+			name:     "clear with null",
+			initial:  &public,
+			body:     `{"visibility": null}`,
+			wantPtr:  nil,
+			wantJSON: "",
+		},
+		{
+			name:     "omit preserves",
+			initial:  &private,
+			body:     `{"position": 2}`,
+			wantPtr:  &private,
+			wantJSON: "private",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h, photos, files, _ := newPhotoServer(t)
+			id := seedPatchablePhoto(t, photos, files, tc.initial)
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPatch,
+				"/api/v1/photos/"+id.String(),
+				strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("patch: %d body=%s", rec.Code, rec.Body.String())
+			}
+			got := photos.rows[id].Visibility
+			switch {
+			case tc.wantPtr == nil && got != nil:
+				t.Errorf("stored visibility = %q, want nil", *got)
+			case tc.wantPtr != nil && got == nil:
+				t.Errorf("stored visibility = nil, want %q", *tc.wantPtr)
+			case tc.wantPtr != nil && got != nil && *tc.wantPtr != *got:
+				t.Errorf("stored visibility = %q, want %q", *got, *tc.wantPtr)
+			}
+
+			// PhotoView field uses omitempty, so the JSON-level
+			// assertion is on raw bytes — confirms the privacy
+			// contract (cleared → absent, not null).
+			var raw map[string]json.RawMessage
+			if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			v, present := raw["visibility"]
+			if tc.wantJSON == "" {
+				if present {
+					t.Errorf("response visibility present (=%s), want absent", string(v))
+				}
+				return
+			}
+			if !present {
+				t.Errorf("response visibility absent, want %q", tc.wantJSON)
+				return
+			}
+			var got2 string
+			if err := json.Unmarshal(v, &got2); err != nil {
+				t.Fatalf("decode visibility: %v", err)
+			}
+			if got2 != tc.wantJSON {
+				t.Errorf("response visibility = %q, want %q", got2, tc.wantJSON)
+			}
+		})
+	}
+}
+
+// TestPhotoPatch_VisibilityRejectsInvalidEnum confirms the
+// applyVisibilityPatch helper rejects a non-Visibility string with 400
+// and leaves the stored override unchanged.
+func TestPhotoPatch_VisibilityRejectsInvalidEnum(t *testing.T) {
+	private := domain.VisibilityPrivate
+	h, photos, files, _ := newPhotoServer(t)
+	id := seedPatchablePhoto(t, photos, files, &private)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/photos/"+id.String(),
+		strings.NewReader(`{"visibility": "owner-only"}`))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+
+	// Huma's enum tag rejects unknown enum values with 422 before the
+	// handler runs; the handler's applyVisibilityPatch guard is
+	// defence-in-depth and only fires if the schema tag is ever
+	// loosened. Either response is acceptable as long as the stored
+	// override is untouched.
+	if rec.Code != http.StatusUnprocessableEntity && rec.Code != http.StatusBadRequest {
+		t.Fatalf("patch: %d body=%s (want 400 or 422)", rec.Code, rec.Body.String())
+	}
+	got := photos.rows[id].Visibility
+	if got == nil || *got != private {
+		t.Errorf("stored visibility mutated on rejected patch: %v", got)
+	}
+}
+
 func TestPhotoList_OrdersByPosition(t *testing.T) {
 	h, photos, files, _ := newPhotoServer(t)
 	specimenID := uuid.New()
