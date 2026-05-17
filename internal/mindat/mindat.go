@@ -126,6 +126,7 @@ type geomaterial struct {
 	CrystalSystem string  `json:"csystem"`
 	Colour        string  `json:"colour"`
 	Lustretype    string  `json:"lustretype"`
+	Magnetism     string  `json:"magnetism"`
 }
 
 // LookupByName performs an exact-name lookup against Mindat's
@@ -148,7 +149,7 @@ func (c *Client) LookupByName(ctx context.Context, name string) (*MineralRecord,
 	// not requested. MineralData stores UV fluorescence as three
 	// structured per-wavelength color lists (mi-qas); Mindat's
 	// prose answer can't be safely mapped into that enum.
-	q.Set("fields", "id,name,ima_formula,mindat_formula,hardness_min,hardness_max,csystem,colour,lustretype")
+	q.Set("fields", "id,name,ima_formula,mindat_formula,hardness_min,hardness_max,csystem,colour,lustretype,magnetism")
 	endpoint := c.baseURL + "geomaterials/?" + q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -240,6 +241,18 @@ func toMineralRecord(g geomaterial) *MineralRecord {
 	}
 	if l := strings.TrimSpace(g.Lustretype); l != "" {
 		rec.Data.Luster = &l
+	}
+	// Mindat's `magnetism` is free text (e.g. "paramagnetic",
+	// "ferromagnetic", "diamagnetic"). This mapping is a hand-curated
+	// heuristic, not a Mindat-blessed boolean — diamagnetic is folded
+	// into "not magnetic" because to a person holding a magnet it is
+	// indistinguishable from a non-response. The operator override on
+	// the specimen form remains the source of truth for the actual
+	// specimen (impurities can make a paramagnetic species strongly
+	// magnetic in an individual sample).
+	if m := strings.TrimSpace(g.Magnetism); m != "" && !strings.EqualFold(m, "diamagnetic") {
+		t := true
+		rec.Data.Magnetic = &t
 	}
 	rec.Data.MindatID = &rec.MindatID
 	return rec
