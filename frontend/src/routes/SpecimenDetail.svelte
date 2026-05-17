@@ -16,9 +16,11 @@
   import { isAuthenticated } from '../lib/oidc/auth';
   import { formatLocal } from '../lib/time';
   import { toastError, toastSuccess } from '../lib/toasts';
+  import { resolveImage, type OwnerLike, type Visibility } from '../lib/api/visibility';
 
   type Specimen = components['schemas']['SpecimenView'];
   type Photo = components['schemas']['PhotoView'];
+  type Profile = components['schemas']['ProfileBody'];
   type Journal = components['schemas']['JournalView'];
   type MineralData = components['schemas']['MineralData'];
   type RockData = components['schemas']['RockData'];
@@ -49,6 +51,16 @@
   // racing the optimistic update.
   let editKindTarget: Photo | null = $state(null);
   let savingKind = $state(false);
+  // "Edit visibility" modal target (mi-fo8 #8) — null when closed.
+  // The matching `savingVisibility` guard prevents a double-submit
+  // from racing the refetch.
+  let editVisibilityTarget: Photo | null = $state(null);
+  let savingVisibility = $state(false);
+  // Owner profile used by the per-image visibility selector to render
+  // the "currently: X" chip on the 'use specimen images-default'
+  // option. Loaded concurrently with the specimen; a failed/anonymous
+  // fetch degrades the chip to the system default. mi-fo8 #8.
+  let ownerProfile: OwnerLike | null = $state(null);
   let journalCreating = $state(false);
   let editingEntryId: string | null = $state(null);
   let editingChain = $state(false);
@@ -154,9 +166,25 @@
     const collectorsP = client.GET('/api/v1/specimens/{id}/collectors', {
       params: { path: { id } },
     });
+    // Profile fetch drives the per-image visibility selector chip
+    // (mi-fo8 #8). Anonymous callers can't edit photos so the
+    // affordance is gated behind $isAuthenticated; for authenticated
+    // viewers who happen not to own this specimen the PATCH will
+    // fail at the backend — the chip text will just reflect the
+    // viewer's own defaults instead of the owner's, which is
+    // acceptable for the loose-coupled affordance.
+    const profileP = client.GET('/api/v1/profile', {
+      headers: SUPPRESS_TOAST_HEADERS,
+    });
 
     try {
-      const [s, p, j, c] = await Promise.all([specimenP, photosP, journalP, collectorsP]);
+      const [s, p, j, c, pr] = await Promise.all([
+        specimenP,
+        photosP,
+        journalP,
+        collectorsP,
+        profileP,
+      ]);
       if (s.error) {
         // mi-4p4: wrapper is redirecting to /profile/setup; stay
         // in `loading` so no "access forbidden" banner flashes.
@@ -168,6 +196,7 @@
       photos = p.data?.items ?? [];
       journal = j.data?.items ?? [];
       collectors = c.data?.items ?? [];
+      ownerProfile = pr.error ? null : ((pr.data as Profile | undefined) ?? null);
       loadState = { kind: 'loaded' };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -257,6 +286,48 @@
       await refetchPhotos(specimen.id);
     } finally {
       savingKind = false;
+    }
+  }
+
+  function requestEditVisibility(id: string) {
+    const target = photos.find((p) => p.id === id);
+    if (!target) return;
+    lightboxIndex = null;
+    editVisibilityTarget = target;
+  }
+
+  function closeEditVisibility() {
+    if (!savingVisibility) editVisibilityTarget = null;
+  }
+
+  // applyEditVisibility runs the PATCH that switches a single photo's
+  // visibility (mi-fo8 #8). Wire shape mirrors the specimen patch:
+  // null clears the per-photo override (chain falls through to the
+  // specimen's images default); an enum value sets it. No-op when
+  // the user picks the value already stored.
+  async function applyEditVisibility(value: Visibility | null): Promise<void> {
+    const target = editVisibilityTarget;
+    if (!target || !specimen || savingVisibility) return;
+    const current = (target.visibility as Visibility | null | undefined) ?? null;
+    if (value === current) {
+      editVisibilityTarget = null;
+      return;
+    }
+    savingVisibility = true;
+    try {
+      const { error, response } = await client.PATCH('/api/v1/photos/{id}', {
+        params: { path: { id: target.id } },
+        body: { visibility: value },
+      });
+      if (error) {
+        toastError(errorMessage(error, response.status));
+        return;
+      }
+      toastSuccess('Photo privacy updated');
+      editVisibilityTarget = null;
+      await refetchPhotos(specimen.id);
+    } finally {
+      savingVisibility = false;
     }
   }
 
@@ -530,6 +601,30 @@
   // the picker only exposes the four mineralogically meaningful
   // lighting conditions the bead asks for.
   const EDITABLE_PHOTO_KINDS: PhotoKind[] = ['visible', 'uv_sw', 'uv_mw', 'uv_lw'];
+
+  // Per-photo visibility modal (mi-fo8 #8) — labels for the explicit
+  // enum options + a helper that resolves what the chain would
+  // produce when the per-photo override is CLEARED (the chip text
+  // on the 'use specimen images-default' row).
+  const VISIBILITY_LABELS: Record<Visibility, string> = {
+    private: 'Private',
+    unlisted: 'Unlisted',
+    public: 'Public',
+  };
+
+  function resolveImageInherit(target: Photo | null): Visibility {
+    if (!target || !specimen) return 'private';
+    // Compute the chain WITHOUT the per-photo override so the chip
+    // shows what 'use specimen images-default' would resolve to.
+    // SpecimenLike is the same shape as Specimen for the fields the
+    // resolver consumes.
+    const spec = {
+      visibility: specimen.visibility,
+      visibility_images: specimen.visibility_images ?? null,
+    };
+    const owner: OwnerLike = ownerProfile ?? {};
+    return resolveImage(spec, owner, {}).visibility;
+  }
   // Filter chip state; 'all' shows the whole gallery, anything else
   // narrows to a single kind. Resets when navigating to a new
   // specimen via the load $effect.
@@ -791,6 +886,15 @@
         {#if $isAuthenticated}
           <button
             type="button"
+            onclick={() => requestEditVisibility(heroPhoto.id)}
+            aria-label="Edit photo privacy"
+            data-testid="hero-photo-edit-visibility"
+            class="absolute right-56 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            Privacy
+          </button>
+          <button
+            type="button"
             onclick={() => requestEditKind(heroPhoto.id)}
             aria-label="Edit photo type"
             data-testid="hero-photo-edit-kind"
@@ -871,6 +975,15 @@
                   </button>
                 {/if}
                 {#if $isAuthenticated}
+                  <button
+                    type="button"
+                    onclick={() => requestEditVisibility(photo.id)}
+                    aria-label="Edit photo privacy"
+                    data-testid="gallery-thumb-edit-visibility"
+                    class="absolute left-1 top-1 rounded-full bg-black/65 px-1.5 text-[10px] leading-5 text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    Privacy
+                  </button>
                   <button
                     type="button"
                     onclick={() => requestDeletePhoto(photo.id)}
@@ -1225,6 +1338,108 @@
             onclick={closeEditKind}
             disabled={savingKind}
             data-testid="edit-kind-cancel"
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if editVisibilityTarget}
+    {@const currentVisibility =
+      (editVisibilityTarget.visibility as Visibility | null | undefined) ?? null}
+    {@const inheritLabel = VISIBILITY_LABELS[resolveImageInherit(editVisibilityTarget)]}
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="edit-visibility-title"
+      data-testid="edit-visibility-modal"
+      onclick={(e) => {
+        if (e.target === e.currentTarget) closeEditVisibility();
+      }}
+      onkeydown={(e) => {
+        if (e.key === 'Escape') closeEditVisibility();
+      }}
+      tabindex="-1"
+    >
+      <div
+        class="w-full max-w-sm rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
+      >
+        <h2
+          id="edit-visibility-title"
+          class="font-serif text-lg font-semibold text-[var(--color-text)]"
+        >
+          Photo privacy
+        </h2>
+        <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+          Who can see this photo. Clearing the override falls back to this specimen's image default,
+          then to your account default.
+        </p>
+        <ul class="mt-4 space-y-2">
+          <li>
+            <button
+              type="button"
+              onclick={() => applyEditVisibility(null)}
+              disabled={savingVisibility}
+              data-testid="edit-visibility-option-inherit"
+              aria-pressed={currentVisibility === null}
+              class="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60 {currentVisibility ===
+              null
+                ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)] text-[var(--color-text)]'
+                : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:border-[var(--color-accent)]'}"
+            >
+              <span>
+                Use specimen images-default
+                <span
+                  class="ml-1 text-xs text-[var(--color-text-muted)]"
+                  data-testid="edit-visibility-inherit-chip"
+                >
+                  (currently: {inheritLabel})
+                </span>
+              </span>
+              {#if currentVisibility === null}
+                <span
+                  class="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-accent)]"
+                >
+                  Current
+                </span>
+              {/if}
+            </button>
+          </li>
+          {#each ['private', 'unlisted', 'public'] as Visibility[] as v (v)}
+            {@const isCurrent = v === currentVisibility}
+            <li>
+              <button
+                type="button"
+                onclick={() => applyEditVisibility(v)}
+                disabled={savingVisibility}
+                data-testid={`edit-visibility-option-${v}`}
+                aria-pressed={isCurrent}
+                class="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60 {isCurrent
+                  ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)] text-[var(--color-text)]'
+                  : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:border-[var(--color-accent)]'}"
+              >
+                <span>{VISIBILITY_LABELS[v]}</span>
+                {#if isCurrent}
+                  <span
+                    class="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-accent)]"
+                  >
+                    Current
+                  </span>
+                {/if}
+              </button>
+            </li>
+          {/each}
+        </ul>
+        <div class="mt-5 flex justify-end">
+          <button
+            type="button"
+            onclick={closeEditVisibility}
+            disabled={savingVisibility}
+            data-testid="edit-visibility-cancel"
             class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             Cancel

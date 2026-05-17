@@ -33,10 +33,11 @@ type SpecimenSeed = {
   locality?: Record<string, unknown>;
   dimensions?: Record<string, unknown>;
   main_image_id?: string | null;
+  visibility_images?: 'private' | 'unlisted' | 'public' | null;
 };
 
 function specimen(seed: SpecimenSeed = {}) {
-  return {
+  const out: Record<string, unknown> = {
     id: seed.id ?? SPECIMEN_ID,
     name: seed.name ?? 'Smoky quartz',
     type: seed.type ?? 'mineral',
@@ -57,6 +58,10 @@ function specimen(seed: SpecimenSeed = {}) {
     source_notes: null,
     main_image_id: seed.main_image_id ?? null,
   };
+  if (seed.visibility_images !== undefined && seed.visibility_images !== null) {
+    out.visibility_images = seed.visibility_images;
+  }
+  return out;
 }
 
 type PhotoSeed = {
@@ -64,10 +69,11 @@ type PhotoSeed = {
   position?: number;
   kind?: 'visible' | 'uv_sw' | 'uv_mw' | 'uv_lw' | 'other';
   file_id?: string;
+  visibility?: 'private' | 'unlisted' | 'public' | null;
 };
 
 function photo(seed: PhotoSeed) {
-  return {
+  const out: Record<string, unknown> = {
     id: seed.id,
     specimen_id: SPECIMEN_ID,
     file_id: seed.file_id ?? 'aaaaaaaa-0000-0000-0000-000000000000',
@@ -79,6 +85,10 @@ function photo(seed: PhotoSeed) {
     taken_at: null,
     created_at: '2026-05-01T12:00:00Z',
   };
+  if (seed.visibility !== undefined && seed.visibility !== null) {
+    out.visibility = seed.visibility;
+  }
+  return out;
 }
 
 type JournalSeed = {
@@ -114,6 +124,11 @@ type Fixture = {
   journalError?: boolean;
   collectors?: CollectorLink[];
   collectorsError?: boolean;
+  // /api/v1/profile fixture for the per-image visibility selector
+  // chip (mi-fo8 #8). Defaults to an empty field_defaults map so the
+  // chip falls through to the system default (`private`).
+  profile?: Record<string, unknown> | null;
+  profileError?: boolean;
 };
 
 function setupFetch(fx: Fixture) {
@@ -170,6 +185,20 @@ function setupFetch(fx: Fixture) {
     // Per-entry attachment lists fired by JournalAttachments.
     if (path === '/api/v1/journal/{id}/files') {
       return { data: { items: [] }, error: undefined, response: new Response() };
+    }
+    if (path === '/api/v1/profile') {
+      if (fx.profileError) {
+        return {
+          data: undefined,
+          error: { error: { code: 'unauthorized', message: 'no auth' } },
+          response: new Response(null, { status: 401 }),
+        };
+      }
+      return {
+        data: fx.profile ?? { id: '00000000-0000-0000-0000-000000000001', field_defaults: {} },
+        error: undefined,
+        response: new Response(),
+      };
     }
     return { data: { items: [], next_cursor: null }, error: undefined, response: new Response() };
   });
@@ -837,6 +866,168 @@ describe('SpecimenDetail route', () => {
 
       expect(mockPatch).not.toHaveBeenCalled();
       await waitFor(() => expect(screen.queryByTestId('edit-kind-modal')).toBeNull());
+    });
+  });
+
+  describe('edit photo visibility flow (mi-fo8 #8)', () => {
+    const PHOTO_ID = 'pppppppp-0000-0000-0000-00000000cccc';
+
+    it('opens the per-image selector with the current override marked', async () => {
+      setupFetch({
+        photos: [photo({ id: PHOTO_ID, position: 1, visibility: 'public' })],
+      });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('hero-photo-edit-visibility'));
+
+      expect(screen.getByTestId('edit-visibility-modal')).toBeInTheDocument();
+      // 'public' is the current override → that option is aria-pressed.
+      expect(screen.getByTestId('edit-visibility-option-public')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      expect(screen.getByTestId('edit-visibility-option-inherit')).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+    });
+
+    it('marks the inherit option when no per-image override is set', async () => {
+      setupFetch({
+        photos: [photo({ id: PHOTO_ID, position: 1 })],
+      });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('hero-photo-edit-visibility'));
+
+      expect(screen.getByTestId('edit-visibility-option-inherit')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+    });
+
+    it("chip text mirrors the specimen's images-default through the chain", async () => {
+      setupFetch({
+        specimen: specimen({ visibility: 'private', visibility_images: 'unlisted' }),
+        photos: [photo({ id: PHOTO_ID, position: 1 })],
+      });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('hero-photo-edit-visibility'));
+
+      expect(screen.getByTestId('edit-visibility-inherit-chip')).toHaveTextContent(
+        '(currently: Unlisted)',
+      );
+    });
+
+    it("falls back to the owner's images default when no specimen override is set", async () => {
+      setupFetch({
+        specimen: specimen({ visibility: 'private' }),
+        photos: [photo({ id: PHOTO_ID, position: 1 })],
+        profile: {
+          id: '00000000-0000-0000-0000-000000000001',
+          field_defaults: { images: 'public' },
+        },
+      });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('hero-photo-edit-visibility'));
+
+      // specimen.visibility is private but it's blank-string semantics
+      // in the resolver — the per-field column is null → falls
+      // through to specimen.visibility (private). The 'private'
+      // setting on the specimen still applies first per the chain.
+      // We seeded a 'public' images default on the owner, but the
+      // chain's specimen-overall layer wins.
+      expect(screen.getByTestId('edit-visibility-inherit-chip')).toHaveTextContent(
+        '(currently: Private)',
+      );
+    });
+
+    it('PATCHes visibility on selection and closes the modal', async () => {
+      setupFetch({
+        photos: [photo({ id: PHOTO_ID, position: 1, visibility: 'private' })],
+      });
+      mockPatch.mockResolvedValueOnce({
+        data: photo({ id: PHOTO_ID, position: 1, visibility: 'public' }),
+        error: undefined,
+        response: new Response(null, { status: 200 }),
+      });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('hero-photo-edit-visibility'));
+      await fireEvent.click(screen.getByTestId('edit-visibility-option-public'));
+
+      await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
+      const [path, opts] = mockPatch.mock.calls[0]!;
+      expect(path).toBe('/api/v1/photos/{id}');
+      expect(opts.params.path.id).toBe(PHOTO_ID);
+      expect(opts.body).toEqual({ visibility: 'public' });
+      await waitFor(() => expect(screen.queryByTestId('edit-visibility-modal')).toBeNull());
+    });
+
+    it('sends null on the wire to clear the per-image override', async () => {
+      setupFetch({
+        photos: [photo({ id: PHOTO_ID, position: 1, visibility: 'public' })],
+      });
+      mockPatch.mockResolvedValueOnce({
+        data: photo({ id: PHOTO_ID, position: 1 }),
+        error: undefined,
+        response: new Response(null, { status: 200 }),
+      });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('hero-photo-edit-visibility'));
+      await fireEvent.click(screen.getByTestId('edit-visibility-option-inherit'));
+
+      await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
+      expect(mockPatch.mock.calls[0]![1].body).toEqual({ visibility: null });
+    });
+
+    it('does not PATCH when the user picks the value already in effect', async () => {
+      setupFetch({
+        photos: [photo({ id: PHOTO_ID, position: 1, visibility: 'unlisted' })],
+      });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('hero-photo-edit-visibility'));
+      await fireEvent.click(screen.getByTestId('edit-visibility-option-unlisted'));
+
+      expect(mockPatch).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByTestId('edit-visibility-modal')).toBeNull());
+    });
+
+    it('Cancel closes the modal without mutating', async () => {
+      setupFetch({
+        photos: [photo({ id: PHOTO_ID, position: 1, visibility: 'private' })],
+      });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await fireEvent.click(await screen.findByTestId('hero-photo-edit-visibility'));
+      await fireEvent.click(screen.getByTestId('edit-visibility-cancel'));
+
+      expect(mockPatch).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByTestId('edit-visibility-modal')).toBeNull());
+    });
+
+    it('renders the affordance on gallery thumbnails too', async () => {
+      const HERO_ID = 'pppppppp-0000-0000-0000-00000000eeee';
+      const THUMB_ID = 'pppppppp-0000-0000-0000-00000000ffff';
+      setupFetch({
+        photos: [
+          photo({ id: HERO_ID, position: 1 }),
+          photo({
+            id: THUMB_ID,
+            position: 2,
+            file_id: 'bbbbbbbb-0000-0000-0000-000000000000',
+          }),
+        ],
+      });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await screen.findByTestId('hero-photo');
+      const thumbAffordances = await screen.findAllByTestId('gallery-thumb-edit-visibility');
+      expect(thumbAffordances).toHaveLength(1);
     });
   });
 

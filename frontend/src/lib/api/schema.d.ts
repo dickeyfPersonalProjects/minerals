@@ -206,7 +206,10 @@ export interface paths {
         delete: operations["delete-photo"];
         options?: never;
         head?: never;
-        /** Update a photo's taken_at and/or position */
+        /**
+         * Update a photo's taken_at, position, kind, or visibility
+         * @description Partial update; omitted fields keep their previous values. `visibility` follows the §13b three-way semantics: omit to preserve; pass null to clear the per-photo override (chain falls through to the specimen's images default); pass an enum value to set the override.
+         */
         patch: operations["patch-photo"];
         trace?: never;
     };
@@ -957,6 +960,11 @@ export interface components {
              * @description New taken_at; pass null to clear, omit to leave unchanged.
              */
             taken_at?: string;
+            /**
+             * @description Per-photo visibility override. Omit to leave unchanged; pass null to clear (chain falls through to the specimen's images default); pass an enum value to set the override.
+             * @enum {string|null}
+             */
+            visibility?: "private" | "unlisted" | "public" | null;
         };
         PatchQRSheetBody: {
             /**
@@ -1088,6 +1096,11 @@ export interface components {
              * @description When the photo was taken; defaulted from EXIF DateTimeOriginal when not provided.
              */
             taken_at: string | null;
+            /**
+             * @description Per-photo visibility override. Null/absent falls through to the specimen's visibility_images, then the specimen's overall visibility, then the owner's default.
+             * @enum {string}
+             */
+            visibility?: "private" | "unlisted" | "public";
         };
         ProfileBody: {
             /**

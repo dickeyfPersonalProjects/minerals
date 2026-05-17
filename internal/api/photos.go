@@ -82,7 +82,15 @@ type PhotoView struct {
 	Kind        string     `json:"kind" enum:"visible,uv_sw,uv_mw,uv_lw,other" doc:"Lighting condition the photo was taken under: visible, uv_sw (shortwave UV), uv_mw (midwave UV), uv_lw (longwave UV), or other."`
 	TakenAt     *time.Time `json:"taken_at" doc:"When the photo was taken; defaulted from EXIF DateTimeOriginal when not provided."`
 	Position    int        `json:"position" doc:"Manual ordering; 1-indexed within the specimen's photos."`
-	CreatedAt   time.Time  `json:"created_at" doc:"RFC 3339 creation timestamp."`
+	// Visibility is the photo-level override in the per-field
+	// visibility resolution chain (CONTRACT.md §13b, mi-fo8). Null/
+	// absent falls through to the parent specimen's visibility_images,
+	// then the specimen's overall visibility, then the owner's images
+	// default, then the system default. Owner-facing affordance — the
+	// SPA's per-image selector reads this to prefill the per-image
+	// override.
+	Visibility *domain.Visibility `json:"visibility,omitempty" enum:"private,unlisted,public" doc:"Per-photo visibility override. Null/absent falls through to the specimen's visibility_images, then the specimen's overall visibility, then the owner's default."`
+	CreatedAt  time.Time          `json:"created_at" doc:"RFC 3339 creation timestamp."`
 }
 
 func toPhotoView(p domain.Photo, f domain.File) PhotoView {
@@ -103,6 +111,7 @@ func toPhotoView(p domain.Photo, f domain.File) PhotoView {
 		Kind:        kind,
 		TakenAt:     p.TakenAt,
 		Position:    p.Position,
+		Visibility:  p.Visibility,
 		CreatedAt:   p.CreatedAt,
 	}
 }
@@ -182,7 +191,8 @@ func registerPhotoOperations(api huma.API, mux *http.ServeMux, authMW authMiddle
 		OperationID: "patch-photo",
 		Method:      http.MethodPatch,
 		Path:        "/api/v1/photos/{id}",
-		Summary:     "Update a photo's taken_at and/or position",
+		Summary:     "Update a photo's taken_at, position, kind, or visibility",
+		Description: "Partial update; omitted fields keep their previous values. `visibility` follows the §13b three-way semantics: omit to preserve; pass null to clear the per-photo override (chain falls through to the specimen's images default); pass an enum value to set the override.",
 		Tags:        []string{"photos"},
 		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound},
 		Middlewares: mws,
@@ -569,6 +579,14 @@ type patchPhotoBody struct {
 	TakenAt  *time.Time `json:"taken_at,omitempty" doc:"New taken_at; pass null to clear, omit to leave unchanged."`
 	Position *int       `json:"position,omitempty" doc:"New manual ordering position; omit to leave unchanged."`
 	Kind     *string    `json:"kind,omitempty" enum:"visible,uv_sw,uv_mw,uv_lw,other" doc:"New photo kind; omit to leave unchanged."`
+	// Visibility uses the three-way absent/null/value pattern from
+	// VisibilityPatch (see specimens.go): omit the key to preserve the
+	// current override; pass null to clear (chain falls through to
+	// the specimen's visibility_images, then the specimen's overall
+	// visibility, then the owner's images default); pass a Visibility
+	// enum value to set the per-photo override (CONTRACT.md §13b,
+	// mi-fo8 #8).
+	Visibility VisibilityPatch `json:"visibility,omitempty" doc:"Per-photo visibility override. Omit to leave unchanged; pass null to clear (chain falls through to the specimen's images default); pass an enum value to set the override."`
 }
 
 type patchPhotoOutput struct {
@@ -608,6 +626,9 @@ func (s *PhotoService) patch(ctx context.Context, in *patchPhotoInput) (*patchPh
 				map[string]any{"field": "kind"})
 		}
 		current.Kind = k
+	}
+	if err := applyVisibilityPatch(in.Body.Visibility, "visibility", &current.Visibility); err != nil {
+		return nil, err
 	}
 
 	if err := s.deps.Photos.Update(ctx, nil, current); err != nil {
