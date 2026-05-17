@@ -71,7 +71,7 @@ describe('ProfileMenu', () => {
     render(ProfileMenu);
     screen.getByTestId('profile-menu-button').click();
     (await screen.findByTestId('profile-menu-profile')).click();
-    expect(mockPush).toHaveBeenCalledWith('/profile/setup');
+    expect(mockPush).toHaveBeenCalledWith('/profile');
     await vi.waitFor(() => {
       expect(screen.queryByTestId('profile-menu')).not.toBeInTheDocument();
     });

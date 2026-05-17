@@ -34,7 +34,7 @@
 
   function goProfile(): void {
     open = false;
-    void push('/profile/setup');
+    void push('/profile');
   }
 
   async function signOut(): Promise<void> {

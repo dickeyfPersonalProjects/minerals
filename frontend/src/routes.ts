@@ -14,10 +14,12 @@ import CollectorEdit from './routes/CollectorEdit.svelte';
 import QRPreview from './routes/QRPreview.svelte';
 import AuthCallback from './routes/AuthCallback.svelte';
 import ProfileSetup from './routes/ProfileSetup.svelte';
+import Profile from './routes/Profile.svelte';
 
 export const routes: RouteDefinition = {
   '/': Specimens,
   '/auth/callback': AuthCallback,
+  '/profile': Profile,
   '/profile/setup': ProfileSetup,
   '/specimens': Specimens,
   '/specimens/new': SpecimenNew,
