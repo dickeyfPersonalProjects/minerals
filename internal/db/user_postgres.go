@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -23,12 +24,15 @@ func NewUserPostgres(pool *pgxpool.Pool) *UserPostgres {
 	return &UserPostgres{pool: pool}
 }
 
+// userColumns is the canonical read column list shared by every
+// user query. Kept in sync with scanUser.
+const userColumns = `id, keycloak_sub, email, display_name, status,
+		field_defaults, created_at, updated_at`
+
 // GetBySub returns the row whose keycloak_sub matches, or
 // domain.ErrUserNotFound.
 func (r *UserPostgres) GetBySub(ctx context.Context, sub string) (domain.User, error) {
-	const q = `
-		SELECT id, keycloak_sub, email, display_name, status, created_at, updated_at
-		FROM users WHERE keycloak_sub = $1`
+	q := `SELECT ` + userColumns + ` FROM users WHERE keycloak_sub = $1`
 	row := r.pool.QueryRow(ctx, q, sub)
 	u, err := scanUser(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -45,12 +49,17 @@ func (r *UserPostgres) GetBySub(ctx context.Context, sub string) (domain.User, e
 // won the race" and retries GetBySub.
 func (r *UserPostgres) Create(ctx context.Context, tx domain.Tx, u domain.User) error {
 	exec := r.execer(tx)
+	fieldDefaults, err := marshalNullable(u.FieldDefaults)
+	if err != nil {
+		return fmt.Errorf("user repo: create: field_defaults: %w", err)
+	}
 	const q = `
-		INSERT INTO users (id, keycloak_sub, email, display_name, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`
-	_, err := exec.Exec(ctx, q,
+		INSERT INTO users (id, keycloak_sub, email, display_name, status,
+			field_defaults, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+	_, err = exec.Exec(ctx, q,
 		u.ID, u.KeycloakSub, u.Email, u.DisplayName, string(u.Status),
-		u.CreatedAt, u.UpdatedAt,
+		fieldDefaults, u.CreatedAt, u.UpdatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -81,6 +90,32 @@ func (r *UserPostgres) MarkActive(
 	return nil
 }
 
+// UpdateFieldDefaults writes the per-user visibility defaults map
+// (mi-fo8 / migration 0012). Passing nil clears the column to SQL
+// NULL — the all-fields-fall-through state. Returns
+// ErrUserNotFound when no row matched.
+func (r *UserPostgres) UpdateFieldDefaults(
+	ctx context.Context, tx domain.Tx, id uuid.UUID, defaults *domain.FieldDefaults, updatedAt time.Time,
+) error {
+	exec := r.execer(tx)
+	fieldDefaults, err := marshalNullable(defaults)
+	if err != nil {
+		return fmt.Errorf("user repo: update field defaults: marshal: %w", err)
+	}
+	const q = `
+		UPDATE users
+		   SET field_defaults = $2, updated_at = $3
+		 WHERE id = $1`
+	tag, err := exec.Exec(ctx, q, id, fieldDefaults, updatedAt)
+	if err != nil {
+		return fmt.Errorf("user repo: update field defaults: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrUserNotFound
+	}
+	return nil
+}
+
 func (r *UserPostgres) execer(tx domain.Tx) domain.Tx {
 	if tx != nil {
 		return tx
@@ -94,14 +129,23 @@ func scanUser(s rowScanner) (domain.User, error) {
 	var u domain.User
 	var displayName *string
 	var status string
+	var fieldDefaults []byte
 	var createdAt, updatedAt time.Time
 	if err := s.Scan(
-		&u.ID, &u.KeycloakSub, &u.Email, &displayName, &status, &createdAt, &updatedAt,
+		&u.ID, &u.KeycloakSub, &u.Email, &displayName, &status,
+		&fieldDefaults, &createdAt, &updatedAt,
 	); err != nil {
 		return domain.User{}, err
 	}
 	u.DisplayName = displayName
 	u.Status = domain.UserStatus(status)
+	if len(fieldDefaults) > 0 && string(fieldDefaults) != "null" {
+		var fd domain.FieldDefaults
+		if err := json.Unmarshal(fieldDefaults, &fd); err != nil {
+			return domain.User{}, fmt.Errorf("field_defaults unmarshal: %w", err)
+		}
+		u.FieldDefaults = &fd
+	}
 	u.CreatedAt = createdAt
 	u.UpdatedAt = updatedAt
 	return u, nil

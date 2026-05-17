@@ -156,8 +156,16 @@ type Specimen struct {
 	// position. The DB enforces ON DELETE SET NULL against files(id),
 	// so deleting the underlying file reverts to the fallback.
 	MainImageID *uuid.UUID
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// Per-field visibility overrides (mi-fo8 / migration 0013). Each
+	// is the specimen-level layer of the resolution chain for one
+	// redactable field: nil falls through to the user default, then
+	// the system default. VisibilityImages governs the default for
+	// photos that do not set their own visibility.
+	VisibilityPrice        *Visibility
+	VisibilityAcquiredFrom *Visibility
+	VisibilityImages       *Visibility
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 }
 
 // PhotoKind discriminates the lighting condition a photo was taken
@@ -197,6 +205,11 @@ type Photo struct {
 	Kind       PhotoKind
 	TakenAt    *time.Time
 	Position   int
+	// Visibility is the photo-level override in the per-field
+	// visibility resolution chain (mi-fo8 / migration 0014). nil
+	// falls through to the parent specimen's VisibilityImages, then
+	// the user default, then the system default.
+	Visibility *Visibility
 	CreatedAt  time.Time
 }
 
@@ -652,7 +665,23 @@ const (
 	UserStatusDeleted UserStatus = "deleted"
 )
 
-// User mirrors the schema added in migration 0008_users (mi-tl2).
+// FieldDefaults is the per-user default-visibility map persisted in
+// users.field_defaults (mi-fo8 / migration 0012). It's sparse by
+// construction: any unset pointer encodes as an absent JSON key and
+// means "no user default; fall through to the system default" in
+// the per-field visibility resolution chain (CONTRACT.md §13).
+//
+// A nil *FieldDefaults persists as SQL NULL — the all-fields-
+// fall-through case.
+type FieldDefaults struct {
+	Price        *Visibility `json:"price,omitempty"`
+	AcquiredFrom *Visibility `json:"acquired_from,omitempty"`
+	Images       *Visibility `json:"images,omitempty"`
+}
+
+// User mirrors the schema added in migration 0008_users (mi-tl2),
+// extended by migration 0012 with the per-user visibility defaults
+// map (mi-fo8 / mi-y72).
 // It maps the Keycloak `sub` claim to the application's row UUID
 // and carries the profile-completion state for the first-login
 // gate (mi-2hf).
@@ -662,8 +691,13 @@ type User struct {
 	Email       string
 	DisplayName *string
 	Status      UserStatus
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// FieldDefaults is the per-user default-visibility map for
+	// redactable fields (price, acquired_from, images). nil means
+	// SQL NULL — no user-level defaults set, fall through to system
+	// default for every field.
+	FieldDefaults *FieldDefaults
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // UserRepo is the consumer-side interface for the users table
@@ -681,6 +715,10 @@ type UserRepo interface {
 	// the row identified by id. Returns ErrUserNotFound if no row
 	// matched. The caller has already bumped updatedAt.
 	MarkActive(ctx context.Context, tx Tx, id uuid.UUID, displayName string, updatedAt time.Time) error
+	// UpdateFieldDefaults writes the per-user visibility defaults
+	// map (mi-fo8 / migration 0012). Passing nil clears the column
+	// (SQL NULL). Returns ErrUserNotFound when no row matched.
+	UpdateFieldDefaults(ctx context.Context, tx Tx, id uuid.UUID, defaults *FieldDefaults, updatedAt time.Time) error
 }
 
 // SpecimenCollectorRepo is the consumer-side interface for the

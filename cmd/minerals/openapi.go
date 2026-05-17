@@ -211,6 +211,9 @@ func (specStubUserRepo) Create(context.Context, domain.Tx, domain.User) error {
 func (specStubUserRepo) MarkActive(context.Context, domain.Tx, uuid.UUID, string, time.Time) error {
 	return domain.ErrUserNotFound
 }
+func (specStubUserRepo) UpdateFieldDefaults(context.Context, domain.Tx, uuid.UUID, *domain.FieldDefaults, time.Time) error {
+	return domain.ErrUserNotFound
+}
 
 // specStubSpecimenCollectorRepo is a never-called stand-in so the
 // type-derived OpenAPI spec advertises the chain routes during
