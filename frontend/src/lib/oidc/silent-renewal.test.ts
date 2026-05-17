@@ -13,6 +13,7 @@ import {
   authStore,
   buildSilentRenewalUrl,
   getAccessToken,
+  isInteractiveLoginInFlight,
   nextSilentRenewalDelay,
   parseSilentRenewalMessage,
   SILENT_TIMEOUT_MS,
@@ -283,6 +284,34 @@ describe('attemptSilentRenewal', () => {
     const result = await pending;
     expect(result).toEqual({ ok: false, reason: 'token-error' });
     expect(getAccessToken()).toBeNull();
+  });
+});
+
+describe('isInteractiveLoginInFlight (mi-rb6k guard)', () => {
+  it('returns false when sessionStorage has no PKCE verifier', () => {
+    const storage = new Map<string, string>();
+    const stub: Storage = {
+      getItem: (k) => storage.get(k) ?? null,
+      setItem: (k, v) => storage.set(k, v),
+      removeItem: (k) => storage.delete(k),
+      clear: () => storage.clear(),
+      key: () => null,
+      length: 0,
+    };
+    expect(isInteractiveLoginInFlight(stub)).toBe(false);
+  });
+
+  it('returns true while beginLogin has stashed a verifier (interactive callback pending)', () => {
+    const storage = new Map<string, string>([['minerals.oidc.code_verifier', 'v-1']]);
+    const stub: Storage = {
+      getItem: (k) => storage.get(k) ?? null,
+      setItem: (k, v) => storage.set(k, v),
+      removeItem: (k) => storage.delete(k),
+      clear: () => storage.clear(),
+      key: () => null,
+      length: 0,
+    };
+    expect(isInteractiveLoginInFlight(stub)).toBe(true);
   });
 });
 

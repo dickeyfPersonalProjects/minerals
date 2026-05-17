@@ -21,6 +21,19 @@ const STORAGE_VERIFIER = 'minerals.oidc.code_verifier';
 const STORAGE_STATE = 'minerals.oidc.state';
 const STORAGE_RETURN_TO = 'minerals.oidc.return_to';
 
+/**
+ * True while an interactive login is in flight — i.e. beginLogin has
+ * stashed a PKCE verifier in sessionStorage but handleAuthCallback has
+ * not yet cleared it. Used by Layout.svelte to suppress on-boot silent
+ * renewal while the user is mid-/auth/callback, so the silent flow
+ * does not race the interactive token exchange. See mi-rb6k.
+ */
+export function isInteractiveLoginInFlight(storage?: Storage): boolean {
+  const s = storage ?? (typeof window !== 'undefined' ? window.sessionStorage : undefined);
+  if (!s) return false;
+  return s.getItem(STORAGE_VERIFIER) !== null;
+}
+
 export interface AuthState {
   readonly accessToken: string | null;
   readonly expiresAt: number | null;

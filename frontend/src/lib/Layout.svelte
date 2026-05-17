@@ -5,7 +5,12 @@
   import LoginButton from './LoginButton.svelte';
   import ProfileMenu from './ProfileMenu.svelte';
   import { qrSheetState, refreshQrSheet } from './qrSheet';
-  import { authStore, attemptSilentRenewal, getAccessToken } from './oidc/auth';
+  import {
+    authStore,
+    attemptSilentRenewal,
+    getAccessToken,
+    isInteractiveLoginInFlight,
+  } from './oidc/auth';
   import { loadOidcConfig, oidcConfigStore } from './oidc/config';
 
   interface Props {
@@ -45,8 +50,21 @@
     // may still be alive, so the user can be re-authenticated without
     // any UI interaction. Failure (SSO expired, OIDC unconfigured) is
     // a no-op — the Login button stays visible.
+    //
+    // Suppress when an interactive PKCE login is in flight (mi-rb6k).
+    // Two complementary signals:
+    //   (a) the URL hash is /auth/callback — AuthCallback.svelte owns
+    //       that exchange, the silent flow MUST NOT race it;
+    //   (b) a PKCE verifier is in sessionStorage — beginLogin ran and
+    //       handleAuthCallback has not yet consumed it.
+    // Either one means an interactive login is mid-flight; firing a
+    // silent renewal here would race the interactive token exchange
+    // and break the auth.spec.ts smoke (the original mi-ct2 PR #195
+    // regression).
     void loadOidcConfig().then((config) => {
       if (!config || getAccessToken() !== null) return;
+      if (window.location.hash.startsWith('#/auth/callback')) return;
+      if (isInteractiveLoginInFlight()) return;
       void attemptSilentRenewal({ config });
     });
   });
