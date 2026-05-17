@@ -102,6 +102,7 @@ This is the source of truth for the project roadmap.
 - [ ] Visibility UX — expose `private | unlisted | public` control in specimen UI (column already exists)
 - [ ] Public specimen pages (no auth required)
 - [ ] Direct-S3 / presigned-GET fast path for public file downloads
+- [ ] **Per-field visibility** — independent visibility on `price`, `acquired_from`, and `images` with user profile defaults + per-specimen / per-image overrides. See CONTRACT §13b. `(mi-fo8)`
 
 ### Catalog numbering
 - [ ] Auto-generation with customizable ID scheme (e.g. `FD-2026-0042`, user-defined template)
