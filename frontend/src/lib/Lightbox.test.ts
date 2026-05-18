@@ -1,13 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 
-// Authenticated image loader is mocked: tests assert against the
-// `data-src` attribute (which mirrors the backend path), not the
-// generated blob: URL (mi-lrqt).
-vi.mock('./photos/blob-url', () => ({
-  loadAuthedBlobUrl: vi.fn(async (path: string) => `blob:fake${path}`),
-  AuthedImageFetchError: class AuthedImageFetchError extends Error {},
-}));
+// V2 BFF cookie flow (mi-3vc4): cookies travel on <img> requests
+// automatically, so the lightbox renders the backend path directly
+// on `src` — no blob-URL workaround, no helper to mock.
 
 import Lightbox from './Lightbox.svelte';
 
@@ -19,13 +15,6 @@ const PHOTOS = [
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  // jsdom does not implement URL.createObjectURL / revokeObjectURL —
-  // AuthedImage drives both, so stub them. The blob-url helper is
-  // mocked above, so createObjectURL is only here to silence the
-  // revoke calls AuthedImage makes on teardown.
-  if (typeof URL.revokeObjectURL !== 'function') {
-    (URL as unknown as { revokeObjectURL: (u: string) => void }).revokeObjectURL = () => {};
-  }
 });
 
 afterEach(() => {
@@ -41,9 +30,7 @@ describe('Lightbox', () => {
     render(Lightbox, { photos: PHOTOS, startIndex: 1, onClose: vi.fn() });
 
     const img = await waitForImage('lightbox-image');
-    // AuthedImage renders with `data-src` mirroring the backend
-    // path; the actual `src` is a blob: URL.
-    expect(img.getAttribute('data-src')).toBe('/api/v1/photos/p2/display');
+    expect(img.getAttribute('src')).toBe('/api/v1/photos/p2/display');
     expect(img.getAttribute('alt')).toBe('second');
     expect(screen.getByTestId('lightbox-counter')).toHaveTextContent('2 / 3');
   });
@@ -55,7 +42,7 @@ describe('Lightbox', () => {
 
     await waitFor(() => {
       const img = screen.getByTestId('lightbox-image') as HTMLImageElement;
-      expect(img.getAttribute('data-src')).toBe('/api/v1/photos/p1/display');
+      expect(img.getAttribute('src')).toBe('/api/v1/photos/p1/display');
     });
     expect(screen.getByTestId('lightbox-counter')).toHaveTextContent('1 / 3');
   });
@@ -67,7 +54,7 @@ describe('Lightbox', () => {
 
     await waitFor(() => {
       const img = screen.getByTestId('lightbox-image') as HTMLImageElement;
-      expect(img.getAttribute('data-src')).toBe('/api/v1/photos/p3/display');
+      expect(img.getAttribute('src')).toBe('/api/v1/photos/p3/display');
     });
     expect(screen.getByTestId('lightbox-counter')).toHaveTextContent('3 / 3');
   });

@@ -20,13 +20,13 @@ vi.mock('svelte-spa-router', async () => {
 });
 
 import SpecimenNew from './SpecimenNew.svelte';
-import { __resetAuthStore, setAccessToken } from '../lib/oidc/auth';
+import { __authenticate, __resetAuthStore } from '../lib/auth';
 
 beforeEach(() => {
   mockPost.mockReset();
   mockPush.mockReset();
   // Default-authed; the anonymous block at the bottom resets.
-  setAccessToken('test-token', 600);
+  __authenticate();
 });
 
 afterEach(() => {

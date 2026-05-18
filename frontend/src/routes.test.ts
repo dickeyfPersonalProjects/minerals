@@ -3,17 +3,6 @@ import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
 import Router from 'svelte-spa-router';
 import { routes } from './routes';
 
-// Mock handleAuthCallback so AuthCallback doesn't actually try to hit
-// Keycloak when the router successfully mounts it — we only care here
-// about *which* route the real <Router> matches against the hash URL.
-vi.mock('./lib/oidc/auth', async () => {
-  const actual = await vi.importActual<Record<string, unknown>>('./lib/oidc/auth');
-  return {
-    ...actual,
-    handleAuthCallback: vi.fn(() => new Promise(() => {})),
-  };
-});
-
 // Specimens fetches a list on mount. Stub the API so the home/catch-all
 // route can mount without a real backend.
 vi.mock('./lib/api/client', async () => {
@@ -43,27 +32,23 @@ afterEach(() => {
   window.location.hash = '';
 });
 
-describe('Router integration with routes.ts', () => {
-  it('mounts AuthCallback for /#/auth/callback with no query', async () => {
-    navigateHash('#/auth/callback');
-    render(Router, { routes });
-    await waitFor(() => {
-      expect(screen.queryByTestId('auth-callback')).toBeInTheDocument();
-    });
+describe('Router integration with routes.ts (V2 BFF cookie flow, mi-3vc4)', () => {
+  // /#/auth/callback is no longer a SPA route — Keycloak now
+  // redirects back to the BACKEND's /auth/callback handler, which
+  // sets the cookie and 302s into the SPA. Any /#/auth/* hash that
+  // somehow reaches the router falls through to the catch-all
+  // (Specimens) so the browser at least lands somewhere useful.
+  it('does not register /auth/callback as a SPA route', () => {
+    expect((routes as Record<string, unknown>)['/auth/callback']).toBeUndefined();
   });
 
-  it('mounts AuthCallback for /#/auth/callback?code=X&state=Y (with query)', async () => {
-    // Regression test for mi-0ag: the real Keycloak round-trip lands on
-    // a hash URL that includes the authorization code + state query
-    // string. The router MUST match `/auth/callback` here — falling
-    // through to the catch-all leaves the user stuck on the home page,
-    // anonymous, with the PKCE verifier silently abandoned.
-    navigateHash(
-      '#/auth/callback?state=abc&session_state=xyz&iss=https%3A%2F%2Fkeycloak.example%2Frealms%2Fminerals&code=def',
-    );
+  it('falls through to the catch-all when /#/auth/callback is somehow navigated', async () => {
+    navigateHash('#/auth/callback');
     render(Router, { routes });
+    // Catch-all is Specimens — render-mount succeeds without
+    // throwing about an unknown route.
     await waitFor(() => {
-      expect(screen.queryByTestId('auth-callback')).toBeInTheDocument();
+      expect(screen.queryByTestId('auth-callback')).not.toBeInTheDocument();
     });
   });
 });

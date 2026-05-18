@@ -4,7 +4,7 @@
   import type { components } from '../lib/api/schema';
   import CollectorForm from '../lib/CollectorForm.svelte';
   import type { CollectorFormSubmitResult } from '../lib/CollectorForm.svelte';
-  import { isAuthenticated } from '../lib/oidc/auth';
+  import { isAuthenticated } from '../lib/auth';
   import { toastSuccess } from '../lib/toasts';
 
   type Collector = components['schemas']['CollectorView'];

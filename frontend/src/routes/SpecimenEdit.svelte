@@ -6,7 +6,7 @@
   import ConfirmModal from '../lib/ConfirmModal.svelte';
   import SpecimenForm from '../lib/SpecimenForm.svelte';
   import type { SpecimenFormSubmitResult } from '../lib/SpecimenForm.svelte';
-  import { isAuthenticated } from '../lib/oidc/auth';
+  import { isAuthenticated } from '../lib/auth';
   import {
     formToPatchBody,
     specimenToFormValues,

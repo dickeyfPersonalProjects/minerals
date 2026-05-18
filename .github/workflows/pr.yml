@@ -346,11 +346,24 @@ jobs:
           # Creates the `minerals-test` public direct-access-grant
           # client (see terraform/keycloak/clients.tf) so the
           # backend-JWT-acceptance step below can mint a realm token
-          # via the password grant. Backend-only scope — the PKCE smoke
-          # uses `minerals-frontend` like real users do. Never set in
-          # staging/prod.
+          # via the password grant. Backend-only scope — the BFF smoke
+          # uses `minerals-frontend` (CONFIDENTIAL) like real users do.
+          # Never set in staging/prod.
           TF_VAR_test_environment: "true"
         run: bash dev-seed.sh
+
+      - name: Recreate app container with BFF secrets (mi-sap2)
+        # dev-seed.sh wrote .env.bff carrying OIDC_CLIENT_SECRET (from
+        # the now-CONFIDENTIAL minerals-frontend client, mi-qnmy) and a
+        # fresh OAUTH_STATE_HMAC_KEY. The app booted before dev-seed
+        # ran, so it currently has empty BFF env vars and /auth/login
+        # 404s. --force-recreate restarts it with the new env.
+        run: |
+          if [ ! -f .env.bff ]; then
+            echo "dev-seed.sh did not produce .env.bff — BFF auth cannot be enabled" >&2
+            exit 1
+          fi
+          docker compose --env-file .env.bff --profile keycloak up -d --force-recreate app
 
       - name: Wait for app /healthz
         # App auto-applies migrations on dev startup; allow up to 120s

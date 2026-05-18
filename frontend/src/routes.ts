@@ -12,13 +12,14 @@ import SpecimenEdit from './routes/SpecimenEdit.svelte';
 import Collectors from './routes/Collectors.svelte';
 import CollectorEdit from './routes/CollectorEdit.svelte';
 import QRPreview from './routes/QRPreview.svelte';
-import AuthCallback from './routes/AuthCallback.svelte';
 import ProfileSetup from './routes/ProfileSetup.svelte';
 import Profile from './routes/Profile.svelte';
 
+// V2 BFF cookie flow (mi-3vc4): /auth/callback is no longer a SPA
+// route — Keycloak redirects back to the BACKEND's /auth/callback
+// handler, which sets the cookie and 302s the browser into the SPA.
 export const routes: RouteDefinition = {
   '/': Specimens,
-  '/auth/callback': AuthCallback,
   '/profile': Profile,
   '/profile/setup': ProfileSetup,
   '/specimens': Specimens,

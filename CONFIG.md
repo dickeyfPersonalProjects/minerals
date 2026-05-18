@@ -8,6 +8,17 @@ their own copies.
 To add or change a setting, follow CONTRACT.md §15 "Adding a new
 setting" — updating this inventory is the first and mandatory step.
 
+> **Authentication.** V2 uses a backend-for-frontend (BFF) design —
+> the Go backend is the OAuth client and the browser holds only an
+> opaque HttpOnly session cookie. See
+> [`docs/design/auth-bff.md`](docs/design/auth-bff.md) for the
+> canonical reference. The BFF-related settings below
+> (`OIDC_CLIENT_SECRET`, `OAUTH_STATE_HMAC_KEY`, `COOKIE_*`,
+> `SESSION_*`, `BFF_ENFORCE_CSRF_LOGOUT`, `POST_LOGOUT_REDIRECT_URI`,
+> `TRUST_FORWARDED_FOR`) are the operator surface of that design.
+> `PUBLIC_OIDC_*` settings are gone — the SPA never speaks OAuth, so
+> nothing reaches the browser.
+
 ## Inventory
 
 | Name | Kind | Default (dev) | Required in prod | Purpose | Source |
@@ -24,20 +35,19 @@ setting" — updating this inventory is the first and mandatory step.
 | `LOG_LEVEL` | env | `info` | no | `debug` / `info` / `warn` / `error` | `internal/config/config.go:63` |
 | `ENV` | env | `dev` | **yes** | `dev` / `prod`; flips strictness | `internal/config/config.go:54` |
 | `MINDAT_API_KEY` | env | _(unset)_ | no | Mindat REST API token for mineral-species lookup (mi-dtg / F-1). When unset, mineral lookup falls back to DB-only mode (no Mindat fallthrough). | `internal/config/config.go` |
-| `OIDC_ISSUER_URL` | env | `http://localhost:8081/realms/minerals` | no | Keycloak realm URL used by the backend for JWT verification. Discovery (`{OIDC_ISSUER_URL}/.well-known/openid-configuration`) yields the JWKS endpoint. Consumed by `internal/oidc` via the auth middleware (mi-aw3a). | `internal/config/config.go` |
-| `OIDC_CLIENT_ID` | env | `minerals-frontend` | no | Expected `aud` claim on bearer tokens reaching the backend. Audience check only — no client secret on the backend (pure resource server, JWKS validation). Consumed by `internal/oidc` via the auth middleware (mi-aw3a). | `internal/config/config.go` |
-| `OIDC_JWKS_URL` | env | _(unset)_ | no | Overrides OIDC discovery for locating the realm's JWKS endpoint. When unset, the verifier discovers it from `OIDC_ISSUER_URL/.well-known/openid-configuration`. Set this when the canonical `OIDC_ISSUER_URL` (which must match browser-issued tokens' `iss` claim) is not reachable from inside the backend container — e.g. the docker-compose dev stack where the issuer is `http://localhost:8081/realms/minerals` (host-side) but the backend reaches Keycloak in-network at `http://keycloak:8080`. Consumed by `internal/oidc` (mi-dau). | `internal/config/config.go` |
+| `OIDC_ISSUER_URL` | env | `http://localhost:8081/realms/minerals` | **yes** | Keycloak realm URL the backend uses (a) as the OAuth-client issuer on the BFF `/auth/login` → `/auth/callback` exchange (mi-bm5b) and (b) for `iss`-claim verification on session-derived tokens (docs/design/auth-bff.md). Discovery (`{OIDC_ISSUER_URL}/.well-known/openid-configuration`) yields the authorization, token, JWKS, and end-session endpoints. | `internal/config/config.go` |
+| `OIDC_CLIENT_ID` | env | `minerals-frontend` | **yes** | Confidential OAuth client id the BFF uses on the server-to-server code exchange (mi-bm5b / mi-qnmy). Also the expected `aud` on any bearer JWTs the backend introspects. | `internal/config/config.go` |
+| `OIDC_JWKS_URL` | env | _(unset)_ | no | Overrides OIDC discovery for locating the realm's JWKS endpoint. When unset, the verifier discovers it from `OIDC_ISSUER_URL/.well-known/openid-configuration`. Set this when the canonical `OIDC_ISSUER_URL` (which must match browser-issued tokens' `iss` claim) is not reachable from inside the backend container — e.g. the docker-compose dev stack where the issuer is `http://localhost:8081/realms/minerals` (host-side) but the backend reaches Keycloak in-network at `http://keycloak:8080`. | `internal/config/config.go` |
 | `OIDC_DISCOVERY_URL` | env | _(unset)_ | no | Overrides the URL the BFF OAuth client uses to fetch the OIDC discovery document. When unset, discovery happens at `OIDC_ISSUER_URL/.well-known/openid-configuration` (the production path). When set, the well-known doc is fetched from `{OIDC_DISCOVERY_URL}/.well-known/openid-configuration` and the canonical `OIDC_ISSUER_URL` is still used to validate the discovery doc's `iss` field and token `iss` claims. Sister setting to `OIDC_JWKS_URL` — same rationale (host-side `OIDC_ISSUER_URL` is unreachable from inside the backend container in dev compose), applied to the BFF OAuth client's discovery instead of the verifier's JWKS lookup. Consumed by `internal/auth/bff` (mi-8tnv). | `internal/config/config.go` |
-| `PUBLIC_OIDC_ISSUER_URL` | env | `http://localhost:8081/realms/minerals` | no | Keycloak realm URL exposed to the SPA via `/api/v1/runtime-config` (the SPA uses it to discover the authorization endpoint for the PKCE login flow). The `PUBLIC_` prefix marks "safe to send to the browser". Consumed by `internal/api` (mi-5ew). | `internal/config/config.go` |
-| `PUBLIC_OIDC_CLIENT_ID` | env | `minerals-frontend` | no | Public OIDC `client_id` the SPA uses for the auth-code-with-PKCE flow. Same value as `OIDC_CLIENT_ID` today (the backend's expected audience and the SPA's client id are the `minerals-frontend` Keycloak client). Served to the SPA via `/api/v1/runtime-config`. | `internal/config/config.go` |
-| `PUBLIC_OIDC_REDIRECT_URI` | env | `http://localhost:5173/auth/callback` | no | Absolute URL the SPA hands Keycloak as the `redirect_uri` in the auth-code flow. Must match a `valid_redirect_uris` entry on the `minerals-frontend` Keycloak client (`terraform/keycloak/clients.tf`). Served to the SPA via `/api/v1/runtime-config`. Under V2 BFF (mi-1d5i) this is also the URL the BFF passes to Keycloak on `/auth/login` and reuses on `/auth/callback`'s code exchange — same URL, but backend-served. | `internal/config/config.go` |
-| `OIDC_CLIENT_SECRET` | env | _(unset)_ | yes (when BFF enabled) | Confidential-client secret the BFF uses on the server-to-server code exchange (mi-bm5b). Required to enable `/auth/login` → `/auth/callback`; unset leaves the BFF handlers unregistered and the SPA on the legacy PKCE path. Provisioned in prod via the SealedSecret `minerals-oidc-secret` (mi-qnmy). Treat as a secret — never log. | `internal/config/config.go` |
-| `OAUTH_STATE_HMAC_KEY` | env | _(unset)_ | yes (when BFF enabled) | HMAC-SHA256 key that signs the short-lived state cookie issued by `/auth/login` and verified on `/auth/callback` (mi-bm5b). 32-byte minimum, enforced at boot. Rotated by deploying a new value — in-flight logins fail with `400 invalid_state` and users retry. Treat as a secret. | `internal/config/config.go` |
+| `OIDC_CLIENT_SECRET` | env | _(unset)_ | **yes** | Confidential-client secret the BFF uses on the server-to-server code exchange (mi-bm5b). Required to enable `/auth/login` → `/auth/callback`; unset leaves the BFF handlers unregistered and login is broken. Provisioned in prod via the SealedSecret `minerals-oidc-secret` (mi-qnmy). Treat as a secret — never log. | `internal/config/config.go` |
+| `OAUTH_STATE_HMAC_KEY` | env | _(unset)_ | **yes** | HMAC-SHA256 key that signs the short-lived state cookie issued by `/auth/login` and verified on `/auth/callback` (mi-bm5b). 32-byte minimum, enforced at boot. Rotated by deploying a new value — in-flight logins fail with `400 invalid_state` and users retry. Treat as a secret. | `internal/config/config.go` |
+| `PUBLIC_OIDC_REDIRECT_URI` | env | `http://localhost:8080/auth/callback` | **yes** | Absolute URL the BFF passes to Keycloak on `/auth/login` and reuses on `/auth/callback`'s code exchange. Must match a `valid_redirect_uris` entry on the `minerals-frontend` Keycloak client (`terraform/keycloak/clients.tf`). Backend-served route — NOT a SPA route. The `PUBLIC_` prefix is historical (originally meant "safe to ship to the browser") and is retained to keep the env-var name stable across the V2 BFF migration; the value is read by the backend only. | `internal/config/config.go` |
 | `COOKIE_SECURE` | env | `true` in prod, `false` in dev | no | Flips the `Secure` flag on the BFF session and state cookies. True in prod/staging (HTTPS-only); false in the dev compose stack (plain-HTTP localhost). Per-environment, never per-request — never inferred from `X-Forwarded-Proto`. | `internal/config/config.go` |
 | `COOKIE_MAX_AGE_SECONDS` | env | `1209600` (14 days) | no | `Max-Age` carried on the BFF session cookie. MUST be longer than `SESSION_ABSOLUTE_EXPIRES_HOURS` so the server-side row expires first; a stale cookie arriving past expiry cleanly clears (design invariant). | `internal/config/config.go` |
 | `SESSION_ABSOLUTE_EXPIRES_HOURS` | env | `168` (7 days) | no | Hard cap on a single BFF session row's lifetime. Stamped into `auth.sessions.absolute_expires_at` on Create; the session middleware (mi-ken4) revokes sessions past this even when Keycloak would still issue a refresh. | `internal/config/config.go` |
+| `SESSION_IDLE_TIMEOUT_MINUTES` | env | `1440` (24 hours) | no | Gap since `last_used_at` after which the session middleware revokes the session. Implements the design's idle-timeout knob (docs/design/auth-bff.md §sessions-table §four-expiration-concepts). Must be > 0 when BFF auth is enabled. | `internal/config/config.go` |
 | `POST_LOGOUT_REDIRECT_URI` | env | _(unset)_ | no | Absolute URL the BFF asks Keycloak to bounce the browser back to after the SSO logout completes. MUST be on Keycloak's `post_logout_redirect_uris` allowlist. Empty disables the 302-to-Keycloak step (handler returns 204 after revoking the local session). | `internal/config/config.go` |
-| `BFF_ENFORCE_CSRF_LOGOUT` | env | `false` | no | Gates the `/auth/logout` handler's CSRF-token check (mi-bm5b). Stays false until both the generic CSRF middleware (mi-gbzs) and the SPA wiring (mi-3vc4) ship; production flips it true once both are live. | `internal/config/config.go` |
+| `BFF_ENFORCE_CSRF_LOGOUT` | env | `false` | no | Gates the `/auth/logout` handler's CSRF-token check (mi-bm5b). Belt-and-suspenders with the generic CSRF middleware (mi-gbzs) — production should flip this true so logout fails closed even if the middleware is mis-mounted. | `internal/config/config.go` |
 | `TRUST_FORWARDED_FOR` | env | `false` | no | Enables `X-Forwarded-For`-based client-IP extraction in the BFF callback (used for the `auth.sessions.ip` forensics column). True only when the ingress strips/normalises the header so a hostile client cannot spoof the value. | `internal/config/config.go` |
 
 `Kind` legend: `env` = process environment variable. New kinds
@@ -45,14 +55,14 @@ setting" — updating this inventory is the first and mandatory step.
 feature flags, etc.) are added when the loading mechanism actually
 diverges; today every setting is an env var.
 
-The `PUBLIC_*` prefix is a convention, not a separate `Kind`. These
-are backend env vars like all the others — the prefix marks values
-the backend is allowed to ship to the SPA at runtime. The SPA itself
-never reads them directly; the backend's `envFrom` pulls them from
-`minerals-config` and serves the SPA-facing subset through the
-`/api/v1/runtime-config` endpoint (mi-5ew). The split between
-non-prefixed and `PUBLIC_*` is the trust boundary: anything without
-the prefix MUST NOT be exposed to the browser.
+The `PUBLIC_*` prefix is historical. Under V1 / pre-BFF it marked
+values the backend was allowed to ship to the SPA via
+`/api/v1/runtime-config`. Under V2 BFF the SPA never speaks OAuth and
+there are no runtime values to ship — `PUBLIC_OIDC_REDIRECT_URI` is
+the only `PUBLIC_*` entry left, and its value is now consumed by the
+backend (as the redirect URI handed to Keycloak from `/auth/login`).
+The prefix is retained for env-var-name stability across the
+migration; do not introduce new `PUBLIC_*` settings.
 
 **Prod routing.** In Kubernetes (`kustomize/base/`) the env vars split
 into two sources:
@@ -60,10 +70,9 @@ into two sources:
 - ConfigMap `minerals-config` (`kustomize/base/configmap.yaml`) supplies
   `PORT`, `ADMIN_PORT`, `ENV`, `S3_BUCKET`, `S3_REGION`, `MAX_UPLOAD_BYTES`,
   `LOG_LEVEL`, `S3_ENDPOINT`. The OIDC vars (`OIDC_ISSUER_URL`,
-  `OIDC_CLIENT_ID`, `PUBLIC_OIDC_ISSUER_URL`, `PUBLIC_OIDC_CLIENT_ID`,
-  `PUBLIC_OIDC_REDIRECT_URI`) are read by the app (backend JWT
-  verification wired by mi-aw3a) but are not in the base ConfigMap —
-  values are hostname-dependent and supplied by per-env overlays (see
+  `OIDC_CLIENT_ID`, `PUBLIC_OIDC_REDIRECT_URI`) are read by the app
+  but not in the base ConfigMap — values are hostname-dependent and
+  supplied by per-env overlays (see
   [`docs/deploy/example/`](./docs/deploy/example/)). `OIDC_JWKS_URL`
   and `OIDC_DISCOVERY_URL` are both left unset in prod (OIDC discovery
   against `OIDC_ISSUER_URL` is the canonical path) — they exist for
@@ -76,12 +85,17 @@ into two sources:
 - Optional Secret `minerals-mindat` (operator-provided in the GitOps
   overlay) supplies `MINDAT_API_KEY`. When the Secret is absent, the
   app starts in DB-only mineral-species mode without errors.
-- No Secret is required for OIDC. The backend is a pure resource
-  server — it validates JWTs against Keycloak's public JWKS endpoint
-  and never holds a `client_secret`. The Terraform-provisioned
-  `minerals-backend` confidential client exists for future
-  service-to-service (Client Credentials) flows, not for the
-  user-facing auth path.
+- Secret `minerals-oidc-secret` (operator-sealed, mi-qnmy) supplies
+  `OIDC_CLIENT_SECRET` and `OAUTH_STATE_HMAC_KEY`. Both are required
+  for V2 BFF auth — when either is missing the BFF handlers stay
+  unregistered and `/auth/login` 404s. The Terraform-provisioned
+  `minerals-frontend` confidential client owns the secret value;
+  extract it via `terraform output -raw frontend_client_secret`,
+  generate a 32-byte HMAC key with `openssl rand -base64 32`, seal both
+  with `kubeseal`. See [`docs/deploy/secrets.md`](./docs/deploy/secrets.md)
+  for the full secret inventory and
+  [`docs/deploy/keycloak.md`](./docs/deploy/keycloak.md#wiring-the-frontend-client-secret-into-the-cluster)
+  for the secret-extraction-from-terraform-output flow.
 
 The application reads everything as env vars regardless of upstream
 source.

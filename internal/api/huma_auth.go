@@ -29,6 +29,14 @@ import (
 // (CONTRACT.md §13 v2).
 func makeHumaAuth(v auth.TokenVerifier) func(huma.Context, func(huma.Context)) {
 	return func(ctx huma.Context, next func(huma.Context)) {
+		// V2 BFF cookie path: SessionMiddleware ran at the http layer
+		// and populated auth.User from the session cookie. Honor it —
+		// the cookie-auth path carries no bearer token, and re-running
+		// the token check would 401 every cookie-authenticated request.
+		if u := auth.FromContext(ctx.Context()); u.Sub != "" {
+			next(ctx)
+			return
+		}
 		if v == nil {
 			next(huma.WithContext(ctx, auth.WithUser(ctx.Context(), auth.StubUser)))
 			return
@@ -60,6 +68,14 @@ func makeHumaAuth(v auth.TokenVerifier) func(huma.Context, func(huma.Context)) {
 // failed).
 func makeHumaOptionalAuth(v auth.TokenVerifier) func(huma.Context, func(huma.Context)) {
 	return func(ctx huma.Context, next func(huma.Context)) {
+		// V2 BFF cookie path: SessionMiddleware already populated the
+		// user when a valid session cookie was present. Anonymous
+		// requests reach here with no user — that's fine on Optional
+		// chains. See makeHumaAuth for the symmetric Protected path.
+		if u := auth.FromContext(ctx.Context()); u.Sub != "" {
+			next(ctx)
+			return
+		}
 		if v == nil {
 			next(huma.WithContext(ctx, auth.WithUser(ctx.Context(), auth.StubUser)))
 			return

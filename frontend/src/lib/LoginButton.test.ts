@@ -1,61 +1,32 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/svelte';
-import { _clearToasts, toasts } from './toasts';
-import { get } from 'svelte/store';
-
-const { mockBeginLogin } = vi.hoisted(() => ({ mockBeginLogin: vi.fn() }));
-
-vi.mock('./oidc/auth', async () => {
-  const actual = await vi.importActual<Record<string, unknown>>('./oidc/auth');
-  return { ...actual, beginLogin: mockBeginLogin };
-});
-
 import LoginButton from './LoginButton.svelte';
 
 beforeEach(() => {
-  mockBeginLogin.mockReset();
-  _clearToasts();
+  // The component reads window.location.hash for the return_to
+  // param. jsdom defaults to about:blank with an empty hash; tests
+  // that care about the value set it explicitly below.
+  window.location.hash = '';
 });
 
 afterEach(() => {
   cleanup();
-  _clearToasts();
+  window.location.hash = '';
 });
 
-describe('LoginButton', () => {
-  it('renders with accessible label and triggers beginLogin on click', async () => {
-    mockBeginLogin.mockResolvedValue(undefined);
+describe('LoginButton (V2 BFF cookie flow, mi-3vc4)', () => {
+  it('renders an anchor pointing at the backend /auth/login endpoint', () => {
     render(LoginButton);
-    const btn = screen.getByTestId('login-button');
-    expect(btn).toHaveTextContent(/log in/i);
-    btn.click();
-    expect(mockBeginLogin).toHaveBeenCalledOnce();
+    const anchor = screen.getByTestId('login-button');
+    expect(anchor.tagName).toBe('A');
+    expect(anchor).toHaveAttribute('href', '/auth/login?return_to=%23%2F');
+    expect(anchor).toHaveTextContent(/log in/i);
   });
 
-  it('surfaces a toast when beginLogin throws', async () => {
-    mockBeginLogin.mockRejectedValue(new Error('OIDC is not configured'));
+  it('encodes the current hash route as return_to so the backend can bounce back', () => {
+    window.location.hash = '#/specimens/abc';
     render(LoginButton);
-    screen.getByTestId('login-button').click();
-    await vi.waitFor(() => {
-      expect(get(toasts)).toHaveLength(1);
-    });
-    expect(get(toasts)[0]?.message).toBe('OIDC is not configured');
-  });
-
-  it('ignores repeat clicks while a login is in flight', async () => {
-    let resolveFn: (() => void) | null = null;
-    mockBeginLogin.mockImplementation(
-      () =>
-        new Promise<void>((res) => {
-          resolveFn = res;
-        }),
-    );
-    render(LoginButton);
-    const btn = screen.getByTestId('login-button');
-    btn.click();
-    btn.click();
-    btn.click();
-    expect(mockBeginLogin).toHaveBeenCalledTimes(1);
-    if (resolveFn) (resolveFn as () => void)();
+    const anchor = screen.getByTestId('login-button');
+    expect(anchor.getAttribute('href')).toBe('/auth/login?return_to=%23%2Fspecimens%2Fabc');
   });
 });

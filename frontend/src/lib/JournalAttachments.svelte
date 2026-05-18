@@ -75,7 +75,7 @@
   import { client } from './api';
   import { SUPPRESS_TOAST_HEADERS } from './api/wrapper';
   import type { components } from './api/schema';
-  import { isAuthenticated } from './oidc/auth';
+  import { isAuthenticated } from './auth';
   import { toastError, toastSuccess } from './toasts';
 
   type Attachment = components['schemas']['JournalFileView'];

@@ -5,8 +5,7 @@
   import LoginButton from './LoginButton.svelte';
   import ProfileMenu from './ProfileMenu.svelte';
   import { qrSheetState, refreshQrSheet } from './qrSheet';
-  import { authStore } from './oidc/auth';
-  import { loadOidcConfig, oidcConfigStore } from './oidc/config';
+  import { authStore } from './auth';
 
   interface Props {
     children?: Snippet;
@@ -20,27 +19,21 @@
   const sheetState = $derived($qrSheetState);
   const showQrSheetLink = $derived(sheetState.status === 'loaded');
 
-  // Authenticated users get the profile menu; everyone else gets the
-  // Login button. Show the button optimistically — hide it only when
-  // we have positive confirmation that OIDC is NOT configured in this
-  // environment ('ready' with a null config). Loading/error/unloaded
-  // states keep the button visible so anonymous users always have an
-  // affordance to log in; clicking before the config resolves awaits
-  // the in-flight fetch (or retries on prior error) and toasts a
-  // friendly message if OIDC really is unconfigured.
+  // V2 BFF cookie flow (mi-3vc4): the SPA learns its auth state by
+  // probing GET /api/v1/profile in main.ts. Show the profile menu
+  // when the probe resolved to a user; otherwise show the Login
+  // button. The Login button is a plain `<a href="/auth/login">`
+  // anchor, so we don't need to gate it on runtime-config — clicking
+  // it always navigates to the backend, which decides whether OIDC
+  // is configured for this deployment.
   const auth = $derived($authStore);
-  const oidcState = $derived($oidcConfigStore);
-  const showProfileMenu = $derived(auth.accessToken !== null);
-  const oidcKnownDisabled = $derived(oidcState.kind === 'ready' && oidcState.config === null);
-  const showLoginButton = $derived(!showProfileMenu && !oidcKnownDisabled);
+  const showProfileMenu = $derived(auth.user !== null);
+  const showLoginButton = $derived(!showProfileMenu);
 
   onMount(() => {
     // Probe once on app load. The store ignores 404s and keeps the
     // nav item hidden when no sheet exists.
     void refreshQrSheet();
-    // Resolve the OIDC config so the Login button can appear if
-    // configured. Errors are swallowed — the button just stays hidden.
-    void loadOidcConfig();
   });
 </script>
 

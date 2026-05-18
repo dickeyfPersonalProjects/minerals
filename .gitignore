@@ -14,6 +14,9 @@ junit.xml
 .env
 .env.local
 .env.*.local
+# dev-seed.sh writes this; carries OIDC_CLIENT_SECRET + OAUTH_STATE_HMAC_KEY
+# for the V2 BFF stack (mi-1d5i / mi-sap2).
+.env.bff
 
 # Frontend
 node_modules/
@@ -28,3 +31,4 @@ frontend/test-results/
 .idea/
 .vscode/
 *.swp
+.beads/
