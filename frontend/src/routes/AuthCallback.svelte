@@ -3,6 +3,9 @@
   import { replace as routerReplace } from 'svelte-spa-router';
   import { handleAuthCallback } from '../lib/oidc/auth';
 
+  // 'busy' covers both interactive sign-in and a silent-renewal
+  // round-trip; both resolve within a second on the happy path so the
+  // momentary "Signing you in…" copy is acceptable for either.
   type State = { kind: 'busy' } | { kind: 'error'; message: string };
 
   let state: State = $state({ kind: 'busy' });
