@@ -28,3 +28,4 @@ frontend/test-results/
 .idea/
 .vscode/
 *.swp
+.beads/

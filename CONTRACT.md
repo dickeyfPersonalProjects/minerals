@@ -2697,14 +2697,29 @@ downloads don't use presigned URLs in v1 — all in
 
 This section governs how the application identifies the current
 user, who can reach which routes, and how user identity flows
-through backend code. v1 has no real authentication — the rules
-below mostly describe the **shape** that v1 honors so real auth
-ships as a mechanical replacement, not a refactor.
+through backend code. V1 had no real authentication — the rules
+below describe the **shape** the codebase honors so the V2 auth
+implementation (now live, per `mi-1d5i`) was a mechanical wiring
+change, not a refactor.
 
-The reasoning lives in `docs/design/05-auth-slot.md`. The V2 BFF
-migration (backend-mediated OAuth + httpOnly session cookies) is
-governed by [`docs/design/auth-bff.md`](docs/design/auth-bff.md) —
-the canonical reference for that work (tracked by `mi-1d5i`).
+**V2 model: backend-for-frontend (BFF).** The Go backend is the OAuth
+client; the browser holds only an opaque HttpOnly session cookie. On
+`/auth/login` the backend 302s to Keycloak; on `/auth/callback` the
+backend exchanges the code for tokens via `client_id + client_secret`,
+persists access + refresh + id tokens server-side in `auth.sessions`,
+sets the cookie, and 302s the SPA back to its return-to. The session
+middleware (always on under `/api/v1/*`) resolves the cookie, refreshes
+the access token under a per-session mutex when due, and populates
+`auth.User` from the resolved session row. Writes carry an
+`X-CSRF-Token` header bound to the session's `csrf_token` column;
+stored-synchronizer CSRF middleware enforces.
+
+The historical reasoning lives in `docs/design/05-auth-slot.md`
+(V1 stub design). The canonical V2 BFF reference is
+[`docs/design/auth-bff.md`](docs/design/auth-bff.md) — cookie
+attributes, session table shape, middleware composition, CSRF
+contract, microservice-extraction boundary. This section stays
+high-level; consult the design doc for implementation depth.
 
 ## Reading the current user
 
@@ -2733,26 +2748,34 @@ the canonical reference for that work (tracked by `mi-1d5i`).
   auth identity provider lands, the struct grows; handlers that
   don't care about new fields stay unchanged.
 
-## Population: two middlewares, layered
+## Population: layered middlewares
 
-- **`auth.Auth`** populates `User` in the request context.
-  - v1 stub: always populates a fixed stub user (`ID =
-    00000000-0000-0000-0000-000000000001`, `Email =
-    overseer@minerals.local`).
-  - Real-auth (deferred): validate the bearer token / cookie /
-    OIDC session; populate from the validated claims; populate
-    nothing if no valid credentials present.
-- **`auth.RequireUser`** rejects requests that don't have a
-  `User` in context.
-  - v1: passes through (because `Auth` always populates).
-  - Real-auth: returns 401 with the error envelope when no user
-    is set, allowing through anonymously-allowable routes that
-    ran only `Auth`.
+- **`bff.SessionMiddleware`** wraps the entire mux when BFF auth is
+  configured. It reads the `minerals_session` cookie, looks up the
+  session row, refreshes the access token under a per-session mutex
+  when near expiry, touches `last_used_at` (debounced), and attaches
+  `auth.User` + `bff.Session` to the request context. Never 401s on
+  a bad or missing cookie — the route's per-operation chain decides
+  whether anonymous is acceptable.
+- **`bff.CSRFMiddleware`** runs on `/api/v1/*` only, under the session
+  middleware. For session-attached requests on non-safe methods it
+  constant-time-compares the `X-CSRF-Token` header against
+  `sess.CSRFToken`. Anonymous (no-session) requests pass through —
+  the route's auth requirements decide; bearer-token callers carry
+  no session and are unaffected.
+- **`auth.Auth`** (huma-level analogue) is a fallthrough: it honors
+  any user already populated by `SessionMiddleware`, falls back to
+  bearer-token validation for service-to-service callers that present
+  a JWT, and populates the stub user in tests where no verifier is
+  wired.
+- **`auth.RequireUser`** rejects requests that don't have a `User` in
+  context. Routes in the Optional() chain omit it; routes in the
+  Protected() chain include it.
 
-The two-middleware split is deliberate. It supports a future
-"public-but-personalized" route (e.g. a public specimen page
-that shows different chrome to a logged-in user) without
-re-shaping the middleware layer.
+The split — session/CSRF at the http layer, auth/require at the huma
+layer — preserves the "public-but-personalized" pattern (`/api/v1/csrf`,
+runtime-config, public-specimen reads) where a logged-in user is
+populated if present but anonymous is allowed.
 
 ## Route bucket placement (mandatory)
 
@@ -2766,18 +2789,19 @@ Currently:
 - `GET /readyz`
 - `GET /docs`
 - `GET /api/v1/openapi.json`
+- `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout`
+  (the OAuth handshake; never under `RequireUser` because login is
+  by definition pre-session)
+- `GET /api/v1/specimens/{id}` and its visibility-scoped peers,
+  where the handler enforces the per-row visibility check itself
+  (CONTRACT.md §13b)
 
-Future additions (when public sharing ships):
-- `GET /api/v1/specimens/{id}` — only when the specimen's
-  `visibility = 'public'` (the handler enforces this; the route
-  is in the public group)
+Public-group routes still run `SessionMiddleware` and the huma
+`Optional()` chain so a logged-in user is populated if present —
+but not `RequireUser`. This is the "public-but-personalized" pattern
+referenced in the design doc.
 
-Public-group routes do NOT receive the `Auth` middleware in v1.
-When real auth lands and the "public-but-personalized" pattern
-appears, public routes will run `Auth` (so a logged-in user is
-populated if present) but NOT `RequireUser`.
-
-### Protected group — `Auth` + `RequireUser`
+### Protected group — Optional/Protected chain + `RequireUser`
 
 Everything else in `/api/v1/...`. The default for any new
 endpoint is **protected**. A polecat adding a public-bucket
@@ -2855,50 +2879,70 @@ Email = overseer@minerals.local
   The migration is part of the same PR that flips on real
   auth.
 
-## Deferred to v2 (do not implement in v1)
+## What V2 ships (now live under `mi-1d5i`)
 
-- OIDC integration via the Keycloak operator (the design's
-  end-state for real auth)
-- Per-row authorization (visibility-based reads, ownership-
-  based writes if multi-user lands)
-- CSRF mitigation — depends on the chosen auth model; cookies
-  need it, bearer tokens in `Authorization` headers don't
-- Audit logging of who edited what and when (the `author_id`
-  and `updated_at` columns already capture enough; the read
-  side is the deferred work)
-- Field-level access control (e.g. price hidden from
-  non-owners)
-- A debug `?as=<email>` header in dev for impersonation
-  testing
-- Refresh-token / session-renewal handling
+- Keycloak OIDC via the BFF flow (this section's V2 model).
+- Per-row authorization via Casbin (the v2 RBAC subsection below).
+- Per-field visibility on `price`, `acquired_from`, `images`
+  (CONTRACT.md §13b).
+- CSRF defense via the stored-synchronizer middleware
+  ([`internal/auth/bff/csrf.go`](internal/auth/bff/csrf.go)) on every
+  cookie-authenticated write.
+- Refresh-token rotation handled server-side by the session middleware
+  (transparent to handlers and the SPA).
 
-A polecat MUST NOT add any of the above as a "cheap
-improvement." Each is a coordinated change that affects the
-threat model.
+## Still deferred
+
+- Audit logging of who edited what and when. The `author_id` and
+  `updated_at` columns capture enough state for forensic
+  reconstruction; a structured audit trail is the next-pass work.
+- A debug `?as=<email>` header in dev for impersonation testing. Use
+  the password-grant client (`minerals-test`) + bearer token instead
+  — that path still works for integration tests and CI smokes.
+- Multi-factor auth at the application layer (Keycloak handles MFA in
+  its own login form; the BFF design does not need to participate).
+- An `auth` microservice extraction. The V2 single-binary design
+  enforces the boundary that makes the extraction a cut, not a
+  rewrite — see `docs/design/auth-bff.md` §microservice-extraction.
+
+A polecat MUST NOT add any of the above as a "cheap improvement."
+Each is a coordinated change that affects the threat model.
 
 ## v2 — RBAC design (Keycloak + Casbin)
 
-This subsection documents the authorization model that ships with v2
-real auth. Polecats MUST NOT implement any of this in v1.
+This subsection documents the authorization model that ships with V2.
+Authentication is handled by the BFF flow above (see the section
+intro); RBAC sits on top of the populated `auth.User`.
 
 ### Identity source
 
-The Keycloak OIDC provider issues a JWT on successful login. The Go
-`auth.Auth` middleware validates the token signature against the Keycloak
-JWKS endpoint and populates an extended `User` struct:
+The Keycloak realm is the OIDC IdP. The BFF `/auth/callback` handler
+exchanges the authorization code for access + refresh + id tokens,
+stores them server-side in `auth.sessions`, and sets the HttpOnly
+`minerals_session` cookie. On every subsequent request the
+`bff.SessionMiddleware` resolves the cookie, refreshes the access
+token when due, and populates the `auth.User` struct from the
+session row joined with `users`:
 
 ```go
 type User struct {
-    ID    uuid.UUID  // mapped from JWT `sub`
-    Email string     // mapped from JWT `email`
-    Roles []string   // mapped from JWT realm roles claim
+    ID          uuid.UUID  // local users.id (resolved from JWT `sub` on first login)
+    Sub         string     // JWT `sub` claim, persisted in users.keycloak_sub
+    Email       string     // mirrored on the users row
+    DisplayName string     // set by the first-login profile flow (mi-2hf)
+    Pending     bool       // true until the first-login profile flow completes
+    Roles       []string   // realm roles attached to the session at create time
 }
 ```
 
-Requests with no valid JWT populate `User` with `Roles: []string{"anonymous"}`.
-`RequireUser` still guards protected routes. Public routes run `Auth`
-only — anonymous users are allowed through and the handler uses the
-`anonymous` role for permission checks.
+Requests with no session cookie reach handlers with a zero-valued
+`User`. `RequireUser` still guards protected routes. Public-bucket
+routes (per the route-bucket-placement section above) skip
+`RequireUser` and handlers may inspect `auth.FromContext` returning
+the empty user to mean "anonymous." Bearer-token callers
+(service-to-service, the password-grant test client) go through the
+fallthrough huma `auth.Auth` and surface the same shape — handlers
+do not distinguish.
 
 ### Permission string format
 

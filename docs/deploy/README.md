@@ -124,18 +124,6 @@ contract.
 | `OIDC_CLIENT_ID` | **yes** | `minerals-frontend` | Expected `aud` on bearer tokens (audience check only — no client secret). |
 | `OIDC_JWKS_URL` | no | _(leave unset in prod)_ | Override discovery only when the in-cluster issuer differs from the public one (dev-only escape hatch). |
 
-### SPA OIDC (ConfigMap patch — required for login)
-
-These are read by the backend and served to the SPA via
-`/api/v1/runtime-config`. The `PUBLIC_` prefix marks them as safe to
-ship to the browser.
-
-| Env var | Required | Example | Notes |
-|---|---|---|---|
-| `PUBLIC_OIDC_ISSUER_URL` | **yes** | `https://auth.example.com/realms/minerals` | Same value as `OIDC_ISSUER_URL` today. SPA uses it to discover the authorization endpoint. |
-| `PUBLIC_OIDC_CLIENT_ID` | **yes** | `minerals-frontend` | Public client id for the auth-code-with-PKCE flow. |
-| `PUBLIC_OIDC_REDIRECT_URI` | **yes** | `https://www.example.com/auth/callback` | Absolute callback URL. MUST match a `valid_redirect_uris` entry on the `minerals-frontend` Keycloak client. |
-
 ### Non-OIDC overlay-supplied config
 
 | Env var | Required | Example | Notes |
@@ -146,7 +134,7 @@ ship to the browser.
 
 ### Required secrets
 
-Three Secrets, all consumed by the deployment via `envFrom` /
+Four Secrets, all consumed by the deployment via `envFrom` /
 `secretKeyRef`. The full inventory (including auto-generated ones)
 lives in [`secrets.md`](./secrets.md).
 
@@ -154,10 +142,16 @@ lives in [`secrets.md`](./secrets.md).
 - `minerals-s3-creds` — `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
 - `minerals-pg-app` — CNPG-managed; supplies `DATABASE_URL` via the
   `uri` key. Never committed.
-
-**No Secret is required for OIDC.** The backend is a pure resource
-server — it validates JWTs against Keycloak's public JWKS and holds
-no `client_secret`.
+- `minerals-oidc-secret` — `OIDC_CLIENT_SECRET` (the confidential
+  `minerals-frontend` client secret from Terraform) and
+  `OAUTH_STATE_HMAC_KEY` (32-byte HMAC key for the BFF state
+  cookie). **Required for V2 BFF auth** — when missing or
+  blank, the BFF handlers stay unregistered and `/auth/login`
+  404s. SealedSecret stubs ship in `example/<env>/minerals-oidc-secret.yaml`
+  (mi-qnmy). The ciphertext is namespace-scoped — each env needs
+  its own sealing pass. See
+  [`keycloak.md`](./keycloak.md#wiring-the-frontend-client-secret-into-the-cluster)
+  for the secret-extraction-from-Terraform-output + kubeseal flow.
 
 ---
 
@@ -165,37 +159,48 @@ no `client_secret`.
 
 **Keycloak is required for login to work in any env.** The OIDC env
 vars above are not optional decorations — without a working Keycloak
-realm and the five `OIDC_*` / `PUBLIC_OIDC_*` keys set in the overlay
-ConfigMap patch, users cannot sign in.
+realm, the `OIDC_*` / `PUBLIC_OIDC_REDIRECT_URI` ConfigMap keys, AND
+the `minerals-oidc-secret` SealedSecret, users cannot sign in.
+
+V2 uses a backend-for-frontend (BFF) design — see
+[`../design/auth-bff.md`](../design/auth-bff.md) for the canonical
+reference. The browser never speaks OAuth; the backend exchanges the
+authorization code for tokens via `client_id + client_secret`,
+persists access + refresh + id tokens server-side, and sets an
+HttpOnly `minerals_session` cookie. Every write carries an
+`X-CSRF-Token` header bound to the session's stored secret.
 
 Follow [`keycloak.md`](./keycloak.md) for the full setup:
 
 - Per-env base + overlay for the Keycloak operator
   (`kustomize/base/keycloak/` + `example/<env>/keycloak/`).
 - Terraform module ([`terraform/keycloak/`](../../terraform/keycloak/))
-  that provisions the realm, the `minerals-frontend` client (with the
-  redirect URIs that must match `PUBLIC_OIDC_REDIRECT_URI`), the
-  `minerals-backend` client, and the devops roles.
+  provisions the realm, the `minerals-frontend` client (now
+  CONFIDENTIAL — `access_type = "CONFIDENTIAL"`, per `mi-qnmy`,
+  with `valid_redirect_uris` pointing at the backend's
+  `/auth/callback`), the `minerals-backend` client, and the devops
+  roles.
 - Wiring Terraform outputs (`realm_issuer`, `frontend_client_id`,
-  redirect URI pattern) into the ConfigMap patch values above.
+  `frontend_client_secret`, redirect URI pattern) into the ConfigMap
+  patch + `minerals-oidc-secret` SealedSecret.
 
-### Failure mode if OIDC vars are unset
+### Failure mode if OIDC vars or the secret are unset
 
-If any of the five `OIDC_*` / `PUBLIC_OIDC_*` keys are missing from
-the overlay ConfigMap patch, the backend still starts (the keys are
-not "required in prod" in `CONFIG.md` — the app degrades rather than
-crashes), but:
+If `OIDC_CLIENT_SECRET`, `OAUTH_STATE_HMAC_KEY`, or
+`PUBLIC_OIDC_REDIRECT_URI` is missing, the backend still starts
+(BFF auth is feature-gated — the app degrades rather than crashes),
+but:
 
-- `/api/v1/runtime-config` returns `{ oidc: null }`.
-- The SPA's `oidcState` becomes `{ kind: 'ready', config: null }`.
-- The Login button stays hidden — the SPA shows an "auth not
-  configured" hint in its place (added by mi-rvn so the broken state
-  is visible to operators instead of silently presenting a Login-less
-  page).
+- `/auth/login`, `/auth/callback`, `/auth/logout` are not registered
+  (404).
+- `/api/v1/csrf` returns 404.
+- The SPA's Login button still renders (it is a plain link to
+  `/auth/login`), but clicking it lands on a 404 page.
 
-If you deploy a new env and see no Login button, the OIDC ConfigMap
-patch is the first thing to check. The hint exists because this
-silent-failure mode (mi-rvn) burned a real operator.
+If you deploy a new env and see a 404 at `/auth/login`, the BFF env
+vars are the first thing to check: the boot log emits
+`bff auth: disabled (missing OIDC_CLIENT_SECRET / OAUTH_STATE_HMAC_KEY / PUBLIC_OIDC_REDIRECT_URI)`
+with a per-field present/absent breakdown.
 
 ---
 
