@@ -248,41 +248,35 @@ func New(deps Deps) http.Handler {
 
 	// Wrap the mux: SessionMW (when configured) runs first so cookie
 	// auth populates auth.User before huma operations evaluate their
-	// per-operation middleware; CSRFMW runs only on /api/v1/* writes
-	// for cookie-authenticated requests (bearer-token callers carry
-	// no session and pass through). Both default to no-ops when BFF
-	// is disabled — the legacy bearer-token chain stays intact.
+	// per-operation middleware; CSRFMW runs on every route under it
+	// (the middleware bypasses safe methods and anonymous-no-session
+	// requests internally, so /api/v1/* GETs, /auth/login, /auth/callback,
+	// the SPA fallback, and bearer-token-authenticated calls all pass
+	// through; cookie-authenticated unsafe methods — POSTs to /api/v1/*
+	// AND /auth/logout per the design doc — are enforced).
+	//
+	// /auth/logout going through CSRFMiddleware is belt-and-suspenders
+	// with the handler's own EnforceCSRFOnLogout gate: a misconfigured
+	// chain that mounts CSRFMW but not EnforceCSRFOnLogout (or vice
+	// versa) still fails closed on a CSRF-less logout.
+	//
+	// Both default to no-ops when BFF is disabled — the legacy
+	// bearer-token chain stays intact for unit tests that don't wire BFF.
 	var top http.Handler = mux
 	if deps.CSRFMW != nil {
-		top = scopeToPath("/api/v1/", deps.CSRFMW, top)
+		top = deps.CSRFMW(top)
 	}
 	if deps.SessionMW != nil {
 		top = deps.SessionMW(top)
 	}
 
-	// Apply public middleware to the entire mux. The /api/v1/*
-	// chain composes with auth wrappers above, preserving the
-	// historical order: Recovery → RequestID → SecHeaders → CSP →
-	// Logging → [SessionMW → CSRFMW (on /api/v1/* writes) →]
-	// [auth.Auth → auth.RequireUser →] handler.
+	// Apply public middleware to the entire mux. Full chain order:
+	// Recovery → RequestID → SecHeaders → CSP → Logging →
+	// [SessionMW → CSRFMW →] [huma per-operation chain →] handler.
 	publicMW := []func(http.Handler) http.Handler{
 		Recovery, RequestID, SecurityHeaders, CSP(deps.CSPIssuerOrigin), Logging,
 	}
 	return Chain(top, publicMW...)
-}
-
-// scopeToPath wraps next with mw only when the request URL has the
-// given prefix. Used to limit CSRFMiddleware to /api/v1/* without
-// touching /auth/* or the SPA fallback.
-func scopeToPath(prefix string, mw func(http.Handler) http.Handler, next http.Handler) http.Handler {
-	wrapped := mw(next)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if len(r.URL.Path) >= len(prefix) && r.URL.Path[:len(prefix)] == prefix {
-			wrapped.ServeHTTP(w, r)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 // healthzOutput uses a body callback so the handler can write the

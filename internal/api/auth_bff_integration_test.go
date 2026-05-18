@@ -352,6 +352,151 @@ func TestIntegration_BFF_AuthRoundTrip(t *testing.T) {
 	}
 }
 
+// TestIntegration_BFF_LogoutRequiresCSRF asserts that /auth/logout
+// fails closed when CSRFMiddleware fires on it without an
+// X-CSRF-Token header. The mayor's review note on mi-sap2 called this
+// out explicitly: wiring /auth/logout into the CSRF-protected chain
+// is belt-and-suspenders with the logout handler's own
+// EnforceCSRFOnLogout gate — a misconfigured chain that mounts one
+// but not the other should still fail closed on a CSRF-less logout.
+// The middleware sees the session cookie attached by SessionMiddleware
+// and rejects the POST before the logout handler runs.
+func TestIntegration_BFF_LogoutRequiresCSRF(t *testing.T) {
+	pool := scopedDB(t)
+	users := db.NewUserPostgres(pool)
+	sessions := bff.NewPostgresResolver(pool)
+
+	const (
+		sub     = "kc-sub-logout-csrf"
+		email   = "logout-csrf@example.invalid"
+		hmacKey = "0123456789abcdef0123456789abcdef"
+	)
+	oauth := &stubOAuthClient{
+		sub:                   sub,
+		email:                 email,
+		accessTokenExpiresIn:  5 * time.Minute,
+		refreshTokenExpiresIn: 30 * 24 * time.Hour,
+		expectCode:            "code-logout-csrf",
+	}
+	enforcer, err := authz.NewEnforcer(nil, db.NewSharesLookup(pool))
+	if err != nil {
+		t.Fatalf("new enforcer: %v", err)
+	}
+	if err := authz.SeedDefaultPolicies(enforcer); err != nil {
+		t.Fatalf("seed policies: %v", err)
+	}
+
+	userResolver := func(ctx context.Context, sub, email string) (uuid.UUID, error) {
+		row, err := api.ResolveOrCreateUser(ctx, users, auth.User{Sub: sub, Email: email})
+		if err != nil {
+			return uuid.Nil, err
+		}
+		if row.Status == domain.UserStatusPending {
+			now := time.Now().UTC().Truncate(time.Microsecond)
+			if err := users.MarkActive(ctx, nil, row.ID, "logout-csrf", now); err != nil {
+				return uuid.Nil, err
+			}
+		}
+		return row.ID, nil
+	}
+
+	cfg := bff.HandlerConfig{
+		// EnforceCSRFOnLogout intentionally left FALSE — the
+		// middleware is the only line of defense in this case, and the
+		// test proves the chain still fails closed.
+		RedirectURI:        "http://localhost/auth/callback",
+		StateHMACKey:       []byte(hmacKey),
+		SessionAbsoluteMax: 7 * 24 * time.Hour,
+		Cookie: bff.CookieConfig{
+			Path:     "/",
+			Secure:   false,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   14 * 24 * time.Hour,
+		},
+		StateCookieSecure:   false,
+		EnforceCSRFOnLogout: false,
+	}
+	handlers, err := bff.NewHandlers(cfg, bff.HandlerDeps{
+		OAuth: oauth, Sessions: sessions, Users: userResolver,
+	})
+	if err != nil {
+		t.Fatalf("new handlers: %v", err)
+	}
+	sessionMW := bff.SessionMiddleware(bff.MiddlewareDeps{
+		Sessions: sessions,
+		OAuth:    oauth,
+		Users:    users,
+		CookieConfig: bff.CookieConfig{
+			Path:     "/",
+			Secure:   false,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   14 * 24 * time.Hour,
+		},
+		IdleTimeout: 24 * time.Hour,
+	})
+	h := api.New(api.Deps{
+		Specimens:  db.NewSpecimenPostgres(pool),
+		Collectors: db.NewCollectorPostgres(pool),
+		Enforcer:   enforcer,
+		Users:      users,
+		Verifier:   rejectingVerifier{},
+		BFFAuth:    handlers,
+		SessionMW:  sessionMW,
+		CSRFMW:     bff.CSRFMiddleware,
+	})
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar: %v", err)
+	}
+	client := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	// Establish a session via login + callback (state cookie path
+	// is /auth, so the jar lookup uses /auth/callback below).
+	resp, err := client.Get(srv.URL + "/auth/login")
+	if err != nil {
+		t.Fatalf("/auth/login: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	loc, _ := url.Parse(resp.Header.Get("Location"))
+	state := loc.Query().Get("state")
+
+	cbURL := srv.URL + "/auth/callback?code=" + oauth.expectCode + "&state=" + state
+	resp, err = client.Get(cbURL)
+	if err != nil {
+		t.Fatalf("/auth/callback: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("/auth/callback status = %d", resp.StatusCode)
+	}
+
+	// POST /auth/logout WITHOUT X-CSRF-Token. CSRFMiddleware should
+	// reject with 403 csrf_missing before the logout handler runs.
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/auth/logout", nil)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /auth/logout (no csrf): %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("logout without CSRF: status = %d body=%s, want 403", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "csrf_missing") {
+		t.Errorf("logout without CSRF: body = %s, want csrf_missing", body)
+	}
+}
+
 // TestIntegration_BFF_AnonymousCSRFEndpoint asserts the
 // authentication gate on /api/v1/csrf: with no session cookie the
 // endpoint returns 401, not the token (design §csrf §subtle-choices:
