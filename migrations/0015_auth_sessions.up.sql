@@ -30,19 +30,15 @@
 
 BEGIN;
 
--- `CREATE SCHEMA IF NOT EXISTS` carries a documented TOCTOU race
--- against `pg_namespace_nspname_index` when two backends apply the
--- same migration concurrently — surfaces in integration tests where
--- each per-test schema runs its own migrate-up against the same DB.
--- Wrapping the create in a DO block with a `duplicate_schema`
--- exception handler is the standard pattern.
-DO $$
-BEGIN
-    CREATE SCHEMA auth;
-EXCEPTION WHEN duplicate_schema THEN
-    NULL;
-END
-$$;
+-- `auth` is a database-global schema (schema names ignore
+-- search_path), so every per-test search_path schema that re-runs
+-- this migration hits the same `auth`. `IF NOT EXISTS` is the
+-- design-doc-specified idempotency clause. An earlier DO-block /
+-- `EXCEPTION WHEN duplicate_schema` form was tried but did not
+-- catch the `unique_violation` (SQLSTATE 23505) PostgreSQL raises
+-- when the underlying `pg_namespace_nspname_index` insert fails;
+-- `IF NOT EXISTS` short-circuits before any insert is attempted.
+CREATE SCHEMA IF NOT EXISTS auth;
 
 CREATE TABLE IF NOT EXISTS auth.sessions (
     id                       BYTEA       PRIMARY KEY,
