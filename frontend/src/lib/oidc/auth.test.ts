@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import {
   __resetAuthStore,
+  attemptSilentRenewal,
   authStore,
   beginLogin,
   beginLogout,
@@ -43,10 +44,15 @@ class MemoryStorage implements Storage {
 
 beforeEach(() => {
   __resetAuthStore();
+  // Tests that don't pass an explicit localStorage land on jsdom's
+  // window.localStorage, which persists across cases — wipe it so
+  // residual had_session markers don't leak between tests.
+  window.localStorage.clear();
 });
 
 afterEach(() => {
   __resetAuthStore();
+  window.localStorage.clear();
   vi.restoreAllMocks();
 });
 
@@ -186,6 +192,18 @@ describe('beginLogout', () => {
     expect(getAccessToken(() => 0)).toBeNull();
     expect(assign).toHaveBeenCalledWith('https://www.example.com/');
   });
+
+  it('clears the had-session marker so the next boot does not silently renew', async () => {
+    const local = new MemoryStorage();
+    local.setItem('minerals.oidc.had_session', '1');
+    await beginLogout({
+      config,
+      locationAssign: vi.fn(),
+      appUrl: 'https://www.example.com/',
+      localStorage: local,
+    });
+    expect(local.getItem('minerals.oidc.had_session')).toBeNull();
+  });
 });
 
 describe('handleAuthCallback', () => {
@@ -315,5 +333,210 @@ describe('handleAuthCallback', () => {
         fetch: vi.fn() as unknown as typeof fetch,
       }),
     ).rejects.toThrow(/verifier/i);
+  });
+
+  it('sets the had-session marker on a successful interactive exchange', async () => {
+    const storage = new MemoryStorage();
+    const local = new MemoryStorage();
+    seed(storage);
+    const fetchStub = vi.fn(async () => tokenJson(200, { access_token: 'at-1', expires_in: 60 }));
+    const result = await handleAuthCallback(new URLSearchParams({ code: 'C', state: 's-1' }), {
+      config,
+      sessionStorage: storage,
+      localStorage: local,
+      fetch: fetchStub as unknown as typeof fetch,
+    });
+    expect(local.getItem('minerals.oidc.had_session')).toBe('1');
+    expect(result.silentRenewal).toBe(false);
+    expect(result.sessionEnded).toBe(false);
+  });
+
+  it('flags silentRenewal when the silent flag was set, and still mints the token', async () => {
+    const storage = new MemoryStorage();
+    const local = new MemoryStorage();
+    seed(storage);
+    storage.setItem('minerals.oidc.silent_renewal', '1');
+    const fetchStub = vi.fn(async () => tokenJson(200, { access_token: 'at-1', expires_in: 60 }));
+    const result = await handleAuthCallback(new URLSearchParams({ code: 'C', state: 's-1' }), {
+      config,
+      sessionStorage: storage,
+      localStorage: local,
+      fetch: fetchStub as unknown as typeof fetch,
+    });
+    expect(result.silentRenewal).toBe(true);
+    expect(result.sessionEnded).toBe(false);
+    expect(getAccessToken()).toBe('at-1');
+    expect(storage.getItem('minerals.oidc.silent_renewal')).toBeNull();
+  });
+
+  it('treats login_required on the silent path as a clean session-end (no throw)', async () => {
+    const storage = new MemoryStorage();
+    const local = new MemoryStorage();
+    local.setItem('minerals.oidc.had_session', '1');
+    storage.setItem('minerals.oidc.silent_renewal', '1');
+    storage.setItem('minerals.oidc.state', 's-1');
+    storage.setItem('minerals.oidc.code_verifier', 'v-1');
+    storage.setItem('minerals.oidc.return_to', '#/specimens/abc');
+    const result = await handleAuthCallback(new URLSearchParams({ error: 'login_required' }), {
+      config,
+      sessionStorage: storage,
+      localStorage: local,
+      fetch: vi.fn() as unknown as typeof fetch,
+    });
+    expect(result).toEqual({
+      returnTo: '#/specimens/abc',
+      silentRenewal: true,
+      sessionEnded: true,
+    });
+    expect(local.getItem('minerals.oidc.had_session')).toBeNull();
+    expect(getAccessToken()).toBeNull();
+  });
+
+  it('still throws on login_required when NOT a silent-renewal callback', async () => {
+    const storage = new MemoryStorage();
+    seed(storage); // no silent flag
+    await expect(
+      handleAuthCallback(
+        new URLSearchParams({ error: 'login_required', error_description: 'login required' }),
+        {
+          config,
+          sessionStorage: storage,
+          fetch: vi.fn() as unknown as typeof fetch,
+        },
+      ),
+    ).rejects.toThrow(/login required/);
+  });
+});
+
+describe('attemptSilentRenewal', () => {
+  it('skips when no prior session marker exists (anonymous browser)', async () => {
+    const local = new MemoryStorage();
+    const session = new MemoryStorage();
+    const assign = vi.fn();
+    const outcome = await attemptSilentRenewal({
+      config,
+      sessionStorage: session,
+      localStorage: local,
+      locationAssign: assign,
+      currentHash: '#/specimens',
+    });
+    expect(outcome).toEqual({ kind: 'skipped', reason: 'no-prior-session' });
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it('skips when already authenticated', async () => {
+    const local = new MemoryStorage();
+    const session = new MemoryStorage();
+    local.setItem('minerals.oidc.had_session', '1');
+    setAccessToken('tok-x', 600, () => 0);
+    const assign = vi.fn();
+    const outcome = await attemptSilentRenewal({
+      config,
+      sessionStorage: session,
+      localStorage: local,
+      locationAssign: assign,
+      currentHash: '#/specimens',
+    });
+    expect(outcome).toEqual({ kind: 'skipped', reason: 'already-authenticated' });
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it('skips when the current route IS the auth callback (avoid steal/loop)', async () => {
+    const local = new MemoryStorage();
+    const session = new MemoryStorage();
+    local.setItem('minerals.oidc.had_session', '1');
+    const assign = vi.fn();
+    const outcome = await attemptSilentRenewal({
+      config,
+      sessionStorage: session,
+      localStorage: local,
+      locationAssign: assign,
+      currentHash: '#/auth/callback?code=C&state=S',
+    });
+    expect(outcome).toEqual({ kind: 'skipped', reason: 'callback-in-progress' });
+    expect(assign).not.toHaveBeenCalled();
+    // and the silent flag was NOT written — would interfere with the
+    // interactive callback that owns this round-trip
+    expect(session.getItem('minerals.oidc.silent_renewal')).toBeNull();
+  });
+
+  it('skips when an interactive login is mid-flight (verifier still present)', async () => {
+    const local = new MemoryStorage();
+    const session = new MemoryStorage();
+    local.setItem('minerals.oidc.had_session', '1');
+    session.setItem('minerals.oidc.code_verifier', 'v-existing');
+    const assign = vi.fn();
+    const outcome = await attemptSilentRenewal({
+      config,
+      sessionStorage: session,
+      localStorage: local,
+      locationAssign: assign,
+      currentHash: '#/specimens',
+    });
+    expect(outcome).toEqual({ kind: 'skipped', reason: 'interactive-login-in-flight' });
+    expect(assign).not.toHaveBeenCalled();
+    // verifier untouched — the in-flight interactive flow still owns it
+    expect(session.getItem('minerals.oidc.code_verifier')).toBe('v-existing');
+  });
+
+  it('skips when OIDC is not configured', async () => {
+    const local = new MemoryStorage();
+    const session = new MemoryStorage();
+    local.setItem('minerals.oidc.had_session', '1');
+    const assign = vi.fn();
+    const outcome = await attemptSilentRenewal({
+      config: null,
+      sessionStorage: session,
+      localStorage: local,
+      locationAssign: assign,
+      currentHash: '#/specimens',
+    });
+    expect(outcome).toEqual({ kind: 'skipped', reason: 'not-configured' });
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it('redirects to /auth?prompt=none with PKCE params and stashes the silent flag', async () => {
+    const local = new MemoryStorage();
+    const session = new MemoryStorage();
+    local.setItem('minerals.oidc.had_session', '1');
+    const assign = vi.fn();
+    const outcome = await attemptSilentRenewal({
+      config,
+      sessionStorage: session,
+      localStorage: local,
+      locationAssign: assign,
+      currentHash: '#/specimens/abc',
+    });
+    expect(outcome).toEqual({ kind: 'redirecting' });
+    expect(assign).toHaveBeenCalledOnce();
+    const url = new URL(assign.mock.calls[0]![0] as string);
+    expect(url.origin + url.pathname).toBe(
+      'https://auth.example.com/realms/minerals/protocol/openid-connect/auth',
+    );
+    expect(url.searchParams.get('prompt')).toBe('none');
+    expect(url.searchParams.get('response_type')).toBe('code');
+    expect(url.searchParams.get('redirect_uri')).toBe('https://www.example.com/auth/callback');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(url.searchParams.get('code_challenge')?.length).toBeGreaterThan(0);
+    expect(url.searchParams.get('state')?.length).toBeGreaterThan(0);
+    // sessionStorage seeded for the callback
+    expect(session.getItem('minerals.oidc.code_verifier')?.length).toBeGreaterThan(0);
+    expect(session.getItem('minerals.oidc.state')).toBe(url.searchParams.get('state'));
+    expect(session.getItem('minerals.oidc.return_to')).toBe('#/specimens/abc');
+    expect(session.getItem('minerals.oidc.silent_renewal')).toBe('1');
+  });
+
+  it('defaults returnTo to #/ when there is no current hash', async () => {
+    const local = new MemoryStorage();
+    const session = new MemoryStorage();
+    local.setItem('minerals.oidc.had_session', '1');
+    await attemptSilentRenewal({
+      config,
+      sessionStorage: session,
+      localStorage: local,
+      locationAssign: vi.fn(),
+      currentHash: '',
+    });
+    expect(session.getItem('minerals.oidc.return_to')).toBe('#/');
   });
 });
