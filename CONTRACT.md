@@ -724,19 +724,24 @@ Five kinds of tags coexist on the same image stream:
   all sharing the same buildx manifest. The gitops staging
   environment pulls this tag.
 - **`prod`** — manual promotion only. Moved by the
-  `Promote to :prod` workflow (`.github/workflows/promote-prod.yml`,
-  `workflow_dispatch`-only), which retags from a source tag
-  (default `staging`) to `:prod` via
+  `Promote to prod` workflow (`.github/workflows/promote-prod.yml`,
+  `workflow_dispatch`-only), which atomically moves the `prod` git
+  tag AND retags the GHCR image as `:prod` (and `:vX.Y.Z`) via
   `docker buildx imagetools create` — a manifest-only operation
   that preserves the original image (no rebuild, no digest churn,
   attestations intact). The gitops production environment pulls
-  this tag.
+  this tag and pins manifests to the matching `prod` git tag, so
+  manifests and image always move together (mi-04b1). See
+  [`docs/deploy/README.md` § Promoting to prod](docs/deploy/README.md#promoting-to-prod)
+  for the operator runbook.
 
 A single image build typically receives multiple tags simultaneously
-(e.g. a `main` build gets `latest`, `staging`, and `sha-abc1234`;
-a release commit gets `v0.3.0`, `sha-abc1234`, and `latest`).
-Promotion to `:prod` does NOT rebuild — it republishes the same
-manifest under a new name.
+(e.g. a `main` build gets `latest`, `staging`, and `sha-abc1234`).
+Versioned release tags (`vX.Y.Z`) are stamped onto an existing
+image manifest by the `Promote to prod` workflow at promotion time
+— they are NOT produced by an independent build. Promotion does
+NOT rebuild; it republishes the source commit's `sha-<short>`
+manifest under the `prod` and `vX.Y.Z` names.
 
 ## Versioning scheme
 
@@ -788,37 +793,50 @@ single-arch v1 (amd64 only; multi-arch is deferred per design §7).
 
 ## Release process (cutting a versioned release)
 
-In normal operation, releases are cut by **CI on tag push** (see
-§5). The manual flow below remains as a fallback when CI is broken
-or unavailable; it is not the default path.
+In normal operation, releases are cut by the **`Promote to prod`
+workflow** (`workflow_dispatch` in the GitHub Actions tab; see
+§5.3 below and the operator runbook in
+[`docs/deploy/README.md` § Promoting to prod](docs/deploy/README.md#promoting-to-prod)).
+
+The promote workflow does not rebuild — it retags an image the
+merge-to-main CI already published under `:sha-<short>`. There is
+NO `git tag v0.3.0 && git push origin v0.3.0` step; the workflow
+itself stamps both the git tag and the image tag atomically. Pushing
+a `v*` git tag by hand does nothing — no workflow watches for it.
 
 1. **Confirm the change set is releasable.** All beads being shipped
    are closed; CONTRACT.md and design docs are up to date; tests
-   pass on `main`.
+   pass on `main`; the merge-to-main CI has published a
+   `:sha-<short>` image for the candidate commit.
 
 2. **Bump the version** in any place it appears as a literal
    (e.g. a `CHANGELOG.md` if the project gets one). For v1 there is
    no `CHANGELOG.md` yet — the git history is the changelog.
 
-3. **Tag the commit:**
-   ```bash
-   git tag -a v0.3.0 -m "Release v0.3.0"
-   git push origin v0.3.0
-   ```
-   Tags MUST be annotated (`-a`), never lightweight. They MUST be
-   signed if the operator's `git` config has signing keys set up.
+3. **Run the workflow.** In the GitHub Actions tab → **Promote to
+   prod** → **Run workflow**, with:
+   - `version`: the new tag, e.g. `v0.3.0` (matches
+     `v<MAJOR>[.<MINOR>[.<PATCH>]][-suffix]`).
+   - `source_ref`: blank (defaults to `main` HEAD) or a specific
+     commit SHA / ref.
+   - `force`: leave `false` for a new release. Set `true` only when
+     deliberately re-stamping an existing version tag at a different
+     commit (rare; usually wrong — ship `vX.Y.Z+1` instead).
+   - `dry_run`: leave `false` for the real cut. Use `true` first if
+     you want to confirm pre-flight (source image exists, tag
+     conflict status) without moving anything.
 
-4. **CI builds and pushes the image** in response to the tag (see
-   §5). Verify the workflow ran and the image landed on ghcr. If CI
-   is unavailable, fall back to the manual `make image-release
-   VERSION=v0.3.0`.
+4. **Verify on GHCR.** The workflow summary shows the resulting
+   digests. The image is visible at
+   `ghcr.io/dickeyfpersonalprojects/minerals:v0.3.0` and
+   `:prod`, both at the same manifest digest as `:sha-<short>`.
 
-5. **Verify on ghcr.** Image visible at
-   `ghcr.io/dickeyfpersonalprojects/minerals:v0.3.0`, manifest sane,
-   size in the expected ballpark (~20-30 MB per design §7.4).
-
-6. **Deploy.** Cluster manifest references `v0.3.0`. The migration
-   Job runs first, then the app rolls.
+5. **Bump the gitops repo** if your Flux setup does not auto-discover
+   tag updates. The prod overlay pins
+   `spec.ref.tag: prod` (or `vX.Y.Z` for an immutable reference) on
+   the Flux `Kustomization`, with the Kustomize image patch set to
+   `newTag: prod` (or `vX.Y.Z`). The migration Job runs first on
+   reconcile, then the app rolls.
 
 ## What MUST stay true across builds
 
@@ -846,11 +864,11 @@ you what to do; that section tells you why.
 # §5 — Continuous integration (GitHub Actions)
 
 The repo's CI runs on **GitHub Actions**, gating PRs and automating
-container image publication. Four workflows make up v1's contract:
-three automated build/test workflows plus one manual promotion
-workflow. A polecat MAY assume CI is in place; treating "but it
-works on my machine" as a defense is not acceptable for a
-merge-ready PR.
+container image publication. Three workflows make up v1's contract:
+two automated build/test workflows plus one manual promotion
+workflow that ships releases. A polecat MAY assume CI is in place;
+treating "but it works on my machine" as a defense is not
+acceptable for a merge-ready PR.
 
 ## The workflows
 
@@ -898,49 +916,65 @@ makes test failure on `main` rare (PRs can't merge with red checks),
 but `main` builds still re-run the suite as a belt-and-suspenders
 check against flaky-on-merge issues.
 
-### 5.3 — Release tag build (`.github/workflows/release.yml`)
-
-Triggered: on push of any git tag matching `v*` (e.g. `v0.3.0`,
-`v1.0.0`, `v1.2.3-rc.1`).
-
-Steps:
-- Run the full test suite
-- Build the Docker image
-- Tag as **`vX.Y.Z`** AND `sha-{short}` AND `latest`, all three
-- Push to ghcr
-
-Image tagging policy follows §4 — `vX.Y.Z` tags are immutable; if a
-release is broken, ship `vX.Y.Z+1` rather than retagging.
-
-This workflow is the default path for releases. The
-`make image-release` Makefile target stays, but only as a fallback
-when CI is broken or unavailable.
-
-### 5.4 — Production promotion (`.github/workflows/promote-prod.yml`)
+### 5.3 — Production promotion (`.github/workflows/promote-prod.yml`)
 
 Triggered: **`workflow_dispatch` only.** Never on push, PR, or tag.
 
-Inputs:
-- `from_tag` — string, default `staging`. Allows promoting from any
-  source tag (a future test might promote a specific `sha-...` tag
-  if the staging tag is suspect).
+This is also the **release workflow**. There is no separate
+release-tag build — versioned tags are stamped onto an existing
+`:sha-<short>` manifest at promotion time, alongside the `prod`
+git+image tag move. The previous `release.yml` (which built on
+`v*` git-tag push) was retired in mi-04b1 to close the
+manifest/image drift class of bug: shipping the image without
+also pinning the manifests at the matching commit caused prod
+outages when probe/port/init-container shapes evolved on `main`.
+
+Inputs (see [`docs/deploy/README.md` § Promoting to prod](docs/deploy/README.md#promoting-to-prod)
+for the operator runbook):
+
+- `version` (string, required) — e.g. `v1.0.2`. Validated against
+  `v<MAJOR>[.<MINOR>[.<PATCH>]][-suffix]`.
+- `source_ref` (string, default empty = `main` HEAD) — commit or
+  ref to promote.
+- `force` (boolean, default `false`) — required `true` to overwrite
+  an existing version tag pointing at a different commit. `vX.Y.Z`
+  tags are conceptually immutable (§4); `force` exists for the rare
+  legitimate case (e.g. correcting a botched stamp before anyone
+  has pulled it).
+- `dry_run` (boolean, default `false`) — runs validation +
+  source-image existence check, then exits without moving any tag.
 
 Steps:
-- Log in to ghcr via the runner's built-in `GITHUB_TOKEN`
-- Inspect the source manifest digest
+- Validate the version string.
+- Check out the source ref with full tag history.
+- Resolve the commit SHA + short SHA.
+- Check whether the version tag already exists; fail unless
+  `force=true` or it already points at the target commit.
+- Log in to ghcr via `GITHUB_TOKEN`.
+- Inspect `${IMAGE}:sha-${short}` to confirm the merge-to-main
+  CI published an image for the source commit; capture its digest.
+- Configure git identity (`github-actions[bot]`).
+- Locally `git tag -f ${VERSION} ${SHA}` and `git tag -f prod
+  ${SHA}`.
+- `git push --atomic --force origin refs/tags/${VERSION}
+  refs/tags/prod` — either both refs update remotely or neither
+  does.
 - `docker buildx imagetools create -t ${IMAGE}:prod
-  ${IMAGE}:${from_tag}` — manifest-only retag (no pull, no rebuild,
-  no re-push of layers; attestations and any multi-manifest
-  structure are preserved)
-- Inspect the `:prod` manifest digest after retag and write a job
-  summary with source tag, source digest, prod digest, and a
-  match check (fails the job if digests diverge)
+  -t ${IMAGE}:${VERSION} ${IMAGE}:sha-${short}` — manifest-only
+  retag (no pull, no rebuild; attestations and multi-arch manifest
+  structure are preserved).
+- Inspect the `:prod` and `:${VERSION}` manifest digests after
+  retag; fail the job if either diverges from the source digest.
+- Write a job summary covering version, commit, source digest,
+  `force`, `dry_run`, and a gitops reminder.
 
-The workflow declares `permissions: { packages: write }` explicitly
-because default token permissions vary by repo settings.
+The workflow declares `permissions: { contents: write, packages:
+write }` explicitly: `contents` to push the git tags, `packages`
+to retag the image. Default token permissions vary by repo
+settings, so the workflow pins what it needs.
 
-This workflow is intentionally manual in v1 — there is no automated
-gating from staging into prod. A future bead may add a
+This workflow is intentionally manual in v1 — there is no
+automated gating from staging into prod. A future bead may add a
 staging-test gate before promotion, but that's out of scope here.
 
 ## Branch protection
@@ -1025,9 +1059,13 @@ paper over it.
   branch. Re-merge. Don't push a "fix" directly to `main` to skip
   the PR review (branch protection should make that impossible
   anyway, but the rule stands).
-- **Red on a release tag build**: the tag is already pushed but
-  the image is not. Ship `vX.Y.Z+1` after the fix; do NOT delete
-  and re-push the broken tag.
+- **Red on a `Promote to prod` run**: the workflow is atomic across
+  the two git refs (`--atomic` push) and the two image tags (a
+  single `buildx imagetools create` call). A failure in the first
+  half (git push) leaves nothing moved; a failure in the second
+  half (image retag) leaves the git tags moved but the image tags
+  not — investigate and re-run rather than rolling forward to a
+  new version.
 - **Flaky CI**: same rule as flaky tests (§9) — fix it or delete
   it. No retry policy.
 
