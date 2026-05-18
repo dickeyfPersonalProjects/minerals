@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
+  import AuthedImage from './photos/AuthedImage.svelte';
 
   type LightboxPhotoKind = 'visible' | 'uv_sw' | 'uv_mw' | 'uv_lw' | 'other';
   interface Props {
@@ -145,7 +146,7 @@
     <figure
       class="pointer-events-none relative z-10 flex max-h-full max-w-full flex-col items-center gap-3"
     >
-      <img
+      <AuthedImage
         src={`/api/v1/photos/${current.id}/display`}
         alt={current.alt}
         class="max-h-[85vh] max-w-full rounded-md object-contain shadow-xl"
