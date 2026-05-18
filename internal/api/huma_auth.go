@@ -335,8 +335,17 @@ func writeHumaError(ctx huma.Context, status int, code, msg string) {
 func writeHumaErrorDetails(
 	ctx huma.Context, status int, code, msg string, details map[string]any,
 ) {
-	ctx.SetStatus(status)
+	// SetHeader MUST run before SetStatus: the humago adapter's
+	// SetStatus commits the response by calling ResponseWriter.WriteHeader,
+	// freezing headers in place. Headers set after that point are
+	// dropped, the response goes out with no Content-Type, and Go's
+	// net/http server falls back to text/plain (since X-Content-Type-Options:
+	// nosniff is also set by SecurityHeaders, the browser refuses to
+	// reinterpret the body either). The frontend wrapper's envelope
+	// parser bails on non-JSON content-type — so a 403 with a redirect
+	// hint silently turns into a generic "HTTP 403" toast (mi-xv4y).
 	ctx.SetHeader("Content-Type", "application/json; charset=utf-8")
+	ctx.SetStatus(status)
 	body := errorEnvelope{Error: errorBody{Code: code, Message: msg, Details: details}}
 	if err := json.NewEncoder(ctx.BodyWriter()).Encode(body); err != nil {
 		slog.ErrorContext(ctx.Context(), "auth: write error envelope failed", "err", err)

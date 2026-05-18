@@ -384,6 +384,55 @@ func TestResolver_FirstLoginCreatesPendingAndGates(t *testing.T) {
 	}
 }
 
+// TestRequireCompleteProfile_ContentTypeIsJSON guards the §10 error
+// envelope's Content-Type on a real net/http response (not the
+// recorder used elsewhere in this file). httptest.ResponseRecorder
+// doesn't model net/http's "headers freeze when WriteHeader is
+// called" behavior, so a SetStatus-then-SetHeader bug looks fine
+// through a recorder; only a real server surfaces it (mi-xv4y).
+// The SPA wrapper's `extractRedirect` bails on non-JSON bodies and
+// SecurityHeaders pins `X-Content-Type-Options: nosniff`, so a
+// text/plain default would silently swallow the profile-setup
+// redirect as a generic "HTTP 403" toast.
+func TestRequireCompleteProfile_ContentTypeIsJSON(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	srv := httptest.NewServer(New(Deps{Users: repo, Collectors: newStubCollectorRepo()}))
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/api/v1/collectors")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d body = %s", resp.StatusCode, string(body))
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json prefix", ct)
+	}
+	// And the body is the §10 envelope so the SPA can pull the
+	// `details.redirect` hint out — proving the JSON Content-Type
+	// matches the actual payload shape.
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	var got errorEnvelope
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal envelope: %v (body=%q)", err, string(body))
+	}
+	if got.Error.Code != "profile_setup_required" {
+		t.Errorf("code = %q, want profile_setup_required", got.Error.Code)
+	}
+	if r, _ := got.Error.Details["redirect"].(string); r != ProfileSetupPath {
+		t.Errorf("details.redirect = %q, want %q", r, ProfileSetupPath)
+	}
+}
+
 func TestResolver_RaceWinnerWins(t *testing.T) {
 	t.Parallel()
 	// Two requests race; both find no row and try to Create. The
