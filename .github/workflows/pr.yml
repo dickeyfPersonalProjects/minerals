@@ -279,9 +279,8 @@ jobs:
   #   2. Real-browser PKCE round-trip — Playwright drives a headless
   #      Chromium through Login → Keycloak form → /auth/callback →
   #      token exchange → logout (mi-dwx). PRIMARY user-facing-flow
-  #      coverage. Catches SPA routing (mi-0ag), CSP (mi-cl1),
-  #      runtime-config gating (mi-rvn), and everything else only a
-  #      real browser exercises.
+  #      coverage. Catches SPA routing (mi-0ag), CSP (mi-cl1), and
+  #      everything else only a real browser exercises.
   #
   # Folded into one job so both halves share the compose stack
   # (keycloak cold start + terraform apply happen once).
@@ -381,77 +380,6 @@ jobs:
           docker compose --profile keycloak ps >&2 || true
           docker compose --profile keycloak logs app >&2 || true
           exit 1
-
-      - name: Backend serves anonymous /api/v1/runtime-config with OIDC block (mi-rvn)
-        # The SPA's Login button is gated on an anonymous GET to
-        # /api/v1/runtime-config returning a non-null `oidc` object —
-        # this is what tells the navbar that login is wired up. If the
-        # endpoint either 401s anonymous callers or omits the oidc
-        # block, the Login button never renders and users have no way
-        # to authenticate. Assert both: 200 + `oidc` present.
-        run: |
-          set -euo pipefail
-          code=$(curl -sS -o /tmp/rc.json -w '%{http_code}' \
-            http://localhost:8080/api/v1/runtime-config)
-          if [ "$code" != "200" ]; then
-            echo "expected 200 for anonymous runtime-config, got $code" >&2
-            cat /tmp/rc.json >&2 || true
-            exit 1
-          fi
-          if ! jq -e '.oidc.client_id and .oidc.issuer_url and .oidc.redirect_uri' \
-              /tmp/rc.json >/dev/null; then
-            echo "runtime-config missing oidc block; body:" >&2
-            cat /tmp/rc.json >&2
-            exit 1
-          fi
-          echo "anonymous runtime-config returned oidc block: $(cat /tmp/rc.json)"
-
-      - name: Backend CSP header allows OIDC issuer origin in connect-src (mi-cl1)
-        # Regression guard for mi-cl1: the previous smoke minted tokens
-        # via curl, which bypasses the browser CSP entirely — so a
-        # CSP with `connect-src 'self'` (forbidding the cross-origin
-        # token POST a real SPA makes) passed every assertion while
-        # login was broken end-to-end.
-        #
-        # A headless browser would catch this directly, but the
-        # proportionate fix is a structural assertion: read the
-        # CSP header from the SPA's index response, find the
-        # `connect-src` directive, and check it contains the configured
-        # OIDC issuer origin. If it doesn't, a browser would block the
-        # token POST and login would fail — fail CI here instead.
-        run: |
-          set -euo pipefail
-          issuer_origin=$(curl -fsS http://localhost:8080/api/v1/runtime-config \
-            | jq -r '.oidc.issuer_url' \
-            | sed -E 's#^(https?://[^/]+).*#\1#')
-          if [ -z "$issuer_origin" ] || [ "$issuer_origin" = "null" ]; then
-            echo "could not derive issuer origin from runtime-config" >&2
-            exit 1
-          fi
-          csp=$(curl -fsSI http://localhost:8080/ | tr -d '\r' \
-            | awk -F': ' 'tolower($1)=="content-security-policy"{ $1=""; sub(/^ /,""); print }')
-          if [ -z "$csp" ]; then
-            echo "Content-Security-Policy header missing on SPA response" >&2
-            curl -fsSI http://localhost:8080/ >&2
-            exit 1
-          fi
-          connect=$(echo "$csp" | tr ';' '\n' | sed 's/^ *//' \
-            | awk '/^connect-src/{print; exit}')
-          if [ -z "$connect" ]; then
-            echo "no connect-src directive in CSP: $csp" >&2
-            exit 1
-          fi
-          case " $connect " in
-            *" $issuer_origin "*)
-              echo "connect-src allows $issuer_origin: $connect"
-              ;;
-            *)
-              echo "FAIL: connect-src does not allow OIDC issuer origin $issuer_origin" >&2
-              echo "connect-src directive: $connect" >&2
-              echo "full CSP: $csp" >&2
-              exit 1
-              ;;
-          esac
 
       - name: Backend rejects requests without a bearer token (401)
         # POST /api/v1/profile is a protected endpoint. Without a
@@ -803,10 +731,9 @@ jobs:
           echo "default-shaped user can list own specimen — round-trip OK"
 
       # Real-browser PKCE round-trip (mi-dwx). The curl assertions
-      # above cover backend JWT verification and the structural CSP /
-      # runtime-config preconditions; this step covers the live SPA →
-      # Keycloak → token-exchange → logout path that those structural
-      # checks can only approximate. Three sequential P0 bugs
+      # above cover backend JWT verification; this step covers the
+      # live SPA → Keycloak → token-exchange → logout path that
+      # backend-only checks can only approximate. Sequential P0 bugs
       # (mi-rvn, mi-0ag, mi-cl1) all shipped past the curl-based smoke
       # because each lives in a layer only a real browser exercises.
       - uses: actions/setup-node@v4

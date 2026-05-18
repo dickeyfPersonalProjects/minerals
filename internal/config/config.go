@@ -7,7 +7,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -39,23 +38,12 @@ type Config struct {
 	// DB-only mineral-species lookups.
 	MindatAPIKey string
 
-	// PublicOIDCIssuerURL, PublicOIDCClientID, and PublicOIDCRedirectURI
-	// are the SPA-facing OIDC settings the backend exposes through
-	// `/api/v1/runtime-config` (mi-5ew). The `PUBLIC_` prefix marks
-	// them as safe to ship to the browser. When all three are set the
-	// SPA enables the OIDC login flow; when any is empty the SPA hides
-	// the login UI. Backend-side JWT verification uses the non-public
-	// OIDCIssuerURL / OIDCClientID below.
-	PublicOIDCIssuerURL   string
-	PublicOIDCClientID    string
+	// PublicOIDCRedirectURI is the absolute URL the BFF passes to
+	// Keycloak on /auth/login and reuses on /auth/callback's code
+	// exchange. Backend-consumed under V2 BFF; the `PUBLIC_` prefix is
+	// historical (see CONFIG.md) and retained for env-var-name
+	// stability across the migration.
 	PublicOIDCRedirectURI string
-
-	// PublicOIDCIssuerOrigin is the origin portion (scheme://host[:port])
-	// of PublicOIDCIssuerURL. Derived at Load() so the CSP builder
-	// (mi-cl1) has a guaranteed-well-formed source to drop into the
-	// `connect-src` directive. Empty when PublicOIDCIssuerURL is unset.
-	// §17 forbids wildcards, so we expose the origin only — never a path.
-	PublicOIDCIssuerOrigin string
 
 	// OIDCIssuerURL and OIDCClientID configure backend-side JWT
 	// verification (mi-aw3a). The backend is a pure resource server:
@@ -210,16 +198,7 @@ func loadFrom(get func(string) string) (*Config, error) {
 	cfg.LogLevel = orDefault(get("LOG_LEVEL"), defaultLogLevel)
 	cfg.S3Region = orDefault(get("S3_REGION"), defaultS3Region)
 	cfg.MindatAPIKey = strings.TrimSpace(get("MINDAT_API_KEY"))
-	cfg.PublicOIDCIssuerURL = strings.TrimSpace(get("PUBLIC_OIDC_ISSUER_URL"))
-	cfg.PublicOIDCClientID = strings.TrimSpace(get("PUBLIC_OIDC_CLIENT_ID"))
 	cfg.PublicOIDCRedirectURI = strings.TrimSpace(get("PUBLIC_OIDC_REDIRECT_URI"))
-	if cfg.PublicOIDCIssuerURL != "" {
-		origin, err := parseIssuerOrigin(cfg.PublicOIDCIssuerURL)
-		if err != nil {
-			return nil, fmt.Errorf("config: PUBLIC_OIDC_ISSUER_URL: %w", err)
-		}
-		cfg.PublicOIDCIssuerOrigin = origin
-	}
 	cfg.OIDCIssuerURL = orDefault(get("OIDC_ISSUER_URL"), defaultOIDCIssuerURL)
 	cfg.OIDCClientID = orDefault(get("OIDC_CLIENT_ID"), defaultOIDCClientID)
 	cfg.OIDCJWKSURL = strings.TrimSpace(get("OIDC_JWKS_URL"))
@@ -310,26 +289,6 @@ func loadFrom(get func(string) string) (*Config, error) {
 	}
 
 	return cfg, nil
-}
-
-// parseIssuerOrigin returns the scheme://host[:port] portion of an
-// absolute http(s) URL. Anything else — relative URL, missing host,
-// non-http(s) scheme, parse failure — is rejected. Used to feed the
-// OIDC issuer origin into the CSP `connect-src` directive without
-// risking a malformed value (trailing slash, embedded path) leaking
-// into the policy.
-func parseIssuerOrigin(raw string) (string, error) {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "", fmt.Errorf("malformed URL %q: %w", raw, err)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("scheme must be http or https, got %q", u.Scheme)
-	}
-	if u.Host == "" {
-		return "", fmt.Errorf("URL %q has no host", raw)
-	}
-	return u.Scheme + "://" + u.Host, nil
 }
 
 func orDefault(v, def string) string {

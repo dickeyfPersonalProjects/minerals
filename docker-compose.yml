@@ -87,16 +87,14 @@ services:
       # the app remembers them). Get a key at https://www.mindat.org/.
       # MINDAT_API_KEY: ""
       #
-      # OIDC dev wiring (mi-dau). PUBLIC_OIDC_* are echoed to the SPA
-      # via /api/v1/runtime-config — they MUST be host-side URLs because
-      # the browser uses them to reach Keycloak and to compare against
-      # the JWT's `iss` claim. OIDC_ISSUER_URL must likewise match the
-      # browser-issued token's `iss`. OIDC_JWKS_URL is the in-container
-      # path the backend uses to fetch Keycloak's public keys — needed
-      # because `localhost:8081` is the container's own loopback, not
-      # the host. With JWKS_URL set, the verifier skips OIDC discovery
-      # entirely (see internal/oidc/verifier.go), so the issuer URL only
-      # needs to be a string match, not reachable from this container.
+      # OIDC dev wiring (mi-dau). OIDC_ISSUER_URL must match the
+      # browser-issued token's `iss` claim. OIDC_JWKS_URL is the
+      # in-container path the backend uses to fetch Keycloak's public
+      # keys — needed because `localhost:8081` is the container's own
+      # loopback, not the host. With JWKS_URL set, the verifier skips
+      # OIDC discovery entirely (see internal/oidc/verifier.go), so the
+      # issuer URL only needs to be a string match, not reachable from
+      # this container.
       #
       # Without `--profile keycloak`, the Keycloak container isn't
       # running and these point at endpoints that won't answer. That's
@@ -117,8 +115,6 @@ services:
       # match OIDC_ISSUER_URL because Keycloak emits URLs based on
       # KC_HOSTNAME (set on the keycloak service). Unset in prod.
       OIDC_DISCOVERY_URL: http://keycloak:8080/realms/minerals
-      PUBLIC_OIDC_ISSUER_URL: http://localhost:8081/realms/minerals
-      PUBLIC_OIDC_CLIENT_ID: minerals-frontend
       PUBLIC_OIDC_REDIRECT_URI: http://localhost:8080/auth/callback
       #
       # V2 BFF auth (mi-1d5i). Both values are required to enable the

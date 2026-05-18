@@ -41,91 +41,27 @@ func TestLoad_DevDefaults(t *testing.T) {
 	}
 }
 
-func TestLoad_PublicOIDCConfig(t *testing.T) {
+func TestLoad_PublicOIDCRedirectURI(t *testing.T) {
 	t.Parallel()
 	cfg, err := loadFrom(envFunc(map[string]string{
-		"PUBLIC_OIDC_ISSUER_URL":   "https://auth.example.com/realms/minerals",
-		"PUBLIC_OIDC_CLIENT_ID":    "minerals-frontend",
 		"PUBLIC_OIDC_REDIRECT_URI": "https://www.example.com/auth/callback",
 	}))
 	if err != nil {
 		t.Fatalf("loadFrom: %v", err)
-	}
-	if got := cfg.PublicOIDCIssuerURL; got != "https://auth.example.com/realms/minerals" {
-		t.Errorf("PublicOIDCIssuerURL = %q", got)
-	}
-	if got := cfg.PublicOIDCClientID; got != "minerals-frontend" {
-		t.Errorf("PublicOIDCClientID = %q", got)
 	}
 	if got := cfg.PublicOIDCRedirectURI; got != "https://www.example.com/auth/callback" {
 		t.Errorf("PublicOIDCRedirectURI = %q", got)
 	}
 }
 
-func TestLoad_PublicOIDCEmptyByDefault(t *testing.T) {
+func TestLoad_PublicOIDCRedirectURIEmptyByDefault(t *testing.T) {
 	t.Parallel()
 	cfg, err := loadFrom(envFunc(nil))
 	if err != nil {
 		t.Fatalf("loadFrom: %v", err)
 	}
-	if cfg.PublicOIDCIssuerURL != "" || cfg.PublicOIDCClientID != "" || cfg.PublicOIDCRedirectURI != "" {
-		t.Errorf("PublicOIDC* defaults should be empty, got %+v", cfg)
-	}
-	if cfg.PublicOIDCIssuerOrigin != "" {
-		t.Errorf("PublicOIDCIssuerOrigin default = %q, want empty", cfg.PublicOIDCIssuerOrigin)
-	}
-}
-
-// TestLoad_PublicOIDCIssuerOriginDerived asserts the origin
-// (scheme://host[:port]) is extracted from PUBLIC_OIDC_ISSUER_URL at
-// load time so the API server can drop it into the CSP `connect-src`
-// directive without re-parsing (mi-cl1). The realm path MUST be
-// stripped — CSP source matching is origin-based.
-func TestLoad_PublicOIDCIssuerOriginDerived(t *testing.T) {
-	t.Parallel()
-	cases := []struct{ raw, want string }{
-		{"https://auth.example.com/realms/minerals", "https://auth.example.com"},
-		{"http://localhost:8081/realms/minerals", "http://localhost:8081"},
-		// Trailing slash on issuer must not leak into the origin.
-		{"https://auth.example.com/", "https://auth.example.com"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.raw, func(t *testing.T) {
-			cfg, err := loadFrom(envFunc(map[string]string{
-				"PUBLIC_OIDC_ISSUER_URL": tc.raw,
-			}))
-			if err != nil {
-				t.Fatalf("loadFrom: %v", err)
-			}
-			if cfg.PublicOIDCIssuerOrigin != tc.want {
-				t.Errorf("origin = %q, want %q", cfg.PublicOIDCIssuerOrigin, tc.want)
-			}
-		})
-	}
-}
-
-// TestLoad_PublicOIDCIssuerURLMalformedFailsFast: a misconfigured
-// PUBLIC_OIDC_ISSUER_URL must abort startup rather than silently emit
-// a broken CSP. mi-cl1 acceptance.
-func TestLoad_PublicOIDCIssuerURLMalformedFailsFast(t *testing.T) {
-	t.Parallel()
-	for _, raw := range []string{
-		"not a url",          // unparseable
-		"ftp://auth.example", // wrong scheme
-		"http://",            // no host
-		"/realms/minerals",   // relative
-	} {
-		t.Run(raw, func(t *testing.T) {
-			_, err := loadFrom(envFunc(map[string]string{
-				"PUBLIC_OIDC_ISSUER_URL": raw,
-			}))
-			if err == nil {
-				t.Fatalf("expected error for malformed issuer URL %q", raw)
-			}
-			if !strings.Contains(err.Error(), "PUBLIC_OIDC_ISSUER_URL") {
-				t.Errorf("error %q must name the variable", err.Error())
-			}
-		})
+	if cfg.PublicOIDCRedirectURI != "" {
+		t.Errorf("PublicOIDCRedirectURI default = %q, want empty", cfg.PublicOIDCRedirectURI)
 	}
 }
 
