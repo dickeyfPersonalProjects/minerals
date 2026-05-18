@@ -12,7 +12,7 @@ vi.mock('../lib/api', () => ({
 }));
 
 import Collectors from './Collectors.svelte';
-import { __resetAuthStore, setAccessToken } from '../lib/oidc/auth';
+import { __authenticate, __resetAuthStore } from '../lib/auth';
 
 type CollectorSeed = {
   id: string;
@@ -39,7 +39,7 @@ beforeEach(() => {
   vi.spyOn(window, 'confirm').mockReturnValue(true);
   // Default to authenticated for the existing CTA tests. The
   // unauthenticated block at the bottom resets the store.
-  setAccessToken('test-token', 600);
+  __authenticate();
 });
 
 afterEach(() => {

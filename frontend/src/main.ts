@@ -1,35 +1,28 @@
-// OIDC path→hash rewrite — MUST be the first import. It runs before
-// svelte-spa-router loads so the router's one-shot URL read sees the
-// rewritten hash URL. See `lib/oidc/path-to-hash.ts` for the why.
-import './lib/oidc/path-to-hash';
 import './app.css';
 import { mount } from 'svelte';
 import App from './App.svelte';
 import { installToastMiddleware } from './lib/api/wrapper';
-import { installAuthHeaderMiddleware } from './lib/oidc/middleware';
-import { attemptSilentRenewal } from './lib/oidc/auth';
+import { probeAuth } from './lib/auth';
+import { fetchCsrfToken } from './lib/csrf';
 import { themeStore } from './lib/theme';
 
 // Initialise the theme store synchronously before mount so the
 // document gets the correct `.dark` class before first paint.
 themeStore();
 
-// Install the auto-toast middleware on the shared API client
-// (E-4). Side-effecting; safe to call repeatedly.
+// Install the auto-toast + CSRF middleware on the shared API
+// client (E-4 / mi-3vc4). Side-effecting; safe to call repeatedly.
 installToastMiddleware();
 
-// Attach the OIDC bearer token to outgoing API calls when present.
-installAuthHeaderMiddleware();
-
-// Silent renewal on boot (mi-wmyc). If the browser has held a session
-// before and we're not currently completing an interactive callback,
-// redirect the whole tab to Keycloak with `prompt=none` so the SSO
-// cookie can mint a new token without user interaction. This is a
-// no-op for first-time/anonymous visitors and for the /auth/callback
-// route itself. We do NOT await — the redirect navigates away on
-// success, and the no-op cases are fast enough that the mount below
-// proceeds without a visible delay.
-void attemptSilentRenewal();
+// V2 BFF cookie flow (mi-1d5i): probe the session cookie to decide
+// whether the user is logged in, then fetch a CSRF token so the
+// wrapper can attach it on the first non-safe call. Anonymous boot
+// keeps the auth store empty and the csrf store null — fetchCsrfToken
+// short-circuits on the 401 path. Sequencing matters: the CSRF
+// endpoint requires a session, so the probe must resolve first.
+void probeAuth().then((user) => {
+  if (user !== null) void fetchCsrfToken();
+});
 
 const target = document.getElementById('app');
 if (!target) {

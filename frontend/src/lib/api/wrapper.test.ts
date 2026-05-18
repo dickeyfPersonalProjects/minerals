@@ -9,6 +9,7 @@ vi.mock('svelte-spa-router', async () => {
 
 import { client } from './index';
 import {
+  CSRFHeaderName,
   envelopeMessage,
   installToastMiddleware,
   isProfileSetupRedirect,
@@ -16,6 +17,7 @@ import {
   SUPPRESS_TOAST_HEADERS,
 } from './wrapper';
 import { _clearToasts, toasts } from '../toasts';
+import { __resetCsrf, __setCsrf, getCsrfToken } from '../csrf';
 
 // The middleware install is module-scoped (idempotent) — every
 // test in this file shares the same client. The wrapper's
@@ -53,6 +55,7 @@ function withFetch(stub: typeof fetch) {
 beforeEach(() => {
   _clearToasts();
   mockPush.mockReset();
+  __resetCsrf();
   window.sessionStorage.clear();
   window.location.hash = '';
 });
@@ -60,6 +63,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   _clearToasts();
+  __resetCsrf();
 });
 
 describe('isProfileSetupRedirect', () => {
@@ -208,5 +212,127 @@ describe('auto-toast middleware', () => {
     expect(list).toHaveLength(1);
     expect(list[0]?.type).toBe('error');
     expect(list[0]?.message).toBe('network down');
+  });
+});
+
+// CSRF middleware (V2 BFF cookie flow, mi-3vc4). Exercises the
+// X-CSRF-Token attachment on non-safe methods and the 403
+// csrf_mismatch refresh-and-retry-once path.
+type POSTPath = Parameters<typeof client.POST>[0];
+type POSTOpts = Parameters<typeof client.POST>[1];
+
+function postWithFetch(stub: typeof fetch) {
+  return async function call(path: string, extra: Record<string, unknown> = {}) {
+    return client.POST(
+      path as unknown as POSTPath,
+      {
+        baseUrl: TEST_BASE,
+        fetch: stub,
+        ...extra,
+      } as unknown as POSTOpts,
+    );
+  };
+}
+
+describe('CSRF middleware (V2 BFF cookie flow, mi-3vc4)', () => {
+  it('attaches X-CSRF-Token on POST when the store has a value', async () => {
+    __setCsrf('csrf-abc');
+    const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
+      const req = input as Request;
+      expect(req.headers.get(CSRFHeaderName)).toBe('csrf-abc');
+      return jsonResponse(200, { ok: true });
+    });
+    await postWithFetch(fetchStub as unknown as typeof fetch)('/healthz');
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT attach X-CSRF-Token on GET', async () => {
+    __setCsrf('csrf-abc');
+    const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
+      const req = input as Request;
+      expect(req.headers.has(CSRFHeaderName)).toBe(false);
+      return jsonResponse(200, { ok: true });
+    });
+    await withFetch(fetchStub as unknown as typeof fetch)('/healthz');
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+  });
+
+  it('omits the header when the store is empty', async () => {
+    __resetCsrf();
+    const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
+      const req = input as Request;
+      expect(req.headers.has(CSRFHeaderName)).toBe(false);
+      return jsonResponse(200, { ok: true });
+    });
+    await postWithFetch(fetchStub as unknown as typeof fetch)('/healthz');
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+  });
+
+  // Extract the X-CSRF-Token from a fetch call's input — openapi-fetch
+  // passes a Request, the wrapper's retry path passes (url, init).
+  function csrfOf(input: RequestInfo | URL, init?: RequestInit): string | null {
+    if (init?.headers) {
+      const h = new Headers(init.headers as HeadersInit);
+      return h.get(CSRFHeaderName);
+    }
+    if (input instanceof Request) return input.headers.get(CSRFHeaderName);
+    return null;
+  }
+  function retryFlagOf(input: RequestInfo | URL, init?: RequestInit): string | null {
+    if (init?.headers) {
+      const h = new Headers(init.headers as HeadersInit);
+      return h.get('x-csrf-retried');
+    }
+    if (input instanceof Request) return input.headers.get('x-csrf-retried');
+    return null;
+  }
+  function urlOf(input: RequestInfo | URL): string {
+    if (typeof input === 'string') return input;
+    if (input instanceof URL) return input.toString();
+    return (input as Request).url;
+  }
+
+  it('on 403 csrf_mismatch: refetches the token and retries once with the fresh value', async () => {
+    __setCsrf('stale');
+    let postCalls = 0;
+    const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = urlOf(input);
+      if (url.endsWith('/api/v1/csrf')) {
+        return jsonResponse(200, { token: 'fresh' });
+      }
+      postCalls += 1;
+      if (postCalls === 1) {
+        // Original POST — return csrf_mismatch.
+        return jsonResponse(403, { error: { code: 'csrf_mismatch', message: 'stale' } });
+      }
+      // Retry — assert it carries the fresh token and the retry marker.
+      expect(csrfOf(input, init)).toBe('fresh');
+      expect(retryFlagOf(input, init)).toBe('1');
+      return jsonResponse(200, { ok: true });
+    });
+    // Wrapper-internal retry uses globalThis.fetch, not openapi-fetch's
+    // captured one — so the retry call still hits our stub.
+    globalThis.fetch = fetchStub as unknown as typeof fetch;
+    await postWithFetch(fetchStub as unknown as typeof fetch)('/healthz');
+    expect(postCalls).toBe(2);
+    expect(getCsrfToken()).toBe('fresh');
+  });
+
+  it('does NOT retry a second time on repeated csrf_mismatch', async () => {
+    __setCsrf('stale');
+    let postCalls = 0;
+    const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
+      const url = urlOf(input);
+      if (url.endsWith('/api/v1/csrf')) {
+        return jsonResponse(200, { token: 'still-stale' });
+      }
+      postCalls += 1;
+      return jsonResponse(403, { error: { code: 'csrf_mismatch', message: 'nope' } });
+    });
+    globalThis.fetch = fetchStub as unknown as typeof fetch;
+    await postWithFetch(fetchStub as unknown as typeof fetch)('/healthz');
+    // First POST + one retry = 2 attempts; the second 403 does NOT
+    // recurse — the retry marker breaks the loop.
+    expect(postCalls).toBe(2);
   });
 });

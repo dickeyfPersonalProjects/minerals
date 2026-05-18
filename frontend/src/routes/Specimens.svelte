@@ -8,7 +8,7 @@
     activeFilterCount,
     type SpecimenFiltersValue,
   } from '../lib/SpecimenFilters.svelte';
-  import { isAuthenticated } from '../lib/oidc/auth';
+  import { isAuthenticated } from '../lib/auth';
 
   type Specimen = components['schemas']['SpecimenView'];
 

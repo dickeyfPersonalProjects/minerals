@@ -69,17 +69,9 @@ vi.mock('./api/wrapper', () => ({
     e?.error?.message || e?.error?.code || `HTTP ${s}`,
 }));
 
-// Authenticated image loader is mocked: the modal renders its <img>
-// against the blob URL returned here, then cropperjs takes over
-// (mi-lrqt). The test below asserts via `crop-modal-image`'s
-// `data-src` which mirrors the backend path.
-const { mockLoadAuthedBlobUrl } = vi.hoisted(() => ({
-  mockLoadAuthedBlobUrl: vi.fn(async (path: string) => `blob:fake${path}`),
-}));
-vi.mock('./photos/blob-url', () => ({
-  loadAuthedBlobUrl: mockLoadAuthedBlobUrl,
-  AuthedImageFetchError: class AuthedImageFetchError extends Error {},
-}));
+// V2 BFF cookie flow (mi-3vc4): cookies travel on <img> requests,
+// so the modal renders the backend path directly on `src` and lets
+// the browser drive the request. No blob-URL helper to mock.
 
 const { mockToastError, mockToastSuccess } = vi.hoisted(() => ({
   mockToastError: vi.fn(),
@@ -101,12 +93,6 @@ beforeEach(() => {
   mockDELETE.mockReset();
   mockToastError.mockReset();
   mockToastSuccess.mockReset();
-  mockLoadAuthedBlobUrl.mockReset();
-  mockLoadAuthedBlobUrl.mockImplementation(async (path: string) => `blob:fake${path}`);
-  // jsdom doesn't implement URL.revokeObjectURL.
-  if (typeof URL.revokeObjectURL !== 'function') {
-    (URL as unknown as { revokeObjectURL: (u: string) => void }).revokeObjectURL = () => {};
-  }
 });
 
 afterEach(() => {
@@ -131,9 +117,9 @@ function renderModal(overrides: ModalOverrides = {}) {
 }
 
 async function fireImageLoad() {
-  // The <img> only renders once the authenticated blob URL has
-  // resolved (mi-lrqt). Wait for it before firing cropperjs's load
-  // event.
+  // The <img> is in the DOM immediately; we fire the browser's
+  // `load` event so the component's `onload` handler initialises
+  // cropperjs.
   const img = await waitFor(() => screen.getByTestId('crop-modal-image'));
   await fireEvent.load(img);
 }
@@ -235,21 +221,7 @@ describe('ImageCropModal', () => {
     expect(lastCropper!.rotation).toBe(0);
   });
 
-  it('falls back to an error message when the authed image fetch fails', async () => {
-    // Simulate the auth-aware fetch rejecting (e.g. 404 don't-leak
-    // path from CONTRACT §13 v2 — the bug this whole refactor is
-    // fixing).
-    mockLoadAuthedBlobUrl.mockRejectedValueOnce(new Error('fetch failed'));
-    renderModal();
-
-    await waitFor(() => {
-      expect(screen.getByTestId('crop-modal-image-error')).toBeInTheDocument();
-    });
-    // Apply stays disabled when there's nothing to crop.
-    expect((screen.getByTestId('crop-modal-apply') as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it('still falls back when the rendered <img> fires an error event', async () => {
+  it('falls back to an error message when the rendered <img> fires an error event', async () => {
     renderModal();
     const img = await waitFor(() => screen.getByTestId('crop-modal-image'));
     await fireEvent.error(img);

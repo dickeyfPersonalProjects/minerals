@@ -15,16 +15,8 @@ vi.mock('../lib/api', () => ({
   client: { GET: mockGet, POST: mockPost, PATCH: mockPatch, DELETE: mockDelete },
 }));
 
-// Authenticated image loader is mocked: hero + gallery <img>s
-// assert against `data-src` (mirror of the backend path) rather
-// than the blob: URL the helper would generate (mi-lrqt).
-vi.mock('../lib/photos/blob-url', () => ({
-  loadAuthedBlobUrl: vi.fn(async (path: string) => `blob:fake${path}`),
-  AuthedImageFetchError: class AuthedImageFetchError extends Error {},
-}));
-
 import SpecimenDetail from './SpecimenDetail.svelte';
-import { __resetAuthStore, setAccessToken } from '../lib/oidc/auth';
+import { __authenticate, __resetAuthStore } from '../lib/auth';
 
 const SPECIMEN_ID = '11111111-1111-1111-1111-111111111111';
 
@@ -218,13 +210,8 @@ beforeEach(() => {
   mockPatch.mockReset();
   mockDelete.mockReset();
   setupFetch({});
-  // jsdom doesn't implement URL.revokeObjectURL; AuthedImage calls
-  // it on teardown.
-  if (typeof URL.revokeObjectURL !== 'function') {
-    (URL as unknown as { revokeObjectURL: (u: string) => void }).revokeObjectURL = () => {};
-  }
   // Default-authed; the anonymous block at the bottom resets.
-  setAccessToken('test-token', 600);
+  __authenticate();
 });
 
 afterEach(() => {
@@ -787,9 +774,9 @@ describe('SpecimenDetail route', () => {
         if (!el) throw new Error('hero image not yet rendered');
         return el;
       })) as HTMLImageElement;
-      // AuthedImage uses a blob: URL for the actual src; the backend
-      // path is mirrored on data-src (mi-lrqt).
-      expect(img.getAttribute('data-src')).toBe(`/api/v1/photos/${p2.id}/display`);
+      // V2 BFF (mi-3vc4): cookies travel on <img> requests, so the
+      // src is the backend path directly.
+      expect(img.getAttribute('src')).toBe(`/api/v1/photos/${p2.id}/display`);
       expect(screen.getByTestId('hero-photo-main-badge')).toBeInTheDocument();
     });
 

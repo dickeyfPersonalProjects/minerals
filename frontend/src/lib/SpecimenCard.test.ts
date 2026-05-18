@@ -12,13 +12,9 @@ vi.mock('./api', () => ({
   client: { GET: mockGet, POST: mockPost, DELETE: mockDelete, PATCH: mockPatch },
 }));
 
-// Authenticated image loader is mocked: the card asserts against
-// the rendered <img>'s `data-src` (mirror of the backend path), not
-// the blob: URL the helper would generate (mi-lrqt).
-vi.mock('./photos/blob-url', () => ({
-  loadAuthedBlobUrl: vi.fn(async (path: string) => `blob:fake${path}`),
-  AuthedImageFetchError: class AuthedImageFetchError extends Error {},
-}));
+// V2 BFF cookie flow (mi-3vc4): cookies travel on <img> requests
+// automatically, so the card renders the backend path directly on
+// `src`. No blob-URL workaround, no helper to mock.
 
 vi.mock('svelte-spa-router', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('svelte-spa-router');
@@ -29,7 +25,7 @@ vi.mock('svelte-spa-router', async () => {
 });
 
 import SpecimenCard from './SpecimenCard.svelte';
-import { __resetAuthStore, setAccessToken } from './oidc/auth';
+import { __authenticate, __resetAuthStore } from './auth';
 import { __resetQrSheetStore, setNoSheet, setSheet, type QRSheetView } from './qrSheet';
 
 function specimen(
@@ -76,14 +72,9 @@ beforeEach(() => {
   mockDelete.mockReset();
   mockPatch.mockReset();
   __resetQrSheetStore();
-  // jsdom doesn't implement URL.revokeObjectURL; AuthedImage calls
-  // it on teardown.
-  if (typeof URL.revokeObjectURL !== 'function') {
-    (URL as unknown as { revokeObjectURL: (u: string) => void }).revokeObjectURL = () => {};
-  }
   // Most tests exercise the authed path; the anonymous block at
   // the bottom of this file explicitly resets the store.
-  setAccessToken('test-token', 600);
+  __authenticate();
 });
 
 afterEach(() => {
@@ -115,9 +106,7 @@ describe('SpecimenCard', () => {
     const img = (await waitFor(() =>
       screen.getByAltText('Photo of Smoky quartz'),
     )) as HTMLImageElement;
-    // AuthedImage renders with `data-src` mirroring the backend path
-    // (the real src is a blob: URL — mi-lrqt).
-    expect(img.getAttribute('data-src')).toBe('/api/v1/photos/aaaa-photo-1/thumb');
+    expect(img.getAttribute('src')).toBe('/api/v1/photos/aaaa-photo-1/thumb');
     // Sanity: API was called for the specimen's photos.
     expect(mockGet).toHaveBeenCalledTimes(1);
     expect(mockGet.mock.calls[0]?.[0]).toBe('/api/v1/specimens/{id}/photos');

@@ -16,8 +16,19 @@
 import { push } from 'svelte-spa-router';
 import { client } from './index';
 import { toastError } from '../toasts';
+import { fetchCsrfToken, getCsrfToken } from '../csrf';
 
 const SUPPRESS_HEADER = 'x-suppress-toast';
+
+// Safe HTTP methods that bypass CSRF attachment. Mirrors the backend
+// CSRFMiddleware's safe-method bypass (docs/design/auth-bff.md §csrf).
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+// Marker header used to break the 403 csrf_mismatch retry loop. Once
+// a request has been retried we never retry again, regardless of the
+// response — a second 403 indicates a real auth failure, not a stale
+// token.
+const CSRF_RETRY_HEADER = 'x-csrf-retried';
 
 export interface ErrorEnvelope {
   error?: { code?: string; message?: string; details?: Record<string, unknown> };
@@ -129,10 +140,62 @@ export function installToastMiddleware(): void {
   if (installed) return;
   installed = true;
   client.use({
+    // CSRF attachment runs on every outgoing request. Non-safe
+    // methods carry the current `X-CSRF-Token` from the in-memory
+    // store; safe methods (GET/HEAD/OPTIONS) skip attachment to
+    // mirror the backend's bypass (docs/design/auth-bff.md §csrf).
+    // `credentials: 'include'` ensures the session cookie travels
+    // even in dev where Vite proxies the SPA from a different port.
+    onRequest({ request }) {
+      // openapi-fetch builds a Request; mutate by assigning back
+      // when needed. Setting credentials directly is ignored on a
+      // cloned Request, but the underlying fetch picks up the
+      // `credentials` field — set it via init when we build the
+      // retry request below; for the first attempt, openapi-fetch
+      // honors the per-call `credentials` we set in `index.ts`.
+      if (!SAFE_METHODS.has(request.method.toUpperCase())) {
+        const token = getCsrfToken();
+        if (token && !request.headers.has(CSRFHeaderName)) {
+          request.headers.set(CSRFHeaderName, token);
+        }
+      }
+      return request;
+    },
+
     async onResponse({ request, response }) {
       if (response.ok) return;
       const suppressed = request.headers.get(SUPPRESS_HEADER) === '1';
       const envelope = await safeReadEnvelope(response);
+
+      // CSRF mismatch (403): refresh the token and retry the
+      // original request ONCE. A second 403 means the session is
+      // really gone — fall through to the normal error path.
+      if (
+        response.status === 403 &&
+        envelope?.error?.code === 'csrf_mismatch' &&
+        request.headers.get(CSRF_RETRY_HEADER) !== '1' &&
+        !SAFE_METHODS.has(request.method.toUpperCase())
+      ) {
+        const fresh = await fetchCsrfToken();
+        if (fresh) {
+          // Build a new Request that copies the original method,
+          // body, and headers, marks itself as the retry, and gets
+          // the fresh token. We must rebuild instead of mutating
+          // because the original Request's body has been consumed.
+          const retryHeaders = new Headers(request.headers);
+          retryHeaders.set(CSRFHeaderName, fresh);
+          retryHeaders.set(CSRF_RETRY_HEADER, '1');
+          return fetch(request.url, {
+            method: request.method,
+            headers: retryHeaders,
+            body: request.body,
+            credentials: 'include',
+            // Stream a body iff there is one — preserves multipart
+            // uploads where the body is a ReadableStream.
+            duplex: request.body ? 'half' : undefined,
+          } as RequestInit & { duplex?: 'half' });
+        }
+      }
 
       // First-login gate (mi-2hf): a 403 carrying `details.redirect`
       // means the backend wants the SPA to navigate. Honored even
@@ -159,6 +222,11 @@ export function installToastMiddleware(): void {
     },
   });
 }
+
+// CSRFHeaderName matches the backend's expected request header (see
+// internal/auth/bff/csrf.go). Exported so tests can reference the
+// canonical literal.
+export const CSRFHeaderName = 'X-CSRF-Token';
 
 // Header constant exported so callers can reference it without
 // hard-coding the literal string.

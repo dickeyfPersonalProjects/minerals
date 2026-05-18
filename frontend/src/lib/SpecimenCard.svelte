@@ -1,7 +1,6 @@
 <script lang="ts">
   import { link } from 'svelte-spa-router';
   import { client } from './api';
-  import AuthedImage from './photos/AuthedImage.svelte';
   import type { components } from './api/schema';
   import {
     addSpecimenToSheet,
@@ -12,7 +11,7 @@
     specimenOnSheet,
   } from './qrSheet';
   import TemplateSelector from './TemplateSelector.svelte';
-  import { isAuthenticated } from './oidc/auth';
+  import { isAuthenticated } from './auth';
   import type { QRTemplateID } from './qrTemplates';
 
   type Specimen = components['schemas']['SpecimenView'];
@@ -175,7 +174,7 @@
       class="relative flex aspect-[4/3] items-center justify-center overflow-hidden bg-[var(--color-surface-2)]"
     >
       {#if thumbUrl && !thumbFailed}
-        <AuthedImage
+        <img
           src={thumbUrl}
           alt={`Photo of ${specimen.name}`}
           class="h-full w-full bg-black object-contain"

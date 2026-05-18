@@ -41,7 +41,7 @@
     type QRSheetView,
     type QRSheetSpecimenView,
   } from '../lib/qrSheet';
-  import { isAuthenticated } from '../lib/oidc/auth';
+  import { isAuthenticated } from '../lib/auth';
   import { toastError, toastSuccess } from '../lib/toasts';
 
   type Specimen = components['schemas']['SpecimenView'];

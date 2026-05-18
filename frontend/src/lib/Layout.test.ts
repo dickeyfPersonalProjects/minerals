@@ -17,13 +17,7 @@ vi.mock('svelte-spa-router', async () => {
 
 import Layout from './Layout.svelte';
 import { __resetQrSheetStore, setSheet, type QRSheetView } from './qrSheet';
-import { __resetOidcConfig } from './oidc/config';
-import { __resetAuthStore, setAccessToken } from './oidc/auth';
-
-function makeJwt(payload: Record<string, unknown>): string {
-  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
-  return `${b64({ alg: 'RS256', typ: 'JWT' })}.${b64(payload)}.signature`;
-}
+import { __authenticate, __resetAuthStore } from './auth';
 
 function sheet(over: Partial<QRSheetView> = {}): QRSheetView {
   return {
@@ -40,14 +34,12 @@ function sheet(over: Partial<QRSheetView> = {}): QRSheetView {
 beforeEach(() => {
   mockGet.mockReset();
   __resetQrSheetStore();
-  __resetOidcConfig();
   __resetAuthStore();
 });
 
 afterEach(() => {
   cleanup();
   __resetQrSheetStore();
-  __resetOidcConfig();
   __resetAuthStore();
 });
 
@@ -104,104 +96,31 @@ describe('Layout — navbar', () => {
   });
 });
 
-describe('Layout — auth controls', () => {
+describe('Layout — auth controls (V2 BFF cookie flow, mi-3vc4)', () => {
   it('shows the profile menu and hides the login button when authenticated', async () => {
     mockGet.mockResolvedValue({
       data: undefined,
       error: { error: { code: 'not_found', message: 'no sheet' } },
       response: new Response(null, { status: 404 }),
     });
-    setAccessToken(makeJwt({ name: 'Ada Lovelace' }), 600, () => 0);
+    __authenticate({ display_name: 'Ada Lovelace' });
     render(Layout);
     expect(await screen.findByTestId('profile-menu-button')).toBeInTheDocument();
     expect(screen.queryByTestId('login-button')).not.toBeInTheDocument();
   });
 
-  it('shows the login button when unauthenticated and OIDC is configured', async () => {
-    mockGet.mockImplementation((path: string) => {
-      if (path === '/api/v1/runtime-config') {
-        return Promise.resolve({
-          data: {
-            oidc: {
-              issuer_url: 'https://auth.example.com/realms/minerals',
-              client_id: 'minerals-frontend',
-              redirect_uri: 'https://www.example.com/auth/callback',
-            },
-          },
-          error: undefined,
-          response: new Response(null, { status: 200 }),
-        });
-      }
-      return Promise.resolve({
-        data: undefined,
-        error: { error: { code: 'not_found', message: 'no sheet' } },
-        response: new Response(null, { status: 404 }),
-      });
+  it('shows the login button when no session probe has resolved a user', async () => {
+    // Anonymous boot — auth store empty, the navbar renders the
+    // login anchor unconditionally (the click navigates to
+    // /auth/login, which the backend handles regardless of whether
+    // OIDC is configured for this deployment).
+    mockGet.mockResolvedValue({
+      data: undefined,
+      error: { error: { code: 'not_found', message: 'no sheet' } },
+      response: new Response(null, { status: 404 }),
     });
     render(Layout);
     expect(await screen.findByTestId('login-button')).toBeInTheDocument();
     expect(screen.queryByTestId('profile-menu-button')).not.toBeInTheDocument();
-  });
-
-  it('shows the login button optimistically before the runtime-config fetch resolves', async () => {
-    // Never-resolving runtime-config response — simulates a slow
-    // backend / in-flight load. The button must be visible on first
-    // paint so anonymous users have an affordance to log in.
-    mockGet.mockImplementation((path: string) => {
-      if (path === '/api/v1/runtime-config') {
-        return new Promise(() => {});
-      }
-      return Promise.resolve({
-        data: undefined,
-        error: { error: { code: 'not_found', message: 'no sheet' } },
-        response: new Response(null, { status: 404 }),
-      });
-    });
-    render(Layout);
-    expect(await screen.findByTestId('login-button')).toBeInTheDocument();
-  });
-
-  it('shows the login button when the runtime-config fetch errors', async () => {
-    // A transient failure (5xx, network drop) must not strand the
-    // user without a way to log in — the click path retries and
-    // surfaces a toast if OIDC really is unavailable.
-    mockGet.mockImplementation((path: string) => {
-      if (path === '/api/v1/runtime-config') {
-        return Promise.resolve({
-          data: undefined,
-          error: { error: { code: 'internal_error', message: 'boom' } },
-          response: new Response(null, { status: 500 }),
-        });
-      }
-      return Promise.resolve({
-        data: undefined,
-        error: { error: { code: 'not_found', message: 'no sheet' } },
-        response: new Response(null, { status: 404 }),
-      });
-    });
-    render(Layout);
-    expect(await screen.findByTestId('login-button')).toBeInTheDocument();
-  });
-
-  it('hides the login button when runtime-config confirms OIDC is unconfigured', async () => {
-    mockGet.mockImplementation((path: string) => {
-      if (path === '/api/v1/runtime-config') {
-        return Promise.resolve({
-          data: {},
-          error: undefined,
-          response: new Response(null, { status: 200 }),
-        });
-      }
-      return Promise.resolve({
-        data: undefined,
-        error: { error: { code: 'not_found', message: 'no sheet' } },
-        response: new Response(null, { status: 404 }),
-      });
-    });
-    render(Layout);
-    await waitFor(() => {
-      expect(mockGet.mock.calls.some((c) => c[0] === '/api/v1/runtime-config')).toBe(true);
-      expect(screen.queryByTestId('login-button')).not.toBeInTheDocument();
-    });
   });
 });
