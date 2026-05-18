@@ -215,6 +215,22 @@ func runServe(_ []string) error {
 		readyz: api.ReadyzHTTPHandler(deps),
 	}))
 
+	// Postgres-backed SessionResolver (mi-ruyc / docs/design/auth-bff.md
+	// §session-resolver-interface). The middleware (mi-ken4) and the
+	// /auth/* handlers (mi-bm5b / #3) both compose against this
+	// interface; a future cache decorator or auth-service RPC client
+	// drops in here without changing any callers.
+	sessionResolver := bff.NewPostgresResolver(pool)
+	_ = sessionResolver // wired into the request chain by mi-bm5b (#3) +
+	// mi-3vc4 (#7) — those beads also bring the OAuthClient and the
+	// cookie/session config inputs that bff.SessionMiddleware needs.
+	// Until then the existing auth.Auth bearer-token chain at
+	// /api/v1/* (line ~200) stays the active auth path. See
+	// docs/design/auth-bff.md §session-middleware §key-behaviors for
+	// the contract the middleware presents — it never 401s on a bad
+	// or missing cookie, so it composes cleanly under the same
+	// `/api/v1/` mount once #3 lands the OAuthClient construction.
+
 	// Background goroutine: hourly auth.sessions cleanup
 	// (mi-twql / docs/design/auth-bff.md §cleanup). The loop
 	// stops on rootCtx cancellation; we wait on cleanerDone
