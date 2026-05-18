@@ -592,85 +592,132 @@ jobs:
           # the working fixture path is the user shape.
           DEFAULT_USERNAME: smoke-default@localhost
           DEFAULT_PASSWORD: MineralsDev123!
+        # NB: NO `set -euo pipefail`. PR #205's first run AND PR #215's
+        # first run both died inside this step with 113ms of total
+        # runtime and ZERO stderr — `##[group]Run` then
+        # `##[error]Process completed with exit code 1` with nothing
+        # between, even when written with body+code capture and explicit
+        # FAIL echos under set -e. Whatever is happening (GHA secret-
+        # masker swallowing output, an aborted command substitution,
+        # a parse-time surprise) is hidden by errexit's silent-exit
+        # semantics. Trade `set -e`'s convenience for legibility:
+        # mirror every line to /tmp/default-token-step.log and let the
+        # next step (Dump default-token-step log) cat the file with
+        # if: always() — so the diagnostic survives even if GHA hides
+        # this step's own stdout.
         run: |
-          set -euo pipefail
-          # Capture body + HTTP code separately so a non-2xx from
-          # Keycloak surfaces in CI output (curl -fsS exits silently on
-          # HTTP errors when piped into jq, masking what actually broke
-          # — PR #205's first run hit exactly this and produced an
-          # empty log).
-          code=$(curl -sS -o /tmp/default-token-resp.json -w '%{http_code}' \
-            -X POST http://localhost:8081/realms/minerals/protocol/openid-connect/token \
-            -d grant_type=password \
-            -d client_id=minerals-test \
-            --data-urlencode "username=${DEFAULT_USERNAME}" \
-            --data-urlencode "password=${DEFAULT_PASSWORD}" \
-            -d scope=openid)
-          if [ "$code" != "200" ]; then
-            echo "FAIL: default-shaped user password grant returned HTTP $code" >&2
-            echo "request: username=${DEFAULT_USERNAME} client_id=minerals-test" >&2
-            echo "response body:" >&2
-            cat /tmp/default-token-resp.json >&2 || true
-            echo "" >&2
-            echo "Keycloak user record for this email:" >&2
-            admin_token=$(curl -fsS -X POST \
-              http://localhost:8081/realms/master/protocol/openid-connect/token \
-              -d grant_type=password -d client_id=admin-cli \
-              -d username=admin -d password=admin | jq -r '.access_token')
-            curl -sS -H "Authorization: Bearer ${admin_token}" \
-              "http://localhost:8081/admin/realms/minerals/users?username=${DEFAULT_USERNAME}&exact=true" \
-              | jq '.' >&2 || true
-            exit 1
-          fi
-          token=$(jq -r '.access_token' /tmp/default-token-resp.json)
-          if [ -z "$token" ] || [ "$token" = "null" ]; then
-            echo "FAIL: default-shaped user token response had no access_token" >&2
-            cat /tmp/default-token-resp.json >&2 || true
-            exit 1
-          fi
-          # Persist the token for the steps below — only readable by
-          # this job's runner.
-          printf '%s' "$token" > /tmp/default-token.txt
+          set +e
+          log=/tmp/default-token-step.log
+          : > "$log"
+          {
+            echo "--- step start: $(date -u +%FT%TZ) ---"
+            code=$(curl -sS -o /tmp/default-token-resp.json -w '%{http_code}' \
+              -X POST http://localhost:8081/realms/minerals/protocol/openid-connect/token \
+              -d grant_type=password \
+              -d client_id=minerals-test \
+              --data-urlencode "username=${DEFAULT_USERNAME}" \
+              --data-urlencode "password=${DEFAULT_PASSWORD}" \
+              -d scope=openid)
+            curl_rc=$?
+            echo "token-grant: curl_rc=$curl_rc HTTP=$code"
+            if [ "$code" != "200" ]; then
+              echo "FAIL: default-shaped user password grant returned HTTP $code"
+              echo "request: username=${DEFAULT_USERNAME} client_id=minerals-test"
+              echo "response body:"
+              cat /tmp/default-token-resp.json 2>&1 || echo "(no body file)"
+              echo ""
+              echo "Keycloak user record for this email:"
+              admin_token=$(curl -sS -X POST \
+                http://localhost:8081/realms/master/protocol/openid-connect/token \
+                -d grant_type=password -d client_id=admin-cli \
+                -d username=admin -d password=admin \
+                | jq -r '.access_token' 2>&1)
+              if [ -n "$admin_token" ] && [ "$admin_token" != "null" ]; then
+                curl -sS -H "Authorization: Bearer ${admin_token}" \
+                  "http://localhost:8081/admin/realms/minerals/users?username=${DEFAULT_USERNAME}&exact=true" \
+                  | jq '.' 2>&1 || echo "(admin lookup failed)"
+              else
+                echo "(could not obtain master-realm admin token for diagnostics)"
+              fi
+              echo "--- step end (token-grant failed) ---"
+              exit 1
+            fi
+            token=$(jq -r '.access_token' /tmp/default-token-resp.json 2>&1)
+            if [ -z "$token" ] || [ "$token" = "null" ]; then
+              echo "FAIL: default-shaped user token response had no access_token"
+              cat /tmp/default-token-resp.json 2>&1 || echo "(no body file)"
+              echo "--- step end (token parse failed) ---"
+              exit 1
+            fi
 
-          # Decode the JWT payload (base64url, no signature check —
-          # already verified above by trusting Keycloak's reply on
-          # localhost). `tr` rewrites the URL-safe alphabet and pads
-          # the body before `base64 -d`.
-          payload_b64=$(printf '%s' "$token" | cut -d. -f2 \
-            | tr '_-' '/+')
-          # Pad to a multiple of 4 (some base64 decoders are strict).
-          pad=$(( (4 - ${#payload_b64} % 4) % 4 ))
-          payload=$(printf '%s%s' "$payload_b64" "$(printf '%0.s=' $(seq 1 $pad))" \
-            | base64 -d 2>/dev/null)
-          echo "default-shaped token claims (realm_access + aud + azp):"
-          echo "$payload" | jq '{realm_access, aud, azp}'
+            # Persist the token for the steps below — only readable by
+            # this job's runner.
+            printf '%s' "$token" > /tmp/default-token.txt
 
-          actual=$(echo "$payload" | jq -c '.realm_access.roles | sort | unique')
-          expected=$(jq -c '.realm_access.roles | sort | unique' \
-            internal/oidc/testdata/keycloak-default-token-claims.json)
-          if [ "$actual" != "$expected" ]; then
-            echo "FAIL: default Keycloak realm_access.roles drifted from snapshot" >&2
-            echo "  expected: $expected" >&2
-            echo "  actual:   $actual"   >&2
-            echo "If this drift is intentional (Keycloak version bump," >&2
-            echo "realm-config change, etc.) update the snapshot at" >&2
-            echo "internal/oidc/testdata/keycloak-default-token-claims.json" >&2
-            echo "in the SAME PR — see docs/design/08-keycloak-default-token-shape.md." >&2
-            exit 1
+            # Decode the JWT payload (base64url, no signature check —
+            # already verified above by trusting Keycloak's reply on
+            # localhost). `tr` rewrites the URL-safe alphabet and pads
+            # the body before `base64 -d`.
+            payload_b64=$(printf '%s' "$token" | cut -d. -f2 | tr '_-' '/+')
+            # Pad to a multiple of 4 (some base64 decoders are strict).
+            pad=$(( (4 - ${#payload_b64} % 4) % 4 ))
+            payload=$(printf '%s%s' "$payload_b64" "$(printf '%0.s=' $(seq 1 $pad))" \
+              | base64 -d 2>/dev/null)
+            echo "default-shaped token claims (realm_access + aud + azp):"
+            echo "$payload" | jq '{realm_access, aud, azp}'
+
+            actual=$(echo "$payload" | jq -c '.realm_access.roles | sort | unique')
+            expected=$(jq -c '.realm_access.roles | sort | unique' \
+              internal/oidc/testdata/keycloak-default-token-claims.json)
+            if [ "$actual" != "$expected" ]; then
+              echo "FAIL: default Keycloak realm_access.roles drifted from snapshot"
+              echo "  expected: $expected"
+              echo "  actual:   $actual"
+              echo "If this drift is intentional (Keycloak version bump,"
+              echo "realm-config change, etc.) update the snapshot at"
+              echo "internal/oidc/testdata/keycloak-default-token-claims.json"
+              echo "in the SAME PR — see docs/design/08-keycloak-default-token-shape.md."
+              echo "--- step end (snapshot diff) ---"
+              exit 1
+            fi
+            echo "default-shaped realm_access.roles matches snapshot: $actual"
+
+            # Audience must contain minerals-frontend — the backend
+            # rejects on `aud`, not `azp` (mi-cl1 family). The
+            # minerals-test client carries the same audience mapper as
+            # the SPA client; if a future TF change drops it, this
+            # assertion catches it before staging does.
+            if ! echo "$payload" | jq -e '
+                (.aud | if type=="array" then index("minerals-frontend") else . == "minerals-frontend" end)
+              ' >/dev/null; then
+              echo "FAIL: default-shaped token aud claim missing 'minerals-frontend'"
+              echo "$payload" | jq '.aud'
+              echo "--- step end (aud missing) ---"
+              exit 1
+            fi
+            echo "--- step end (success) ---"
+          } 2>&1 | tee -a "$log"
+          exit_code=${PIPESTATUS[0]}
+          echo "[wrapper] braced-block exit_code=$exit_code"
+          exit "$exit_code"
+
+      - name: Default-shaped user — dump token-step log on failure (mi-2xa4)
+        if: always()
+        run: |
+          # Even if the previous step's stdout/stderr is hidden by the
+          # GHA secret-masker, we wrote everything to /tmp/default-token-step.log
+          # via tee. Cat it here so the failure is legible.
+          if [ -f /tmp/default-token-step.log ]; then
+            echo "=== /tmp/default-token-step.log ($(wc -c </tmp/default-token-step.log) bytes) ==="
+            cat /tmp/default-token-step.log
+            echo "=== end of log ==="
+          else
+            echo "/tmp/default-token-step.log does NOT exist — the previous step never reached the braced-block redirect (likely a pre-script GHA failure)."
           fi
-          echo "default-shaped realm_access.roles matches snapshot: $actual"
-
-          # Audience must contain minerals-frontend — the backend
-          # rejects on `aud`, not `azp` (mi-cl1 family). The
-          # minerals-test client carries the same audience mapper as
-          # the SPA client; if a future TF change drops it, this
-          # assertion catches it before staging does.
-          if ! echo "$payload" | jq -e '
-              (.aud | if type=="array" then index("minerals-frontend") else . == "minerals-frontend" end)
-            ' >/dev/null; then
-            echo "FAIL: default-shaped token aud claim missing 'minerals-frontend'" >&2
-            echo "$payload" | jq '.aud' >&2
-            exit 1
+          if [ -f /tmp/default-token-resp.json ]; then
+            echo "=== /tmp/default-token-resp.json ==="
+            cat /tmp/default-token-resp.json
+            echo "=== end of token response body ==="
           fi
 
       - name: Default-shaped user — profile setup + write succeeds (mi-2xa4)
