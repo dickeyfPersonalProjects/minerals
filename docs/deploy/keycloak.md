@@ -71,10 +71,11 @@ module owns:
 
 - **Realm `minerals`** — token lifespans, password policy, optional
   SMTP, optional self-registration.
-- **Clients** — `minerals-frontend` (public, PKCE) and
-  `minerals-backend` (confidential, with a `view-users`
-  realm-management role on its service account). Optional
-  `minerals-test` password-grant client when `test_environment = true`.
+- **Clients** — `minerals-frontend` (confidential, drives the V2 BFF
+  server-to-server code exchange — mi-1d5i) and `minerals-backend`
+  (confidential, with a `view-users` realm-management role on its
+  service account). Optional `minerals-test` password-grant client
+  when `test_environment = true`.
 - **Roles** — `devops-viewer`, `devops-admin` (devops/staff only;
   normal users have no realm role and are authorized by per-row rules
   in [`CONTRACT.md`](../../CONTRACT.md) §13).
@@ -373,37 +374,108 @@ inline via `-var`).
 terraform output realm_issuer
 terraform output oidc_discovery_url
 terraform output frontend_client_id
+terraform output -raw frontend_client_secret   # sensitive — V2 BFF (mi-1d5i)
 terraform output backend_client_id
 terraform output -raw backend_client_secret    # sensitive
 terraform output -raw admin_password           # sensitive — capture once
 ```
 
-The two sensitive outputs are the load-bearing ones:
+The three sensitive outputs are the load-bearing ones:
 
-- **`backend_client_secret`** — the Go backend's confidential-client
-  credential. Goes into a SealedSecret consumed by the Deployment.
+- **`frontend_client_secret`** — the V2 BFF's confidential-client
+  credential (mi-1d5i). Goes into the per-env SealedSecret
+  `minerals-oidc-secret` under the `OIDC_CLIENT_SECRET` key, consumed
+  by the Deployment via `envFrom: secretRef` (optional, mi-ron5).
+- **`backend_client_secret`** — the `minerals-backend` service-account
+  credential (used for any server-to-server Keycloak admin calls; not
+  the V2 BFF user-auth path).
 - **`admin_password`** — the realm admin's initial password. Capture
   it once, store it in a password manager, then it can be rotated
   out-of-band.
 
 ### Wiring outputs into k8s Secrets for the Go backend
 
-The pattern (manual, gitops-side; not automated by the module today):
+The V2 BFF (mi-1d5i) reads `OIDC_CLIENT_SECRET` and
+`OAUTH_STATE_HMAC_KEY` from the per-env SealedSecret
+`minerals-oidc-secret`. The Deployment already references this Secret
+via `envFrom: secretRef` with `optional: true`
+([`kustomize/base/deployment.yaml`](../../kustomize/base/deployment.yaml)),
+so populating it is the only operator step needed.
 
-1. `terraform output -raw backend_client_secret` to retrieve the value.
-2. Place it in a plaintext `.sec/minerals-oidc.yaml` Secret manifest
-   alongside the issuer URL and client ID.
-3. Run kubeseal per [`encrypt.md`](./encrypt.md) to produce
-   `minerals-oidc.yaml` in the env overlay.
-4. Add it to the env's `kustomization.yaml` resources list.
-5. Reference it from `kustomize/base/deployment.yaml` via `envFrom`
-   when the auth implementation bead lands.
+1. `terraform output -raw frontend_client_secret` to retrieve the
+   value Keycloak generated for the (now confidential) `minerals-frontend`
+   client.
+2. Generate a long-lived HMAC key for the state cookie, e.g.
+   `openssl rand -hex 32`. Same value goes in every pod replica; rotate
+   it and in-flight logins fail (`400 invalid_state`, users retry).
+3. Stage a plaintext `.sec/minerals-oidc-secret.yaml` manifest with
+   both data keys (`OIDC_CLIENT_SECRET`, `OAUTH_STATE_HMAC_KEY`).
+4. Run kubeseal per [`encrypt.md`](./encrypt.md) to produce the
+   encrypted manifest. The example stubs at
+   [`example/staging/minerals-oidc-secret.yaml`](./example/staging/minerals-oidc-secret.yaml)
+   and [`example/prod/minerals-oidc-secret.yaml`](./example/prod/minerals-oidc-secret.yaml)
+   show the target shape.
+5. Commit the encrypted manifest to the gitops repo (it's already in
+   the example overlay's `kustomization.yaml` resources list).
+
+The Go backend's BFF gate (`cmd/minerals/serve.go`) treats either key
+being empty as "BFF disabled" and leaves `/auth/login`,
+`/auth/callback`, `/auth/logout` unregistered, so a pod whose
+SealedSecret hasn't reconciled yet stays cleanly on the legacy PKCE
+path.
 
 The "auto-rotate the SealedSecret when Terraform rotates the secret"
 loop is out of scope today — the secret is set once and rotated
 manually if needed. External-Secrets + Vault would close that loop;
 see [`encrypt.md`](./encrypt.md) for the broader external-secrets
 discussion.
+
+### Cutover sequence: applying the PUBLIC → CONFIDENTIAL flip
+
+Per mi-ron5 / mi-1d5i, the `minerals-frontend` Keycloak client is now
+provisioned as `CONFIDENTIAL`. The order in which the Terraform apply
+and the SealedSecret rollout reach a given environment matters:
+
+**Before `terraform apply` against the env:**
+
+1. **Backend already has `OIDC_CLIENT_SECRET` available.** The
+   SealedSecret `minerals-oidc-secret` must be sealed, committed to
+   the gitops repo, reconciled by Flux, and visible as a Secret in
+   `mineral-<env>` (`kubectl get secret -n mineral-<env>
+   minerals-oidc-secret`). Until then the env var is unset; the
+   backend stays on PKCE; flipping Keycloak now breaks login.
+2. Note that the SealedSecret can be sealed with a *temporary*
+   placeholder value for `OIDC_CLIENT_SECRET` first if the operator
+   wants the Deployment wired and reconciled before the real secret
+   exists — the backend won't try to use it until Keycloak is
+   confidential. The `OAUTH_STATE_HMAC_KEY` value is operator-
+   generated and can be set in the same sealing pass.
+
+**Apply Terraform.**
+
+3. `terraform apply -var-file=<env>.tfvars` against the env. The plan
+   should show the `minerals-frontend` client's `access_type` going
+   from `PUBLIC` to `CONFIDENTIAL` as the only in-place update on the
+   client (plus a new computed `client_secret`). Capture
+   `terraform output -raw frontend_client_secret`.
+4. If step 1 used a placeholder, re-seal `minerals-oidc-secret` with
+   the real `OIDC_CLIENT_SECRET` value now, commit, and let Flux
+   reconcile. The Deployment's `envFrom` re-reads the Secret on the
+   next pod roll; force a rollout with
+   `kubectl rollout restart deploy/minerals -n mineral-<env>` if
+   immediate cutover is needed.
+
+**After Terraform apply and SealedSecret reconciliation:**
+
+5. **Verify the BFF smoke against staging.** The Playwright BFF smoke
+   (mi-sap2) is the gate — it drives the full
+   `/auth/login` → Keycloak → `/auth/callback` → cookie session
+   round-trip against the now-confidential client. A green smoke
+   confirms the flip landed cleanly.
+6. If the smoke fails, the legacy PKCE path no longer works (Keycloak
+   is confidential) — rolling back means either re-applying Terraform
+   with `access_type = "PUBLIC"` or fixing the secret plumbing.
+   Prefer the latter; the dep chain (mi-1d5i) is one-directional.
 
 ---
 
@@ -470,44 +542,33 @@ editing the committed file.
 
 ## How the app consumes OIDC
 
-> **Forward reference.** The Go backend does not consume these
-> variables yet — the auth implementation lands in a later bead
-> (`mi-aw3`). The operator contract is settled (env-var names,
-> ConfigMap shape) so the auth bead has a fixed target;
-> [`CONFIG.md`](../../CONFIG.md) and the example overlays already
-> document the values.
+**Backend is the OIDC client.** Under V2 BFF (mi-1d5i) the Go backend
+drives the full auth-code flow: it builds the authorization URL,
+receives the callback, exchanges the code for tokens server-to-server
+using the confidential client's secret, creates a session row, and
+hands the browser an httpOnly cookie. The SPA never sees a token. See
+[`docs/design/auth-bff.md`](../design/auth-bff.md) for the canonical
+contract.
 
-**Backend is a pure resource server.** It validates incoming JWTs
-against Keycloak's public JWKS endpoint and never holds a
-`client_secret`. No Secret is required for OIDC. The Terraform-
-provisioned `minerals-backend` confidential client exists for a future
-service-to-service (Client Credentials) flow, not for the user-facing
-auth path.
+The deployment consumes these BFF env vars. The non-secret ones live
+in the per-env ConfigMap patch; the two secrets live in
+`minerals-oidc-secret` (per § "Wiring outputs into k8s Secrets" above
+and [`secrets.md`](./secrets.md)).
 
-The deployment consumes five non-secret env vars, all in the
-`minerals-config` ConfigMap. Two are backend-internal; three are
-served by the backend to the SPA at runtime:
+| Env var | Source | Purpose |
+|---|---|---|
+| `OIDC_ISSUER_URL` | `realm_issuer` (e.g. `https://auth.example.com/realms/minerals`) | Discover endpoints, verify token `iss`. JWKS URL learned via `{OIDC_ISSUER_URL}/.well-known/openid-configuration`. |
+| `OIDC_CLIENT_ID` | `frontend_client_id` (`minerals-frontend`) | Identifies the confidential client on the token exchange and the audience the backend expects on issued tokens. |
+| `OIDC_CLIENT_SECRET` | `terraform output -raw frontend_client_secret` (sealed into `minerals-oidc-secret`) | Authenticates the backend on the `/token` exchange. |
+| `OAUTH_STATE_HMAC_KEY` | Operator-generated, ≥ 32 bytes (sealed into `minerals-oidc-secret`) | Signs the short-lived state cookie issued by `/auth/login` and verified on `/auth/callback`. |
+| `PUBLIC_OIDC_REDIRECT_URI` | `https://www.<env_domain>/auth/callback` | The backend's own callback URL. MUST match a `valid_redirect_uris` entry on the `minerals-frontend` client (the Terraform module wires `${frontend_url}/auth/callback` by default). |
 
-| Env var | Component | Source (Terraform output / pattern) | Purpose |
-|---|---|---|---|
-| `OIDC_ISSUER_URL` | backend | `realm_issuer` (e.g. `https://auth.example.com/realms/minerals`) | Discover endpoints and verify token `iss`. JWKS URL is learned via `{OIDC_ISSUER_URL}/.well-known/openid-configuration`. |
-| `OIDC_CLIENT_ID` | backend | `frontend_client_id` (`minerals-frontend`) | Expected `aud` claim on bearer tokens (audience check only). |
-| `PUBLIC_OIDC_ISSUER_URL` | frontend (via backend) | Same as `OIDC_ISSUER_URL` | Realm URL the SPA uses to discover the authorization endpoint. |
-| `PUBLIC_OIDC_CLIENT_ID` | frontend (via backend) | Same as `OIDC_CLIENT_ID` (`minerals-frontend`) | Public OIDC `client_id` the SPA uses for auth-code-with-PKCE. |
-| `PUBLIC_OIDC_REDIRECT_URI` | frontend (via backend) | `https://www.<env_domain>/auth/callback` | SPA's OIDC redirect target. Must match a `valid_redirect_uris` entry on the `minerals-frontend` client. |
-
-The `PUBLIC_*` prefix is a convention marking values the backend is
-allowed to ship to the SPA at runtime. The backend reads all five as
-env vars via `envFrom: configMapRef: minerals-config`; the mechanism
-for exposing the `PUBLIC_*` set to the browser (runtime config
-endpoint or HTML injection) is decided by the auth bead.
-
-Per-env values live in the GitOps overlay — see
+The full BFF settings inventory (cookie flags, session lifetimes,
+CSRF gate, etc.) lives in [`CONFIG.md`](../../CONFIG.md). Per-env
+hostname-dependent values live in the GitOps overlay — see
 [`example/staging/mineral.yaml`](./example/staging/mineral.yaml) and
 [`example/prod/mineral.yaml`](./example/prod/mineral.yaml) for the
-ConfigMap patch shape. The base manifest's
-[`kustomize/base/configmap.yaml`](../../kustomize/base/configmap.yaml)
-intentionally omits these keys because they are hostname-dependent.
+ConfigMap patch shape.
 
 The realm exposes two devops/staff roles — `devops-viewer` and
 `devops-admin`. Normal users have no realm role; the backend

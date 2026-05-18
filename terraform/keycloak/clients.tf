@@ -1,22 +1,32 @@
-# Public SPA client used by the minerals frontend (browser-based OIDC,
-# PKCE, no client secret).
+# Confidential client used by the minerals BFF (mi-1d5i). The Go
+# backend's `/auth/login` redirects the browser here; Keycloak issues a
+# code; the SPA-served path `/auth/callback` is now backend-served and
+# the backend exchanges the code for tokens server-to-server using the
+# generated `client_secret` (Terraform output `frontend_client_secret`,
+# sealed into the per-env `minerals-oidc-secret` Secret as
+# `OIDC_CLIENT_SECRET`). PKCE is irrelevant for a confidential client
+# (the secret authenticates the exchange) so the field is omitted.
 resource "keycloak_openid_client" "frontend" {
   realm_id  = keycloak_realm.minerals.id
   client_id = "minerals-frontend"
   name      = "Minerals Frontend"
   enabled   = true
 
-  access_type = "PUBLIC"
+  access_type = "CONFIDENTIAL"
 
   standard_flow_enabled        = true
   direct_access_grants_enabled = false
   implicit_flow_enabled        = false
 
-  pkce_code_challenge_method = "S256"
-
+  # Same URL string as the prior public-PKCE config — but the route is
+  # now backend-served (Go BFF), not SPA-served. Do NOT "fix" this back
+  # to a SPA path: under V2 BFF the SPA never sees the auth code, the
+  # backend does. The local-dev `additional_redirect_uris` (set via
+  # dev.tfvars) still uses a wildcard since dev runs against
+  # localhost:5173/:8080 and may serve the callback from either origin.
   valid_redirect_uris = concat(
     [
-      "${local.frontend_url}/*",
+      "${local.frontend_url}/auth/callback",
     ],
     var.additional_redirect_uris,
   )

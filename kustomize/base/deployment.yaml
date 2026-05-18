@@ -126,6 +126,19 @@ spec:
             # what the app reads — no further mapping needed).
             - secretRef:
                 name: minerals-s3-creds
+            # BFF OIDC secrets (mi-1d5i): OIDC_CLIENT_SECRET (from the
+            # Terraform `frontend_client_secret` output) and
+            # OAUTH_STATE_HMAC_KEY (operator-generated). Both keys named
+            # to match the env vars the app reads — no further mapping
+            # (CONTRACT.md §15). `optional: true` so the pod boots
+            # cleanly when the SealedSecret isn't reconciled yet: the
+            # BFF gate in cmd/minerals/serve.go leaves /auth/* handlers
+            # unregistered and the SPA stays on the legacy PKCE path
+            # (mi-ron5 cutover order — the SealedSecret must reconcile
+            # BEFORE the Terraform PUBLIC→CONFIDENTIAL flip is applied).
+            - secretRef:
+                name: minerals-oidc-secret
+                optional: true
           env:
             # CNPG provides the DSN under the `uri` key in its auto-generated
             # app Secret <cluster-name>-app. Map it to DATABASE_URL.

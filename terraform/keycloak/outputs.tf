@@ -44,8 +44,20 @@ output "oidc_discovery_url" {
 }
 
 output "frontend_client_id" {
-  description = "Public client ID used by the SPA."
+  description = "Confidential client ID used by the BFF (mi-1d5i)."
   value       = keycloak_openid_client.frontend.client_id
+}
+
+output "frontend_client_secret" {
+  description = <<-EOT
+    Confidential-client secret for `minerals-frontend`. Consumed by the
+    Go BFF on `/auth/callback`'s server-to-server code exchange — env
+    var `OIDC_CLIENT_SECRET`, plumbed via the per-env SealedSecret
+    `minerals-oidc-secret`. See docs/deploy/keycloak.md "Wiring outputs
+    into k8s Secrets" for the kubeseal handoff.
+  EOT
+  value       = keycloak_openid_client.frontend.client_secret
+  sensitive   = true
 }
 
 output "backend_client_id" {
