@@ -385,3 +385,136 @@ func TestLoad_EmptyStringTreatedAsUnset(t *testing.T) {
 		t.Errorf("LogLevel = %q (empty should fall back)", cfg.LogLevel)
 	}
 }
+
+// TestLoad_BFFAuthDefaults confirms the BFF auth fields default
+// correctly when unset: no client secret / HMAC key (BFF stays
+// off), 14-day cookie, 7-day session cap, CSRF gate off, trust
+// X-Forwarded-For off. Production overrides every one of these.
+func TestLoad_BFFAuthDefaults(t *testing.T) {
+	t.Parallel()
+	cfg, err := loadFrom(envFunc(nil))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.OIDCClientSecret != "" {
+		t.Errorf("OIDCClientSecret = %q, want empty", cfg.OIDCClientSecret)
+	}
+	if cfg.OAuthStateHMACKey != "" {
+		t.Errorf("OAuthStateHMACKey = %q, want empty", cfg.OAuthStateHMACKey)
+	}
+	if cfg.CookieMaxAgeSeconds != 1209600 {
+		t.Errorf("CookieMaxAgeSeconds = %d, want 1209600", cfg.CookieMaxAgeSeconds)
+	}
+	if cfg.SessionAbsoluteExpiresHours != 168 {
+		t.Errorf("SessionAbsoluteExpiresHours = %d, want 168", cfg.SessionAbsoluteExpiresHours)
+	}
+	if cfg.BFFEnforceCSRFOnLogout {
+		t.Error("BFFEnforceCSRFOnLogout default should be false")
+	}
+	if cfg.TrustForwardedFor {
+		t.Error("TrustForwardedFor default should be false")
+	}
+	if cfg.CookieSecure {
+		t.Error("CookieSecure default should be false in dev")
+	}
+}
+
+// TestLoad_BFFAuthExplicit walks the full set of BFF auth env vars
+// through loadFrom and asserts every field round-trips. Catches a
+// typo in a field name or a swapped pair of getters during a
+// future refactor.
+func TestLoad_BFFAuthExplicit(t *testing.T) {
+	t.Parallel()
+	cfg, err := loadFrom(envFunc(map[string]string{
+		"OIDC_CLIENT_SECRET":             "kc-secret",
+		"OAUTH_STATE_HMAC_KEY":           "0123456789abcdef0123456789abcdef",
+		"COOKIE_SECURE":                  "true",
+		"COOKIE_MAX_AGE_SECONDS":         "3600",
+		"SESSION_ABSOLUTE_EXPIRES_HOURS": "24",
+		"POST_LOGOUT_REDIRECT_URI":       "https://app.example/",
+		"BFF_ENFORCE_CSRF_LOGOUT":        "true",
+		"TRUST_FORWARDED_FOR":            "true",
+	}))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.OIDCClientSecret != "kc-secret" {
+		t.Errorf("OIDCClientSecret = %q", cfg.OIDCClientSecret)
+	}
+	if cfg.OAuthStateHMACKey != "0123456789abcdef0123456789abcdef" {
+		t.Errorf("OAuthStateHMACKey = %q", cfg.OAuthStateHMACKey)
+	}
+	if !cfg.CookieSecure {
+		t.Error("CookieSecure should be true")
+	}
+	if cfg.CookieMaxAgeSeconds != 3600 {
+		t.Errorf("CookieMaxAgeSeconds = %d, want 3600", cfg.CookieMaxAgeSeconds)
+	}
+	if cfg.SessionAbsoluteExpiresHours != 24 {
+		t.Errorf("SessionAbsoluteExpiresHours = %d, want 24", cfg.SessionAbsoluteExpiresHours)
+	}
+	if cfg.PostLogoutRedirectURI != "https://app.example/" {
+		t.Errorf("PostLogoutRedirectURI = %q", cfg.PostLogoutRedirectURI)
+	}
+	if !cfg.BFFEnforceCSRFOnLogout {
+		t.Error("BFFEnforceCSRFOnLogout should be true")
+	}
+	if !cfg.TrustForwardedFor {
+		t.Error("TrustForwardedFor should be true")
+	}
+}
+
+// TestLoad_CookieSecureDefaultsToProd locks the per-environment
+// default — true in prod, false in dev — and the explicit
+// override path. A misconfigured COOKIE_SECURE in prod could
+// silently issue cookies in clear-text mode; the default-from-env
+// behavior makes that hard to do by accident.
+func TestLoad_CookieSecureDefaultsToProd(t *testing.T) {
+	t.Parallel()
+	prod, err := loadFrom(envFunc(map[string]string{"ENV": "prod"}))
+	if err != nil {
+		t.Fatalf("loadFrom prod: %v", err)
+	}
+	if !prod.CookieSecure {
+		t.Error("CookieSecure default in prod should be true")
+	}
+	dev, err := loadFrom(envFunc(map[string]string{"ENV": "dev"}))
+	if err != nil {
+		t.Fatalf("loadFrom dev: %v", err)
+	}
+	if dev.CookieSecure {
+		t.Error("CookieSecure default in dev should be false")
+	}
+}
+
+// TestLoad_BFFAuthMalformedValues guards the explicit error
+// messages parseBoolWithDefault / parseIntWithDefault emit when an
+// env var carries a typo. Catching "yes" before it silently
+// flips the cookie to insecure is the whole point of validating at
+// load.
+func TestLoad_BFFAuthMalformedValues(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"bool typo", map[string]string{"COOKIE_SECURE": "yes"}, "COOKIE_SECURE"},
+		{"int typo", map[string]string{"COOKIE_MAX_AGE_SECONDS": "not-a-number"}, "COOKIE_MAX_AGE_SECONDS"},
+		{"int negative", map[string]string{"SESSION_ABSOLUTE_EXPIRES_HOURS": "-1"}, "SESSION_ABSOLUTE_EXPIRES_HOURS"},
+		{"csrf bool typo", map[string]string{"BFF_ENFORCE_CSRF_LOGOUT": "maybe"}, "BFF_ENFORCE_CSRF_LOGOUT"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := loadFrom(envFunc(tc.env))
+			if err == nil {
+				t.Fatalf("loadFrom accepted %v; want error mentioning %s", tc.env, tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want mention of %s", err, tc.want)
+			}
+		})
+	}
+}

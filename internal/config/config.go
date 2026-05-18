@@ -80,6 +80,63 @@ type Config struct {
 	// in-container backend reaches Keycloak at `http://keycloak:8080`.
 	// Empty in prod — OIDC discovery handles it.
 	OIDCJWKSURL string
+
+	// OIDCClientSecret is the Keycloak confidential-client secret
+	// the BFF uses on the server-to-server code exchange (mi-bm5b).
+	// Required to enable the /auth/login → /auth/callback flow; when
+	// empty the BFF handlers are not registered and the SPA falls
+	// back to the (deprecated) PKCE path. Sealed in the gitops
+	// overlay; never logged.
+	OIDCClientSecret string
+
+	// OAuthStateHMACKey signs the short-lived state cookie issued
+	// by /auth/login and verified on /auth/callback (mi-bm5b). 32-
+	// byte minimum, enforced when the BFF handlers boot. Treat as a
+	// secret — leaking it lets an attacker forge state values.
+	// Rotated by deploying a new value: in-flight logins fail with
+	// 400 invalid_state and users retry, which is acceptable.
+	OAuthStateHMACKey string
+
+	// CookieSecure flips the Secure flag on the BFF cookies (session
+	// + state). True in prod/staging; false in dev (docker-compose
+	// serves on plain HTTP localhost). Per-environment, never
+	// per-request — never inferred from X-Forwarded-Proto.
+	CookieSecure bool
+
+	// CookieMaxAgeSeconds is the Max-Age the session cookie carries
+	// to the browser. Must be longer than SessionAbsoluteExpiresHours
+	// so the server-side row expires first and a stale cookie
+	// arriving past expiry cleanly clears (the design's invariant).
+	// Default 1209600 (14 days).
+	CookieMaxAgeSeconds int
+
+	// SessionAbsoluteExpiresHours is the hard cap on a single
+	// session row's lifetime, stamped into auth.sessions.
+	// absolute_expires_at on Create. The session middleware
+	// (mi-ken4) tears down sessions past this even when Keycloak
+	// would still issue a refresh. Default 168 (7 days).
+	SessionAbsoluteExpiresHours int
+
+	// PostLogoutRedirectURI is the absolute URL the BFF asks
+	// Keycloak to bounce the browser back to after the SSO logout
+	// completes. MUST be on Keycloak's post_logout_redirect_uris
+	// allowlist. Empty disables the 302-to-Keycloak step (handler
+	// returns 204 after revoking the local session).
+	PostLogoutRedirectURI string
+
+	// BFFEnforceCSRFOnLogout gates the /auth/logout handler's CSRF
+	// check. False until the generic CSRF middleware (mi-gbzs) and
+	// the SPA wiring (mi-3vc4) ship; production flips it true once
+	// both are live. The header check is constant-time.
+	BFFEnforceCSRFOnLogout bool
+
+	// TrustForwardedFor enables X-Forwarded-For-based client-IP
+	// extraction for the BFF callback handler (used for the
+	// auth.sessions.ip forensics column). True only when the
+	// ingress strips/normalises the header so a hostile client
+	// cannot spoof the value. Default false — RemoteAddr is the
+	// safe fallback.
+	TrustForwardedFor bool
 }
 
 // Defaults for ENV=dev or unset. Mirrors the inventory in CONTRACT.md
@@ -149,6 +206,43 @@ func loadFrom(get func(string) string) (*Config, error) {
 	cfg.OIDCIssuerURL = orDefault(get("OIDC_ISSUER_URL"), defaultOIDCIssuerURL)
 	cfg.OIDCClientID = orDefault(get("OIDC_CLIENT_ID"), defaultOIDCClientID)
 	cfg.OIDCJWKSURL = strings.TrimSpace(get("OIDC_JWKS_URL"))
+	cfg.OIDCClientSecret = strings.TrimSpace(get("OIDC_CLIENT_SECRET"))
+	cfg.OAuthStateHMACKey = strings.TrimSpace(get("OAUTH_STATE_HMAC_KEY"))
+	cfg.PostLogoutRedirectURI = strings.TrimSpace(get("POST_LOGOUT_REDIRECT_URI"))
+
+	// CookieSecure defaults to prod (true in prod, false in dev).
+	// Explicit COOKIE_SECURE overrides either way — useful for the
+	// dev compose stack when the developer tests with an HTTPS
+	// reverse proxy locally.
+	cs, err := parseBoolWithDefault(get("COOKIE_SECURE"), prod)
+	if err != nil {
+		return nil, fmt.Errorf("config: COOKIE_SECURE: %w", err)
+	}
+	cfg.CookieSecure = cs
+
+	cma, err := parseIntWithDefault(get("COOKIE_MAX_AGE_SECONDS"), 1209600)
+	if err != nil {
+		return nil, fmt.Errorf("config: COOKIE_MAX_AGE_SECONDS: %w", err)
+	}
+	cfg.CookieMaxAgeSeconds = cma
+
+	sae, err := parseIntWithDefault(get("SESSION_ABSOLUTE_EXPIRES_HOURS"), 168)
+	if err != nil {
+		return nil, fmt.Errorf("config: SESSION_ABSOLUTE_EXPIRES_HOURS: %w", err)
+	}
+	cfg.SessionAbsoluteExpiresHours = sae
+
+	ec, err := parseBoolWithDefault(get("BFF_ENFORCE_CSRF_LOGOUT"), false)
+	if err != nil {
+		return nil, fmt.Errorf("config: BFF_ENFORCE_CSRF_LOGOUT: %w", err)
+	}
+	cfg.BFFEnforceCSRFOnLogout = ec
+
+	tf, err := parseBoolWithDefault(get("TRUST_FORWARDED_FOR"), false)
+	if err != nil {
+		return nil, fmt.Errorf("config: TRUST_FORWARDED_FOR: %w", err)
+	}
+	cfg.TrustForwardedFor = tf
 
 	// Required-in-prod variables: in dev, fall back to the inventory
 	// default; in prod, leave the field empty so ValidateFor* can
@@ -219,6 +313,44 @@ func orDefault(v, def string) string {
 		return s
 	}
 	return def
+}
+
+// parseBoolWithDefault parses "true"/"false"/"1"/"0" (and a small
+// set of common variants) from an env var; empty falls through to
+// def. Anything else surfaces as an error so a typo
+// (`COOKIE_SECURE=yes`) does not silently flip the cookie to
+// insecure.
+func parseBoolWithDefault(raw string, def bool) (bool, error) {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	switch s {
+	case "":
+		return def, nil
+	case "true", "1", "t":
+		return true, nil
+	case "false", "0", "f":
+		return false, nil
+	default:
+		return false, fmt.Errorf("expected true/false, got %q", raw)
+	}
+}
+
+// parseIntWithDefault parses a positive integer from raw; empty
+// returns def. Negative values are rejected — every numeric env
+// var in the §15 inventory is a duration / size that has no
+// meaningful negative interpretation.
+func parseIntWithDefault(raw string, def int) (int, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("expected integer, got %q: %w", raw, err)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("expected non-negative integer, got %d", n)
+	}
+	return n, nil
 }
 
 // ValidateForServe enforces the prod-strictness rule for the serve

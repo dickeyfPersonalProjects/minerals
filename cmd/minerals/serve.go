@@ -12,10 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dickeyfPersonalProjects/minerals/internal/api"
+	"github.com/dickeyfPersonalProjects/minerals/internal/auth"
 	"github.com/dickeyfPersonalProjects/minerals/internal/auth/bff"
 	"github.com/dickeyfPersonalProjects/minerals/internal/authz"
 	"github.com/dickeyfPersonalProjects/minerals/internal/config"
@@ -146,6 +148,20 @@ func runServe(_ []string) error {
 	}
 	slog.Info("authz enforcer configured", "policies", len(authz.DefaultPolicies))
 
+	users := db.NewUserPostgres(pool)
+
+	// BFF auth handlers (mi-bm5b). The bundle is built only when
+	// every required input is present — OIDC discovery URL, client
+	// id + secret, HMAC key for the state cookie, and an absolute
+	// redirect_uri. In dev / test deployments missing any of these,
+	// the handlers stay unregistered and the SPA falls back to the
+	// (deprecated) PKCE path; the same /auth/login link 404s, which
+	// is the right signal that BFF auth is off in this environment.
+	bffAuth, err := buildBFFAuth(rootCtx, cfg, pool, users)
+	if err != nil {
+		return fmt.Errorf("serve: init bff auth: %w", err)
+	}
+
 	photoDeps := &api.PhotoServiceDeps{
 		Photos:         db.NewPhotoPostgres(pool),
 		Files:          db.NewFilePostgres(pool),
@@ -178,9 +194,10 @@ func runServe(_ []string) error {
 			Mindat: newMindatClient(cfg.MindatAPIKey),
 		},
 		QRSheets: db.NewQRSheetPostgres(pool),
-		Users:    db.NewUserPostgres(pool),
+		Users:    users,
 		Verifier: verifier,
 		Enforcer: enforcer,
+		BFFAuth:  bffAuth,
 		RuntimeOIDC: api.RuntimeOIDCConfig{
 			IssuerURL:   cfg.PublicOIDCIssuerURL,
 			ClientID:    cfg.PublicOIDCClientID,
@@ -313,6 +330,93 @@ func configureLogger(level string) {
 		lv = slog.LevelInfo
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lv})))
+}
+
+// buildBFFAuth assembles the V2 cookie-auth handler bundle when the
+// deployment supplies all of OIDC_CLIENT_SECRET, OAUTH_STATE_HMAC_KEY,
+// and PUBLIC_OIDC_REDIRECT_URI. Missing any one returns (nil, nil)
+// — the BFF routes stay unregistered and the legacy PKCE path keeps
+// working. This lets the migration roll out one environment at a
+// time without forking the binary (per docs/design/auth-bff.md).
+//
+// The OAuth client is constructed here (and not lazily inside the
+// handlers) so misconfiguration — bad issuer, unreachable Keycloak
+// at boot — surfaces at process start rather than on the first user
+// login. The session cleanup goroutine (mi-twql) already runs
+// regardless, so cleanup is decoupled from this gate.
+func buildBFFAuth(
+	ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, users domain.UserRepo,
+) (*bff.Handlers, error) {
+	if cfg.OIDCClientSecret == "" || cfg.OAuthStateHMACKey == "" || cfg.PublicOIDCRedirectURI == "" {
+		slog.Info("bff auth: disabled (missing OIDC_CLIENT_SECRET / OAUTH_STATE_HMAC_KEY / PUBLIC_OIDC_REDIRECT_URI)",
+			"client_secret_present", cfg.OIDCClientSecret != "",
+			"hmac_key_present", cfg.OAuthStateHMACKey != "",
+			"redirect_uri_present", cfg.PublicOIDCRedirectURI != "")
+		return nil, nil //nolint:nilnil // explicit "feature off" signal, not an error
+	}
+	if cfg.SessionAbsoluteExpiresHours <= 0 {
+		return nil, fmt.Errorf("SESSION_ABSOLUTE_EXPIRES_HOURS must be > 0 when BFF auth is enabled")
+	}
+
+	oauthClient, err := bff.NewKeycloakOAuthClient(ctx, bff.OAuthConfig{
+		Issuer:       cfg.OIDCIssuerURL,
+		ClientID:     cfg.OIDCClientID,
+		ClientSecret: cfg.OIDCClientSecret,
+		// Standard Keycloak claim-emitting scopes — `openid` is
+		// required for OIDC, the others surface the email + roles
+		// the resolver needs on first-login (docs/design/auth-bff.md
+		// §sessions-table).
+		Scopes: []string{"openid", "profile", "email", "roles"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("oauth client: %w", err)
+	}
+
+	handlers, err := bff.NewHandlers(
+		bff.HandlerConfig{
+			RedirectURI:           cfg.PublicOIDCRedirectURI,
+			PostLogoutRedirectURI: cfg.PostLogoutRedirectURI,
+			StateHMACKey:          []byte(cfg.OAuthStateHMACKey),
+			SessionAbsoluteMax:    time.Duration(cfg.SessionAbsoluteExpiresHours) * time.Hour,
+			Cookie: bff.CookieConfig{
+				Path:     "/",
+				Secure:   cfg.CookieSecure,
+				SameSite: http.SameSiteLaxMode,
+				MaxAge:   time.Duration(cfg.CookieMaxAgeSeconds) * time.Second,
+			},
+			StateCookieSecure:   cfg.CookieSecure,
+			EnforceCSRFOnLogout: cfg.BFFEnforceCSRFOnLogout,
+			TrustForwardedFor:   cfg.TrustForwardedFor,
+		},
+		bff.HandlerDeps{
+			OAuth:    oauthClient,
+			Sessions: bff.NewPostgresResolver(pool),
+			Users:    bffUserResolver(users),
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("handlers: %w", err)
+	}
+	slog.Info("bff auth: enabled",
+		"redirect_uri", cfg.PublicOIDCRedirectURI,
+		"enforce_csrf_on_logout", cfg.BFFEnforceCSRFOnLogout,
+		"session_absolute_max_hours", cfg.SessionAbsoluteExpiresHours)
+	return handlers, nil
+}
+
+// bffUserResolver bridges bff.UserResolver into the application's
+// first-login resolver. Reusing api.ResolveOrCreateUser keeps the
+// cookie path and the bearer-token path on the same users row —
+// duplicating the resolve-or-create logic here would let the two
+// flows drift apart.
+func bffUserResolver(repo domain.UserRepo) bff.UserResolver {
+	return func(ctx context.Context, sub, email string) (uuid.UUID, error) {
+		row, err := api.ResolveOrCreateUser(ctx, repo, auth.User{Sub: sub, Email: email})
+		if err != nil {
+			return uuid.Nil, err
+		}
+		return row.ID, nil
+	}
 }
 
 // parseCount is a small convenience for the migrate subcommand.
