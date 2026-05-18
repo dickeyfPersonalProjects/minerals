@@ -268,7 +268,7 @@ Only these things vary between staging and prod in the example:
 | `Kustomization.metadata.name`  | `mineral-staging`                    | `mineral-prod`                    |
 | `images[0].newTag`             | `staging`                            | `prod`                            |
 | ConfigMap `ENV` patch value    | `staging`                            | `prod`                            |
-| `OIDC_ISSUER_URL` / `PUBLIC_OIDC_ISSUER_URL` | `https://auth.staging.example.com/realms/minerals` | `https://auth.example.com/realms/minerals` |
+| `OIDC_ISSUER_URL`              | `https://auth.staging.example.com/realms/minerals` | `https://auth.example.com/realms/minerals` |
 | `PUBLIC_OIDC_REDIRECT_URI`     | `https://www.staging.example.com/auth/callback` | `https://www.example.com/auth/callback` |
 | SealedSecret ciphertext        | encrypted to `mineral-staging` scope | encrypted to `mineral-prod` scope |
 
@@ -311,8 +311,7 @@ that the overlay's behavior is obvious from the overlay itself.
    `valid_redirect_uris` must include the SPA's `/auth/callback`
    on the new hostname.
 5. Edit the OIDC ConfigMap patch in the new overlay's `mineral.yaml`
-   to point `OIDC_ISSUER_URL`, `PUBLIC_OIDC_ISSUER_URL`,
-   `PUBLIC_OIDC_CLIENT_ID`, `OIDC_CLIENT_ID`, and
+   to point `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and
    `PUBLIC_OIDC_REDIRECT_URI` at this env's Keycloak realm and SPA
    hostname. Skipping this step leaves login silently broken — see
    [Authentication setup](#authentication-setup).

@@ -2774,8 +2774,8 @@ high-level; consult the design doc for implementation depth.
 
 The split — session/CSRF at the http layer, auth/require at the huma
 layer — preserves the "public-but-personalized" pattern (`/api/v1/csrf`,
-runtime-config, public-specimen reads) where a logged-in user is
-populated if present but anonymous is allowed.
+public-specimen reads) where a logged-in user is populated if present
+but anonymous is allowed.
 
 ## Route bucket placement (mandatory)
 
@@ -3978,7 +3978,7 @@ script-src 'self';
 style-src 'self' 'unsafe-inline';
 img-src 'self' data:;
 font-src 'self';
-connect-src 'self' <PUBLIC_OIDC_ISSUER_URL origin, if configured>;
+connect-src 'self';
 frame-ancestors 'none';
 base-uri 'self';
 form-action 'self';
@@ -3992,28 +3992,11 @@ form-action 'self';
 - Polecats MUST NOT add wildcard sources (`*`, `https://*`) to
   any directive. If a specific origin needs allow-listing
   (rare), name it explicitly.
-
-#### `connect-src` and the OIDC issuer (mi-cl1)
-
-The browser PKCE flow performs a cross-origin POST from the SPA
-to Keycloak's token endpoint. `'self'` alone forbids that, so
-when `PUBLIC_OIDC_ISSUER_URL` is set, the **origin** portion
-(`scheme://host[:port]`) is appended to `connect-src`. When the
-variable is unset, the policy stays exactly as the baseline
-above — no auth, no cross-origin.
-
-Hard rules:
-
-- The configured value is the **origin only** — never the full
-  issuer URL with realm path. CSP source matching is
-  origin-based; including a path is meaningless and misleading.
-- The origin is derived from `PUBLIC_OIDC_ISSUER_URL` by URL
-  parsing in `internal/config`. A malformed value fails startup
-  rather than silently emitting a broken policy.
-- Adding any other cross-origin source to `connect-src` (or any
-  other directive) is a contract amendment, not a one-off
-  change. Today's allow-list is `'self'` + the one OIDC origin
-  the SPA already uses. Nothing else.
+- Under V2 BFF the SPA never speaks OAuth directly, so
+  `connect-src 'self'` is sufficient — no cross-origin Keycloak
+  POST to allow-list. Adding any cross-origin source to
+  `connect-src` (or any other directive) is a contract
+  amendment, not a one-off change.
 - `frame-src`, `script-src`, `form-action` stay `'self'`. The
   SPA does not use Keycloak's session-check iframe, does not
   load Keycloak JS, and does not POST HTML forms to Keycloak —

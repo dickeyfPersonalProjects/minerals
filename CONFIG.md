@@ -56,13 +56,13 @@ feature flags, etc.) are added when the loading mechanism actually
 diverges; today every setting is an env var.
 
 The `PUBLIC_*` prefix is historical. Under V1 / pre-BFF it marked
-values the backend was allowed to ship to the SPA via
-`/api/v1/runtime-config`. Under V2 BFF the SPA never speaks OAuth and
-there are no runtime values to ship — `PUBLIC_OIDC_REDIRECT_URI` is
-the only `PUBLIC_*` entry left, and its value is now consumed by the
-backend (as the redirect URI handed to Keycloak from `/auth/login`).
-The prefix is retained for env-var-name stability across the
-migration; do not introduce new `PUBLIC_*` settings.
+values the backend was allowed to ship to the SPA via a runtime-config
+endpoint. Under V2 BFF the SPA never speaks OAuth and there are no
+runtime values to ship — `PUBLIC_OIDC_REDIRECT_URI` is the only
+`PUBLIC_*` entry left, and its value is now consumed by the backend
+(as the redirect URI handed to Keycloak from `/auth/login`). The
+prefix is retained for env-var-name stability across the migration;
+do not introduce new `PUBLIC_*` settings.
 
 **Prod routing.** In Kubernetes (`kustomize/base/`) the env vars split
 into two sources:

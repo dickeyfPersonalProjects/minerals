@@ -200,12 +200,6 @@ func runServe(_ []string) error {
 		BFFAuth:   bffAuth,
 		SessionMW: buildSessionMW(cfg, oauthClient, sessions, users),
 		CSRFMW:    buildCSRFMW(oauthClient),
-		RuntimeOIDC: api.RuntimeOIDCConfig{
-			IssuerURL:   cfg.PublicOIDCIssuerURL,
-			ClientID:    cfg.PublicOIDCClientID,
-			RedirectURI: cfg.PublicOIDCRedirectURI,
-		},
-		CSPIssuerOrigin: cfg.PublicOIDCIssuerOrigin,
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        db.NewJournalEntryPostgres(pool),
 			Attachments:    db.NewJournalEntryFilePostgres(pool),
