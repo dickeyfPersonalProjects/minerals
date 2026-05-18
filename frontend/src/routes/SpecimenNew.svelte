@@ -3,7 +3,7 @@
   import { client } from '../lib/api';
   import SpecimenForm from '../lib/SpecimenForm.svelte';
   import type { SpecimenFormSubmitResult } from '../lib/SpecimenForm.svelte';
-  import { isAuthenticated } from '../lib/oidc/auth';
+  import { isAuthenticated } from '../lib/auth';
   import { formToCreateBody, type SpecimenFormValues } from '../lib/schemas/specimen';
   import { toastSuccess } from '../lib/toasts';
 

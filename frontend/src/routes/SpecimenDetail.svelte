@@ -12,9 +12,8 @@
   import type { JournalEntryFormValues } from '../lib/schemas/journal';
   import ImageCropModal from '../lib/ImageCropModal.svelte';
   import Lightbox from '../lib/Lightbox.svelte';
-  import AuthedImage from '../lib/photos/AuthedImage.svelte';
   import PhotoUploader from '../lib/PhotoUploader.svelte';
-  import { isAuthenticated } from '../lib/oidc/auth';
+  import { isAuthenticated } from '../lib/auth';
   import { formatLocal } from '../lib/time';
   import { toastError, toastSuccess } from '../lib/toasts';
   import { resolveImage, type OwnerLike, type Visibility } from '../lib/api/visibility';
@@ -849,7 +848,7 @@
           aria-label="Open photo viewer"
           data-testid="hero-photo"
         >
-          <AuthedImage
+          <img
             src={`/api/v1/photos/${heroPhoto.id}/display`}
             alt={`Photo of ${specimen.name}`}
             class="block h-auto w-full transition group-hover:opacity-95"
@@ -939,7 +938,7 @@
                   aria-label="View photo"
                   data-testid="gallery-thumb"
                 >
-                  <AuthedImage
+                  <img
                     src={`/api/v1/photos/${photo.id}/thumb`}
                     alt=""
                     class="h-full w-full object-cover"

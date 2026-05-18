@@ -1,19 +1,32 @@
 <script lang="ts">
   import { push } from 'svelte-spa-router';
-  import { authStore, beginLogout, decodeTokenClaims } from './oidc/auth';
+  import { authStore } from './auth';
+  import { csrfStore } from './csrf';
   import { toastError } from './toasts';
 
+  // V2 BFF cookie flow (mi-3vc4): user identity comes from the
+  // /api/v1/profile probe (auth.ts); the JWT is no longer in the
+  // browser. Sign-out is a fetch POST to /auth/logout with the
+  // CSRF token in the X-CSRF-Token header — the backend invalidates
+  // the session row, clears the cookie, and (when configured) 302s
+  // to Keycloak's end-session endpoint. fetch can't navigate the
+  // tab cross-origin, so we POST and then hard-navigate the tab to
+  // `/` for a clean reboot. Keycloak's own SSO cookie may persist
+  // (mild) — the app cookie is gone, which is what the user asked
+  // for; the next click on Log in will silently mint a new session.
+
   const auth = $derived($authStore);
-  const claims = $derived(decodeTokenClaims(auth.accessToken));
+  const csrf = $derived($csrfStore);
+  const user = $derived(auth.user);
+  const label = $derived(user?.display_name?.trim() || user?.email || 'Account');
   const initials = $derived(initialsFor());
-  const label = $derived(claims?.name ?? claims?.preferredUsername ?? claims?.email ?? 'Account');
 
   let open = $state(false);
   let busy = $state(false);
   let container: HTMLDivElement;
 
   function initialsFor(): string | null {
-    const name = claims?.name?.trim();
+    const name = user?.display_name?.trim();
     if (name) {
       const parts = name.split(/\s+/).filter(Boolean);
       const first = parts[0];
@@ -23,8 +36,8 @@
       }
       if (first) return first.slice(0, 2).toUpperCase();
     }
-    const username = claims?.preferredUsername?.trim();
-    if (username) return username.slice(0, 2).toUpperCase();
+    const email = user?.email?.trim();
+    if (email) return email.slice(0, 2).toUpperCase();
     return null;
   }
 
@@ -42,7 +55,18 @@
     busy = true;
     open = false;
     try {
-      await beginLogout();
+      await fetch('/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+        redirect: 'manual',
+        headers: csrf ? { 'X-CSRF-Token': csrf } : undefined,
+      });
+      // Hard-navigate even if the POST failed: the user clicked
+      // Sign out and clearing local state is the right UX. The
+      // session cookie is HttpOnly so we can't delete it from
+      // here — only the backend can — but `/` reboots the SPA and
+      // the next probe will surface the current truth.
+      window.location.assign('/');
     } catch (err: unknown) {
       busy = false;
       toastError(err instanceof Error ? err.message : String(err));
@@ -82,7 +106,7 @@
     {#if initials}
       <span aria-hidden="true">{initials}</span>
     {:else}
-      <!-- generic person icon when no name/username claim is present -->
+      <!-- generic person icon when no name/email present -->
       <svg
         xmlns="http://www.w3.org/2000/svg"
         width="18"

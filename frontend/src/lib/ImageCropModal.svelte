@@ -4,7 +4,6 @@
   import 'cropperjs/dist/cropper.css';
   import { client } from './api';
   import { SUPPRESS_TOAST_HEADERS, envelopeMessage } from './api/wrapper';
-  import { loadAuthedBlobUrl } from './photos/blob-url';
   import { toastError, toastSuccess } from './toasts';
 
   interface Props {
@@ -26,41 +25,10 @@
   let imageError = $state(false);
   let rotation = $state(0);
 
-  // Source path for the photo bytes — kept as a stable string for
-  // `data-src` on the rendered <img> so tests can still assert
-  // against a meaningful URL.
+  // V2 BFF (mi-3vc4): cookies travel on <img> requests automatically,
+  // so the image URL is the backend path directly — no auth header to
+  // attach, no Blob URL workaround.
   const imagePath = $derived(`/api/v1/photos/${photoId}/display`);
-  // Blob URL holding the authenticated bytes (mi-lrqt). Null while
-  // the request is in flight; set to the URL once resolved. Revoked
-  // in the cleanup return below when the component teardown or the
-  // path changes.
-  let imageUrl: string | null = $state(null);
-
-  $effect(() => {
-    const path = imagePath;
-    imageUrl = null;
-    const ctrl = new AbortController();
-    let createdUrl: string | null = null;
-    let alive = true;
-    loadAuthedBlobUrl(path, { signal: ctrl.signal })
-      .then((url) => {
-        if (!alive || ctrl.signal.aborted) {
-          URL.revokeObjectURL(url);
-          return;
-        }
-        createdUrl = url;
-        imageUrl = url;
-      })
-      .catch(() => {
-        if (!alive || ctrl.signal.aborted) return;
-        imageError = true;
-      });
-    return () => {
-      alive = false;
-      ctrl.abort();
-      if (createdUrl) URL.revokeObjectURL(createdUrl);
-    };
-  });
 
   function markDirty() {
     if (!dirty) dirty = true;
@@ -263,13 +231,13 @@
         >
           Couldn't load this image for cropping.
         </p>
-      {:else if imageUrl}
+      {:else}
         <!-- cropperjs replaces this <img> with its own DOM after init.
-             It needs a real <img> on first render. We only render it
-             once the authenticated blob URL is in hand (mi-lrqt). -->
+             It needs a real <img> on first render. Cookies travel on
+             the request automatically under the V2 BFF cookie flow. -->
         <img
           bind:this={imgEl}
-          src={imageUrl}
+          src={imagePath}
           data-src={imagePath}
           alt="Crop preview"
           class="block max-h-[60vh] w-full"
