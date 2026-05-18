@@ -1909,18 +1909,47 @@ For v1 the bar is intentionally modest:
 - **Component tests** for critical UI flows (specimen create
   form, photo upload widget). Use Svelte Testing Library +
   Vitest.
-- **E2E / browser tests deferred** to when the SPA's surface
-  justifies the investment.
+- **E2E / browser tests** under `frontend/e2e/` driven by
+  Playwright. Run via `cd frontend && npm run e2e` against a
+  live docker-compose stack (app + Postgres + MinIO + Keycloak).
 
 Frontend tests run via:
 
 ```bash
-cd frontend && npm test
+cd frontend && npm test       # vitest (unit + component)
+cd frontend && npm run e2e    # playwright (e2e against the live stack)
 ```
 
 The exemption rules from "What is exempt from testing" above
 apply analogously: don't test trivial Svelte template renderings,
 don't test the framework, do test branching logic.
+
+### Browser-rendering assertions for protected resources
+
+Every protected resource the SPA renders via a browser-issued
+fetch (`<img>`, `<video>`, `<a download>`) MUST be covered by a
+Playwright assertion proving the bytes actually loaded for the
+authenticated owner — not merely that the element is in the DOM.
+The failure mode this guards against: a backend authz bug, a
+broken auth-attaching wrapper (mi-lrqt), or a regressed
+`<AuthedImage>` call site that silently renders a broken image
+which still satisfies `toBeVisible()`.
+
+Helpers live in `frontend/e2e/helpers/loaded.ts`:
+
+- `expectImgLoaded(locator)` — asserts the underlying `<img>`
+  reports `naturalWidth > 0`.
+- `expectVideoLoaded(locator)` — asserts `readyState >=
+  HAVE_METADATA` on a `<video>`/`<audio>` media element.
+- `expectDownloadable(api, url, prefix?)` — asserts an
+  authenticated GET against `url` returns 200, non-empty body,
+  and a content-type matching the optional prefix.
+
+Use these helpers (rather than ad-hoc `naturalWidth` /
+`readyState` reads) so the audit's intent stays grep-able and
+the canonical guidance has one home. The principle comes from
+hq-ohz5 Snippet 2; mi-8ppx is the first wholesale application
+across the SPA's protected-resource renderings.
 
 ## What this section is NOT
 

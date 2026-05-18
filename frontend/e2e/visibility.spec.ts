@@ -32,6 +32,7 @@
 
 import { test, expect, request as playwrightRequest } from '@playwright/test';
 import type { APIRequestContext } from '@playwright/test';
+import { expectImgLoaded } from './helpers/loaded';
 
 const KEYCLOAK_BASE_URL = process.env.E2E_KEYCLOAK_BASE_URL ?? 'http://localhost:8081';
 const KEYCLOAK_REALM = process.env.E2E_KEYCLOAK_REALM ?? 'minerals';
@@ -251,7 +252,15 @@ test('per-field visibility — anonymous viewer sees public fields, redacted fie
     // count becomes 0 because the explicit `public` photo no longer
     // wins against the specimen's `private` images-default. Adjust
     // here in lockstep with the visibility helper.)
+    //
+    // The toBeVisible() check above only proves the wrapper button is
+    // in the DOM. mi-8ppx audits browser-rendering: the AuthedImage's
+    // <img> inside MUST have a non-zero naturalWidth, otherwise a
+    // future regression that breaks the blob-URL fetch (mi-lrqt) or
+    // an authz bug on /photos/{id}/display would still let the button
+    // pass toBeVisible() while showing a broken image.
     await expect(page.getByTestId('hero-photo')).toBeVisible();
+    await expectImgLoaded(page.getByTestId('hero-photo'));
     await expect(page.getByTestId('gallery-thumb')).toHaveCount(0);
 
     expect(
