@@ -13,6 +13,7 @@ setting" — updating this inventory is the first and mandatory step.
 | Name | Kind | Default (dev) | Required in prod | Purpose | Source |
 |---|---|---|---|---|---|
 | `PORT` | env | `8080` | no | HTTP listen port | `internal/config/config.go:62` |
+| `ADMIN_PORT` | env | `9090` | no | Operator-facing admin listen port — serves Prometheus `/metrics` plus the kubelet's `/healthz` / `/readyz` probes. MUST NOT be wired into the public Ingress; the base `Service` exposes it as a named port (`admin`) only for in-cluster scrape and probe traffic (mi-2b1k). | `internal/config/config.go` |
 | `DATABASE_URL` | env | `postgres://minerals:minerals@localhost:5432/minerals?sslmode=disable` | **yes** | Postgres DSN | `internal/config/config.go:71` |
 | `S3_ENDPOINT` | env | `http://localhost:9000` | **yes** | MinIO endpoint URL | `internal/config/config.go:72` |
 | `S3_ACCESS_KEY_ID` | env | `minioadmin` | **yes** | MinIO access key | `internal/config/config.go:73` |
@@ -48,7 +49,7 @@ the prefix MUST NOT be exposed to the browser.
 into two sources:
 
 - ConfigMap `minerals-config` (`kustomize/base/configmap.yaml`) supplies
-  `PORT`, `ENV`, `S3_BUCKET`, `S3_REGION`, `MAX_UPLOAD_BYTES`,
+  `PORT`, `ADMIN_PORT`, `ENV`, `S3_BUCKET`, `S3_REGION`, `MAX_UPLOAD_BYTES`,
   `LOG_LEVEL`, `S3_ENDPOINT`. The OIDC vars (`OIDC_ISSUER_URL`,
   `OIDC_CLIENT_ID`, `PUBLIC_OIDC_ISSUER_URL`, `PUBLIC_OIDC_CLIENT_ID`,
   `PUBLIC_OIDC_REDIRECT_URI`) are read by the app (backend JWT

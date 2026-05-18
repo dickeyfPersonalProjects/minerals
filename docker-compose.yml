@@ -6,6 +6,7 @@
 #
 #   1. Standard onboarding (full stack):
 #        docker compose up -d        # postgres + minio + migrate + app on :8080
+#                                     # (admin port also exposed on host :9090)
 #
 #   2. Hot-reload dev (deps only — host runs `make run` and Vite):
 #        docker compose up -d postgres minio
@@ -111,6 +112,11 @@ services:
       PUBLIC_OIDC_REDIRECT_URI: http://localhost:8080/auth/callback
     ports:
       - "8080:8080"
+      # Admin listener (mi-2b1k): Prometheus `/metrics` + health probes.
+      # Exposed on the host so developers can `curl :9090/metrics` against
+      # the dev stack without exec'ing into the container. In prod, this
+      # port is in-cluster only (ClusterIP, never on the Ingress).
+      - "9090:9090"
     depends_on:
       postgres:
         condition: service_healthy

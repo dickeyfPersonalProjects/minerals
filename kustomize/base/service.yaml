@@ -1,5 +1,16 @@
 # ClusterIP service for the app. Named `minerals` so the GitOps overlay's
 # Ingress can target it by stable name.
+#
+# Two ports:
+#   - `http`  (80 → 8080): user-facing API + embedded SPA. The only port
+#     the per-env Ingress backends point at.
+#   - `admin` (9090 → 9090): operator-facing — Prometheus `/metrics` plus
+#     the kubelet's `/healthz` / `/readyz` probes. The Prometheus Operator's
+#     ServiceMonitor (see docs/deploy/example/<env>/servicemonitor.yaml)
+#     targets this named port; kube-prometheus scrapes it via the in-cluster
+#     ClusterIP DNS. The admin port is NEVER added to the Ingress backend
+#     list — defense-in-depth (mi-2b1k): even if a future Ingress edit
+#     mistakenly maps "all Service ports", nothing public-facing routes here.
 apiVersion: v1
 kind: Service
 metadata:
@@ -12,4 +23,8 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+      protocol: TCP
+    - name: admin
+      port: 9090
+      targetPort: admin
       protocol: TCP

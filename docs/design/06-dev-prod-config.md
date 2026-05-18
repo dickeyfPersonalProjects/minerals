@@ -135,8 +135,10 @@ behave identically from the browser's perspective.
 
 ## Deferred to v2 / later
 
-- **Prometheus metrics endpoint** (`/metrics`). Nice to have for k3s
-  observability; not v1.
+- ~~**Prometheus metrics endpoint** (`/metrics`). Nice to have for k3s
+  observability; not v1.~~ **Shipped in mi-2b1k (2026-05-18)** — runs
+  on a separate `ADMIN_PORT` (default `9090`); see §7 update note and
+  [`docs/deploy/README.md`](../deploy/README.md) "Observability".
 - **Sentry / external error reporting** (no DSN env var in v1).
 - **Feature flags / runtime configuration** beyond env vars (no need
   yet; revisit if prod tuning ever requires it).

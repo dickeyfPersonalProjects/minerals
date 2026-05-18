@@ -21,6 +21,9 @@ func TestLoad_DevDefaults(t *testing.T) {
 	if cfg.Port != defaultPort {
 		t.Errorf("Port = %q, want %q", cfg.Port, defaultPort)
 	}
+	if cfg.AdminPort != defaultAdminPort {
+		t.Errorf("AdminPort = %q, want %q", cfg.AdminPort, defaultAdminPort)
+	}
 	if cfg.DatabaseURL != defaultDatabaseURL {
 		t.Errorf("DatabaseURL = %q", cfg.DatabaseURL)
 	}

@@ -14,6 +14,15 @@ Container image is built in three stages — Node for SPA, Go for backend
 (consuming the SPA via `embed.FS`), distroless static nonroot for
 runtime. Prometheus metrics are deferred to v2.
 
+> **Update (mi-2b1k, 2026-05-18):** Prometheus metrics now ship. The
+> app exposes `/metrics` on a separate **admin port** (`ADMIN_PORT`,
+> default `9090`) alongside the `/healthz` and `/readyz` probe paths.
+> The k8s deployment example wires the kubelet probes at the admin
+> port, and `docs/deploy/example/{staging,prod}/servicemonitor.yaml`
+> tells the Prometheus Operator to scrape it. The v2-deferral below
+> is superseded; see [`docs/deploy/README.md`](../deploy/README.md)
+> "Observability" for the runbook.
+
 ## Decisions
 
 ### 7.1 — Container registry: ghcr.io
@@ -149,8 +158,10 @@ No need to rebuild containers on every code change.
 
 ## Deferred to v2 / later
 
-- **Prometheus metrics endpoint** (`/metrics`). Useful for k3s
-  observability; not v1.
+- ~~**Prometheus metrics endpoint** (`/metrics`). Useful for k3s
+  observability; not v1.~~ **Shipped in mi-2b1k (2026-05-18)** — see
+  the update note at the top of this doc and the Observability runbook
+  in [`docs/deploy/README.md`](../deploy/README.md).
 - **Distributed tracing** (OpenTelemetry). Single-binary app — tracing
   buys little until there are multiple services to correlate across.
 - **External error reporting** (Sentry / similar). Personal-scale; logs
