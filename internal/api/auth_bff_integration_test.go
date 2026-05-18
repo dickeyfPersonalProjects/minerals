@@ -47,15 +47,15 @@ func (rejectingVerifier) Verify(_ context.Context, _ string) (*oidc.Claims, erro
 // against a real Postgres schema. Covers the bead's "Backend
 // integration test" acceptance criteria (mi-sap2):
 //
-//   1. GET /auth/login → 302 to Keycloak, state cookie set
-//   2. Simulated Keycloak callback exchanges code for tokens (stub
-//      OAuthClient) → 302 to '/' with session cookie
-//   3. GET /api/v1/profile with the cookie → 200, user populated
-//   4. POST /api/v1/specimens without CSRF token → 403 csrf_missing
-//   5. GET /api/v1/csrf with the cookie → 200, token returned
-//   6. POST /api/v1/specimens with the CSRF header → 201
-//   7. POST /auth/logout (with CSRF) → cookie cleared
-//   8. Next /api/v1/profile request → 401 (session revoked)
+//  1. GET /auth/login → 302 to Keycloak, state cookie set
+//  2. Simulated Keycloak callback exchanges code for tokens (stub
+//     OAuthClient) → 302 to '/' with session cookie
+//  3. GET /api/v1/profile with the cookie → 200, user populated
+//  4. POST /api/v1/specimens without CSRF token → 403 csrf_missing
+//  5. GET /api/v1/csrf with the cookie → 200, token returned
+//  6. POST /api/v1/specimens with the CSRF header → 201
+//  7. POST /auth/logout (with CSRF) → cookie cleared
+//  8. Next /api/v1/profile request → 401 (session revoked)
 //
 // The stub OAuth client returns deterministic tokens whose id_token
 // payload carries a known sub + email; the BFF callback handler
