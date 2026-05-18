@@ -1,0 +1,11 @@
+{
+  "_comment": "Snapshot of the realm_access.roles claim Keycloak emits for a freshly-created user with NO explicit role assignments, NO group memberships, and NO attribute pre-fill — see docs/design/08-keycloak-default-token-shape.md and the keycloak-smoke job in .github/workflows/pr.yml (mi-2xa4). The 'user' role is here because the realm's default-roles composite includes it (mi-rcox); the backend's authzUser injects 'user' implicitly as defense-in-depth (mi-2eg6) so the API still works if a future TF change drops it from the composite. The CI smoke diffs the actual token's roles against this snapshot; a mismatch fails the build with an explicit prompt to review the drift before updating. The unit test that consumes this asset (internal/api/authz_default_shape_test.go) asserts the backend's implicit-user fallback still fires for callers whose JWT carries this shape MINUS the 'user' role.",
+  "realm_access": {
+    "roles": [
+      "default-roles-minerals",
+      "offline_access",
+      "uma_authorization",
+      "user"
+    ]
+  }
+}
