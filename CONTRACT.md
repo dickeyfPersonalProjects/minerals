@@ -2701,7 +2701,10 @@ through backend code. v1 has no real authentication — the rules
 below mostly describe the **shape** that v1 honors so real auth
 ships as a mechanical replacement, not a refactor.
 
-The reasoning lives in `docs/design/05-auth-slot.md`.
+The reasoning lives in `docs/design/05-auth-slot.md`. The V2 BFF
+migration (backend-mediated OAuth + httpOnly session cookies) is
+governed by [`docs/design/auth-bff.md`](docs/design/auth-bff.md) —
+the canonical reference for that work (tracked by `mi-1d5i`).
 
 ## Reading the current user
 
@@ -4647,6 +4650,7 @@ follow the cross-reference into the design doc.
 | [`docs/design/05-auth-slot.md`](docs/design/05-auth-slot.md) | Auth middleware shape, route grouping, stub user |
 | [`docs/design/06-dev-prod-config.md`](docs/design/06-dev-prod-config.md) | Env vars, migrations subcommand, dev/prod parity |
 | [`docs/design/07-build-embed-observability.md`](docs/design/07-build-embed-observability.md) | Multi-stage Dockerfile, slog logging, healthz/readyz |
+| [`docs/design/auth-bff.md`](docs/design/auth-bff.md) | V2 BFF migration — backend-mediated OAuth + httpOnly session cookies (`mi-1d5i`) |
 
 The agenda bead that drove the design session: `hq-8h4`.
 
