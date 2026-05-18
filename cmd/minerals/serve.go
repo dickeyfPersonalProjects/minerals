@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dickeyfPersonalProjects/minerals/internal/api"
+	"github.com/dickeyfPersonalProjects/minerals/internal/auth/bff"
 	"github.com/dickeyfPersonalProjects/minerals/internal/authz"
 	"github.com/dickeyfPersonalProjects/minerals/internal/config"
 	"github.com/dickeyfPersonalProjects/minerals/internal/db"
@@ -214,6 +215,18 @@ func runServe(_ []string) error {
 		readyz: api.ReadyzHTTPHandler(deps),
 	}))
 
+	// Background goroutine: hourly auth.sessions cleanup
+	// (mi-twql / docs/design/auth-bff.md §cleanup). The loop
+	// stops on rootCtx cancellation; we wait on cleanerDone
+	// after srv.Shutdown so the process does not exit while
+	// the pool is still being read.
+	sessionCleaner := bff.NewCleaner(pool)
+	cleanerDone := make(chan struct{})
+	go func() {
+		defer close(cleanerDone)
+		sessionCleaner.Run(rootCtx)
+	}()
+
 	srvErr := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -245,6 +258,10 @@ func runServe(_ []string) error {
 		// API server is what matters; the admin port is operator-only.
 		slog.Warn("admin listener shutdown error", "err", err)
 	}
+	// Wait for the session cleanup goroutine to drain. Its loop
+	// returns immediately on rootCtx.Done() (already cancelled by
+	// this point), so this is a fast handshake — not a stall.
+	<-cleanerDone
 	slog.Info("shutdown complete")
 	return nil
 }
