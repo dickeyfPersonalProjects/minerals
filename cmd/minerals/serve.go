@@ -157,7 +157,7 @@ func runServe(_ []string) error {
 	// the handlers stay unregistered and the SPA falls back to the
 	// (deprecated) PKCE path; the same /auth/login link 404s, which
 	// is the right signal that BFF auth is off in this environment.
-	bffAuth, err := buildBFFAuth(rootCtx, cfg, pool, users)
+	bffAuth, oauthClient, sessions, err := buildBFFAuth(rootCtx, cfg, pool, users)
 	if err != nil {
 		return fmt.Errorf("serve: init bff auth: %w", err)
 	}
@@ -193,11 +193,13 @@ func runServe(_ []string) error {
 			Repo:   db.NewMineralSpeciesPostgres(pool),
 			Mindat: newMindatClient(cfg.MindatAPIKey),
 		},
-		QRSheets: db.NewQRSheetPostgres(pool),
-		Users:    users,
-		Verifier: verifier,
-		Enforcer: enforcer,
-		BFFAuth:  bffAuth,
+		QRSheets:  db.NewQRSheetPostgres(pool),
+		Users:     users,
+		Verifier:  verifier,
+		Enforcer:  enforcer,
+		BFFAuth:   bffAuth,
+		SessionMW: buildSessionMW(cfg, oauthClient, sessions, users),
+		CSRFMW:    buildCSRFMW(oauthClient),
 		RuntimeOIDC: api.RuntimeOIDCConfig{
 			IssuerURL:   cfg.PublicOIDCIssuerURL,
 			ClientID:    cfg.PublicOIDCClientID,
@@ -231,22 +233,6 @@ func runServe(_ []string) error {
 	adminShutdown, adminErr := startAdminServer(":"+cfg.AdminPort, newAdminHandler(adminProbes{
 		readyz: api.ReadyzHTTPHandler(deps),
 	}))
-
-	// Postgres-backed SessionResolver (mi-ruyc / docs/design/auth-bff.md
-	// §session-resolver-interface). The middleware (mi-ken4) and the
-	// /auth/* handlers (mi-bm5b / #3) both compose against this
-	// interface; a future cache decorator or auth-service RPC client
-	// drops in here without changing any callers.
-	sessionResolver := bff.NewPostgresResolver(pool)
-	_ = sessionResolver // wired into the request chain by mi-bm5b (#3) +
-	// mi-3vc4 (#7) — those beads also bring the OAuthClient and the
-	// cookie/session config inputs that bff.SessionMiddleware needs.
-	// Until then the existing auth.Auth bearer-token chain at
-	// /api/v1/* (line ~200) stays the active auth path. See
-	// docs/design/auth-bff.md §session-middleware §key-behaviors for
-	// the contract the middleware presents — it never 401s on a bad
-	// or missing cookie, so it composes cleanly under the same
-	// `/api/v1/` mount once #3 lands the OAuthClient construction.
 
 	// Background goroutine: hourly auth.sessions cleanup
 	// (mi-twql / docs/design/auth-bff.md §cleanup). The loop
@@ -362,16 +348,19 @@ func configureLogger(level string) {
 // regardless, so cleanup is decoupled from this gate.
 func buildBFFAuth(
 	ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, users domain.UserRepo,
-) (*bff.Handlers, error) {
+) (*bff.Handlers, bff.OAuthClient, bff.SessionResolver, error) {
 	if cfg.OIDCClientSecret == "" || cfg.OAuthStateHMACKey == "" || cfg.PublicOIDCRedirectURI == "" {
 		slog.Info("bff auth: disabled (missing OIDC_CLIENT_SECRET / OAUTH_STATE_HMAC_KEY / PUBLIC_OIDC_REDIRECT_URI)",
 			"client_secret_present", cfg.OIDCClientSecret != "",
 			"hmac_key_present", cfg.OAuthStateHMACKey != "",
 			"redirect_uri_present", cfg.PublicOIDCRedirectURI != "")
-		return nil, nil //nolint:nilnil // explicit "feature off" signal, not an error
+		return nil, nil, nil, nil
 	}
 	if cfg.SessionAbsoluteExpiresHours <= 0 {
-		return nil, fmt.Errorf("SESSION_ABSOLUTE_EXPIRES_HOURS must be > 0 when BFF auth is enabled")
+		return nil, nil, nil, fmt.Errorf("SESSION_ABSOLUTE_EXPIRES_HOURS must be > 0 when BFF auth is enabled")
+	}
+	if cfg.SessionIdleTimeoutMinutes <= 0 {
+		return nil, nil, nil, fmt.Errorf("SESSION_IDLE_TIMEOUT_MINUTES must be > 0 when BFF auth is enabled")
 	}
 
 	oauthClient, err := bff.NewKeycloakOAuthClient(ctx, bff.OAuthConfig{
@@ -385,8 +374,10 @@ func buildBFFAuth(
 		Scopes: []string{"openid", "profile", "email", "roles"},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("oauth client: %w", err)
+		return nil, nil, nil, fmt.Errorf("oauth client: %w", err)
 	}
+
+	sessions := bff.NewPostgresResolver(pool)
 
 	handlers, err := bff.NewHandlers(
 		bff.HandlerConfig{
@@ -406,18 +397,57 @@ func buildBFFAuth(
 		},
 		bff.HandlerDeps{
 			OAuth:    oauthClient,
-			Sessions: bff.NewPostgresResolver(pool),
+			Sessions: sessions,
 			Users:    bffUserResolver(users),
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("handlers: %w", err)
+		return nil, nil, nil, fmt.Errorf("handlers: %w", err)
 	}
 	slog.Info("bff auth: enabled",
 		"redirect_uri", cfg.PublicOIDCRedirectURI,
 		"enforce_csrf_on_logout", cfg.BFFEnforceCSRFOnLogout,
-		"session_absolute_max_hours", cfg.SessionAbsoluteExpiresHours)
-	return handlers, nil
+		"session_absolute_max_hours", cfg.SessionAbsoluteExpiresHours,
+		"session_idle_timeout_minutes", cfg.SessionIdleTimeoutMinutes)
+	return handlers, oauthClient, sessions, nil
+}
+
+// buildSessionMW wraps SessionMiddleware with the runtime config so
+// api.New can apply it to the top-level mux. Returns nil when BFF
+// auth is disabled — api.New then leaves the legacy bearer-token
+// chain intact (mi-sap2 / mi-1d5i #8).
+func buildSessionMW(
+	cfg *config.Config,
+	oauthClient bff.OAuthClient,
+	sessions bff.SessionResolver,
+	users domain.UserRepo,
+) func(http.Handler) http.Handler {
+	if oauthClient == nil || sessions == nil {
+		return nil
+	}
+	return bff.SessionMiddleware(bff.MiddlewareDeps{
+		Sessions: sessions,
+		OAuth:    oauthClient,
+		Users:    users,
+		CookieConfig: bff.CookieConfig{
+			Path:     "/",
+			Secure:   cfg.CookieSecure,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   time.Duration(cfg.CookieMaxAgeSeconds) * time.Second,
+		},
+		IdleTimeout: time.Duration(cfg.SessionIdleTimeoutMinutes) * time.Minute,
+	})
+}
+
+// buildCSRFMW returns the stored-synchronizer CSRF middleware only
+// when BFF auth is configured (signaled by a non-nil OAuth client).
+// api.New scopes the wrap to /api/v1/* so /auth/* keeps its own
+// EnforceCSRFOnLogout gate without double-handling.
+func buildCSRFMW(oauthClient bff.OAuthClient) func(http.Handler) http.Handler {
+	if oauthClient == nil {
+		return nil
+	}
+	return bff.CSRFMiddleware
 }
 
 // bffUserResolver bridges bff.UserResolver into the application's

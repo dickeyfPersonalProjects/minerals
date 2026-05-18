@@ -117,6 +117,13 @@ type Config struct {
 	// would still issue a refresh. Default 168 (7 days).
 	SessionAbsoluteExpiresHours int
 
+	// SessionIdleTimeoutMinutes is the gap since last_used_at after
+	// which the session middleware revokes the session. Tracks the
+	// design's idle-timeout knob (docs/design/auth-bff.md
+	// §sessions-table §four-expiration-concepts). Default 1440
+	// (24 hours). Must be > 0 when BFF auth is enabled.
+	SessionIdleTimeoutMinutes int
+
 	// PostLogoutRedirectURI is the absolute URL the BFF asks
 	// Keycloak to bounce the browser back to after the SSO logout
 	// completes. MUST be on Keycloak's post_logout_redirect_uris
@@ -231,6 +238,12 @@ func loadFrom(get func(string) string) (*Config, error) {
 		return nil, fmt.Errorf("config: SESSION_ABSOLUTE_EXPIRES_HOURS: %w", err)
 	}
 	cfg.SessionAbsoluteExpiresHours = sae
+
+	sit, err := parseIntWithDefault(get("SESSION_IDLE_TIMEOUT_MINUTES"), 1440)
+	if err != nil {
+		return nil, fmt.Errorf("config: SESSION_IDLE_TIMEOUT_MINUTES: %w", err)
+	}
+	cfg.SessionIdleTimeoutMinutes = sit
 
 	ec, err := parseBoolWithDefault(get("BFF_ENFORCE_CSRF_LOGOUT"), false)
 	if err != nil {
