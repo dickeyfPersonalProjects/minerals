@@ -233,13 +233,15 @@ func New(deps Deps) http.Handler {
 		mux.Handle("GET /api/v1/csrf", http.HandlerFunc(bff.CSRFHandler))
 	}
 
-	// Protected /api/v1/* fallback. Real handlers land in feature
-	// beads; for now any unmatched /api/v1/ path falls through to a
-	// 404 envelope after the auth chain has run.
+	// Unmatched /api/v1/* fallback: emit the §10 404 envelope. The
+	// production auth chain runs at the top-level wrapper (SessionMW
+	// → CSRFMW) and the huma per-operation middleware (humaAuth +
+	// RequireUser); a catch-all auth chain here would be dead code
+	// (mi-6tts).
 	apiNotFound := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such endpoint", nil)
 	})
-	mux.Handle("/api/v1/", Chain(apiNotFound, auth.Auth(deps.Verifier), auth.RequireUser))
+	mux.Handle("/api/v1/", apiNotFound)
 
 	// SPA fallback (public): everything else is the embedded SPA.
 	if deps.WebHandler != nil {
