@@ -23,6 +23,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
 	"github.com/dickeyfPersonalProjects/minerals/internal/auth"
+	"github.com/dickeyfPersonalProjects/minerals/internal/auth/bff"
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
 )
 
@@ -115,6 +116,13 @@ type Deps struct {
 	// authz check fires. This mirrors the nil-Verifier stub path and
 	// is the seam unit tests use; serve always wires a real enforcer.
 	Enforcer *casbin.Enforcer
+	// BFFAuth is the GET/POST handler bundle for the V2 cookie auth
+	// flow (mi-bm5b): /auth/login, /auth/callback, /auth/logout.
+	// nil leaves the routes unregistered — the path tests that
+	// don't configure a Keycloak client + HMAC key take. Production
+	// wiring in cmd/minerals sets this whenever OIDC_CLIENT_SECRET
+	// and OAUTH_STATE_HMAC_KEY are both present.
+	BFFAuth *bff.Handlers
 }
 
 // RuntimeOIDCConfig captures the SPA-facing OIDC settings the backend
@@ -190,6 +198,17 @@ func New(deps Deps) http.Handler {
 	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets)
 	registerProfileOperations(humaAPI, authMW, deps.Users)
 	registerSpecimenRedirect(mux)
+
+	// BFF V2 auth routes (mi-bm5b). The three routes attach to the
+	// raw mux — they sit outside the /api/v1 catch-all so the
+	// existing auth.Auth chain doesn't fire on them (login +
+	// callback are pre-session by definition; logout reads its own
+	// cookie). The public middleware (Recovery / RequestID /
+	// SecurityHeaders / CSP / Logging) still wraps them via the
+	// outer Chain call below.
+	if deps.BFFAuth != nil {
+		deps.BFFAuth.RegisterRoutes(mux)
+	}
 
 	// Protected /api/v1/* fallback. Real handlers land in feature
 	// beads; for now any unmatched /api/v1/ path falls through to a
