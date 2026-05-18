@@ -13,5 +13,6 @@ resources:
   - ingress.yaml
   - minerals-minio-config.yaml
   - minerals-s3-creds.yaml
+  - minerals-oidc-secret.yaml
   - servicemonitor.yaml
   - mineral.yaml
