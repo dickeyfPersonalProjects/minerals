@@ -79,26 +79,42 @@ Flux has two relevant resource kinds in this setup:
 The flow:
 
 ```
-GitHub (this repo, main)
+GitHub (this repo)
         │  every 1m
         ▼
 GitRepository "minerals-repo"  ─── caches working tree
         │
         ├── Kustomization "mineral-staging"  ── every 10m ──▶  mineral-staging ns
+        │       ref.branch: main            (manifests follow main)
         │       path: ./kustomize/base
         │       images: ghcr.io/.../minerals:staging
         │       patches: ConfigMap ENV=staging
         │
         └── Kustomization "mineral-prod"     ── every 10m ──▶  mineral-prod ns
+                ref.tag: prod               (manifests pinned to prod git tag)
                 path: ./kustomize/base
                 images: ghcr.io/.../minerals:prod
                 patches: ConfigMap ENV=prod
 ```
 
 A merge to `main` lands on staging within ~1m (poll) + ~10m (reconcile).
-Image rollouts are driven by retagging `staging`/`prod` in GHCR and
-Flux re-pulling on the next reconcile (the base sets
-`imagePullPolicy: Always`).
+Prod rollouts are driven by the `Promote to prod` workflow
+([Promoting to prod](#promoting-to-prod)), which moves the `prod`
+git tag and the `:prod` GHCR image tag together. Flux re-pulls on the
+next reconcile (the base sets `imagePullPolicy: Always`).
+
+> **Why prod pins `ref.tag: prod` and staging pins `ref.branch: main`:**
+> the manifests in `kustomize/base/` and the image at `:prod` move on
+> separate clocks — manifests move with every merge; the image only
+> moves on manual promote. If prod's `Kustomization` followed
+> `branch: main`, manifests would race ahead of the image and produce
+> inconsistent (manifest, image) pairs (e.g. a probe targeting a port
+> that doesn't exist on the older image). Pinning prod to
+> `ref.tag: prod` keeps both artifacts at the same commit. The
+> `Promote to prod` workflow moves the tag and the image in lockstep,
+> so reading the manifests at `tag: prod` always describes the image
+> at `:prod`. Staging keeps `branch: main` for fast iteration — drift
+> there is acceptable and short-lived.
 
 ---
 
@@ -294,6 +310,115 @@ overlays. Two reasons:
 
 The cost is a few lines of YAML that look like a no-op. The benefit is
 that the overlay's behavior is obvious from the overlay itself.
+
+---
+
+## Promoting to prod
+
+Prod is moved by the `Promote to prod` GitHub Actions workflow
+([`.github/workflows/promote-prod.yml`](../../.github/workflows/promote-prod.yml)).
+It is the ONLY supported path to update prod. A single run moves the
+git tag `prod`, stamps a versioned `vX.Y.Z` git tag, retags the GHCR
+image as `:prod` and `:vX.Y.Z`, and pushes all of it atomically —
+manifests and image always advance together.
+
+### Why a single workflow
+
+Manifests live in `kustomize/base/` (this repo) and the image lives in
+GHCR. Without a coordinated promotion path the two artifacts drift:
+manifests advance with every merge to `main`, but `:prod` only moves
+on manual retag. Drift is silent until a deployment-shape change (e.g.
+a new probe port, a new init container, a new ConfigMap key) reaches
+prod before the matching image does — and then the pod fails liveness
+or refuses to start.
+
+The drift class of bug is closed by:
+
+1. **`Promote to prod` moves git+image together.** A single workflow,
+   one operator action, both refs updated under `git push --atomic`.
+2. **Flux pins prod to `ref.tag: prod`**, not `ref.branch: main`. The
+   manifests Flux renders are exactly the manifests at the prod git
+   tag. The image at `:prod` was built from the same commit.
+3. **Versioned tags are immutable.** Each promotion also stamps
+   `vX.Y.Z` (git + image). If you want to roll back, pin
+   `ref.tag: vX.Y.Z-prev` + `image: ...:vX.Y.Z-prev` and re-promote
+   forward later.
+
+### Running the workflow
+
+Trigger from the Actions tab: **Promote to prod** → **Run workflow**.
+
+| Input | Required | Default | Notes |
+|---|---|---|---|
+| `version` | **yes** | — | The semver tag to stamp, e.g. `v1.0.2`. Matches `v<MAJOR>[.<MINOR>[.<PATCH>]][-suffix]`. |
+| `source_ref` | no | `main` (HEAD) | Commit SHA or ref to promote. Defaults to the latest commit on `main`. |
+| `force` | no | `false` | Required true if the `version` tag already exists at a different commit (prevents accidental rewrites of release history). |
+| `dry_run` | no | `false` | Validates inputs and verifies the source image exists, without touching any tag. Use to rehearse a promote. |
+
+Pre-flight checks the workflow runs before it touches anything:
+
+- Version string matches the semver regex.
+- Source ref resolves to a commit; commit's `:sha-<short>` image
+  exists in GHCR (the merge-to-main CI pushed it).
+- If the `version` git tag already exists, it points at the source
+  commit (idempotent re-run is allowed) or `force=true` is set.
+
+Then, in order:
+
+1. Local `git tag -f vX.Y.Z <sha>` and `git tag -f prod <sha>`.
+2. `git push --atomic --force origin refs/tags/vX.Y.Z refs/tags/prod` —
+   either both refs update on the remote or neither does.
+3. `docker buildx imagetools create -t :prod -t :vX.Y.Z :sha-<short>` —
+   manifest-only retag, no rebuild, same digest as the source image.
+4. Verify the post-retag digests on `:prod` and `:vX.Y.Z` match the
+   source digest. Fail loudly on mismatch.
+
+### After a successful promote
+
+The workflow summary includes a gitops reminder. Confirm both pins
+on the gitops repo's prod `Kustomization`:
+
+- `spec.ref.tag: prod` (or pin to the specific `vX.Y.Z` for an
+  immutable reference; the `vX.Y.Z` git tag does not move).
+- The Kustomize image patch is `newTag: prod` (or `vX.Y.Z`).
+
+If your Flux setup auto-discovers tag updates (e.g. via
+[image automation controllers](https://fluxcd.io/flux/components/image/)),
+no gitops repo edit is needed. Otherwise, commit the bump.
+
+### Rehearsing with dry-run
+
+`dry_run=true` runs every validation step (version regex, source ref
+resolution, GHCR source image existence, tag conflict check) without
+moving any tag. Use it to:
+
+- Confirm a candidate `source_ref` has a published image before
+  scheduling the real promote.
+- Verify a non-default `version` (e.g. a major bump) is well-formed.
+
+A throwaway value like `v0.0.0-test` plus `dry_run=true` exercises the
+full pre-flight chain without affecting `prod`.
+
+### Why the previous workflows were removed
+
+Two earlier image-only workflows existed:
+
+- `promote-prod.yml` retagged `:staging` → `:prod`. It moved the image
+  but never the git tag, so manifests and image still drifted.
+- `release.yml` retagged `:prod` → `:vX.Y.Z` on a manual `v*` tag push.
+  It pulled from current `:prod`, not from the source commit's
+  `:sha-<short>`, so a stale `:prod` could end up stamped with a new
+  version — the inverse of what the version tag is supposed to mean.
+
+Both were superseded by the unified workflow. There is now one
+promote path.
+
+### Required permissions
+
+The workflow uses the default `GITHUB_TOKEN` with `contents: write` +
+`packages: write`. Force-moving the `prod` tag requires that no tag
+protection rule blocks it — if you add one later, give the actions
+bot an exemption or switch to a PAT in the workflow's checkout step.
 
 ---
 

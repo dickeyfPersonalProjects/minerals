@@ -1,82 +1,240 @@
-name: Promote to :prod
+name: Promote to prod
+
+# Single, atomic promote-prod step: moves the `prod` git tag AND the
+# `:prod` GHCR image tag to the same commit in lockstep. Also stamps a
+# versioned tag (`vX.Y.Z`) on both the git ref and the image so an
+# immutable reference exists alongside the moving `prod` tag.
+#
+# Prevents the manifest/image drift class of bug (mi-04b1): GitOps Flux
+# `Kustomization` pinned to `ref.tag: prod` + `image: ...:prod` resolves
+# to a single, consistent (manifest, image) pair after every promote.
+#
+# This is the ONLY promotion path. The previous `promote-prod` (image-
+# only, from `:staging`) and `release` (image-only, retag `:prod` to a
+# version on `v*` tag push) workflows are superseded by this one.
 
 on:
   workflow_dispatch:
     inputs:
-      from_tag:
-        description: 'Source tag to promote (default: staging)'
+      version:
+        description: 'Version tag to stamp (e.g. v1.0.2). Must not already exist unless force=true.'
         required: true
-        default: 'staging'
         type: string
+      source_ref:
+        description: 'Commit / ref to promote (default: main HEAD)'
+        required: false
+        default: ''
+        type: string
+      force:
+        description: 'Allow overwriting an existing version tag at a different commit'
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: 'Validate inputs + source image without moving any tag'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
+  # Needed to push the version tag and force-move the `prod` tag.
+  contents: write
+  # Needed to retag GHCR images.
   packages: write
 
 env:
+  REGISTRY: ghcr.io
   IMAGE_NAME: ghcr.io/dickeyfpersonalprojects/minerals
 
 jobs:
   promote:
-    name: Retag to :prod
+    name: Promote to prod (atomic)
     runs-on: ubuntu-latest
     steps:
+      - name: Validate version format
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "${VERSION}" =~ ^v[0-9]+(\.[0-9]+){0,2}([.-].+)?$ ]]; then
+            echo "::error::Version '${VERSION}' does not match v<MAJOR>[.<MINOR>[.<PATCH>]][-suffix]"
+            exit 1
+          fi
+
+      - name: Resolve source ref
+        id: src
+        env:
+          SOURCE_REF_INPUT: ${{ inputs.source_ref }}
+        run: |
+          ref="${SOURCE_REF_INPUT:-main}"
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout source ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.src.outputs.ref }}
+          # Full history + tags so the conflict check sees every existing
+          # version tag, and so the push has a known base for refs/tags/prod.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve commit SHAs
+        id: commit
+        run: |
+          sha=$(git rev-parse HEAD)
+          short=$(git rev-parse --short=7 HEAD)
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "short=${short}" >> "$GITHUB_OUTPUT"
+          echo "Promoting commit ${sha}"
+
+      - name: Check version-tag conflict
+        env:
+          VERSION: ${{ inputs.version }}
+          FORCE: ${{ inputs.force }}
+          NEW_SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          # The tag may live on the remote without being a local ref, but
+          # fetch-tags above pulled it. `git rev-parse --verify refs/tags/X`
+          # succeeds iff X exists locally as a tag.
+          if git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null; then
+            existing=$(git rev-list -n1 "refs/tags/${VERSION}")
+            if [ "${existing}" = "${NEW_SHA}" ]; then
+              echo "Tag ${VERSION} already exists at ${NEW_SHA} — idempotent, continuing."
+            elif [ "${FORCE}" = "true" ]; then
+              echo "::warning::Tag ${VERSION} exists at ${existing}; force-overwriting to ${NEW_SHA}."
+            else
+              echo "::error::Tag ${VERSION} already exists at ${existing}. Re-run with force=true to overwrite."
+              exit 1
+            fi
+          else
+            echo "Tag ${VERSION} does not yet exist — fresh stamp."
+          fi
+
       - name: Log in to ghcr.io
         uses: docker/login-action@v4
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Inspect source manifest digest
-        id: src
-        run: |
-          digest=$(docker buildx imagetools inspect \
-            "${IMAGE_NAME}:${FROM_TAG}" \
-            --format '{{.Manifest.Digest}}')
-          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
-          echo "Source digest: ${digest}"
+      - name: Verify source image exists
+        id: source_image
         env:
-          FROM_TAG: ${{ inputs.from_tag }}
-
-      - name: Retag to :prod (manifest-only)
+          SHORT: ${{ steps.commit.outputs.short }}
         run: |
+          src_tag="sha-${SHORT}"
+          # The main-branch CI pushes ${IMAGE_NAME}:sha-<short> for every
+          # merge (see main.yml). If this lookup fails, the source commit
+          # has no published image — promotion would create a `prod` git
+          # tag pointing at a commit no image exists for.
+          if ! digest=$(docker buildx imagetools inspect \
+              "${IMAGE_NAME}:${src_tag}" \
+              --format '{{.Manifest.Digest}}' 2>/dev/null); then
+            echo "::error::Source image ${IMAGE_NAME}:${src_tag} does not exist. Ensure the merge-to-main CI built and pushed an image for this commit."
+            exit 1
+          fi
+          echo "tag=${src_tag}" >> "$GITHUB_OUTPUT"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "Source image: ${IMAGE_NAME}:${src_tag} @ ${digest}"
+
+      - name: Configure git identity
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Stamp tags locally
+        if: ${{ !inputs.dry_run }}
+        env:
+          VERSION: ${{ inputs.version }}
+          NEW_SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          # `prod` always force-moves; the version tag is either new or
+          # already validated by the conflict-check step.
+          git tag -f "${VERSION}" "${NEW_SHA}"
+          git tag -f prod "${NEW_SHA}"
+
+      - name: Push tags atomically
+        if: ${{ !inputs.dry_run }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          # --atomic: either both refs update on the remote or neither does.
+          # --force: required to move the `prod` tag; harmless on a fresh
+          #          version tag, and authorized for the version tag when
+          #          force=true (already gated by the conflict check).
+          git push --atomic --force origin \
+            "refs/tags/${VERSION}" \
+            "refs/tags/prod"
+
+      - name: Retag image as :prod and :version
+        if: ${{ !inputs.dry_run }}
+        env:
+          VERSION: ${{ inputs.version }}
+          SRC_TAG: ${{ steps.source_image.outputs.tag }}
+        run: |
+          # Manifest-only retag: the multi-arch manifest list at the
+          # source tag is published under :prod and :${VERSION} with no
+          # rebuild and no architecture-skew risk.
           docker buildx imagetools create \
             -t "${IMAGE_NAME}:prod" \
-            "${IMAGE_NAME}:${FROM_TAG}"
+            -t "${IMAGE_NAME}:${VERSION}" \
+            "${IMAGE_NAME}:${SRC_TAG}"
+
+      - name: Verify post-retag digests match source
+        if: ${{ !inputs.dry_run }}
+        id: verify
         env:
-          FROM_TAG: ${{ inputs.from_tag }}
-
-      - name: Inspect :prod manifest digest
-        id: prod
+          VERSION: ${{ inputs.version }}
+          SRC_DIGEST: ${{ steps.source_image.outputs.digest }}
         run: |
-          digest=$(docker buildx imagetools inspect \
-            "${IMAGE_NAME}:prod" \
-            --format '{{.Manifest.Digest}}')
-          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
-          echo "Prod digest: ${digest}"
+          prod_digest=$(docker buildx imagetools inspect \
+            "${IMAGE_NAME}:prod" --format '{{.Manifest.Digest}}')
+          ver_digest=$(docker buildx imagetools inspect \
+            "${IMAGE_NAME}:${VERSION}" --format '{{.Manifest.Digest}}')
+          echo "prod_digest=${prod_digest}" >> "$GITHUB_OUTPUT"
+          echo "ver_digest=${ver_digest}" >> "$GITHUB_OUTPUT"
+          if [ "${prod_digest}" != "${SRC_DIGEST}" ] || [ "${ver_digest}" != "${SRC_DIGEST}" ]; then
+            echo "::error::Digest mismatch after retag (src=${SRC_DIGEST}, prod=${prod_digest}, version=${ver_digest})"
+            exit 1
+          fi
+          echo "All three tags point at ${SRC_DIGEST}."
 
-      - name: Summarize
+      - name: Summary
+        env:
+          VERSION: ${{ inputs.version }}
+          SHA: ${{ steps.commit.outputs.sha }}
+          SHORT: ${{ steps.commit.outputs.short }}
+          SRC_TAG: ${{ steps.source_image.outputs.tag }}
+          SRC_DIGEST: ${{ steps.source_image.outputs.digest }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          FORCE: ${{ inputs.force }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
           {
-            echo "## Promote to :prod"
+            echo "## Promote to prod"
             echo ""
             echo "| Field | Value |"
             echo "|---|---|"
-            echo "| Source tag | \`${FROM_TAG}\` |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Commit | [\`${SHORT}\`](${REPO_URL}/commit/${SHA}) |"
+            echo "| Source image | \`${IMAGE_NAME}:${SRC_TAG}\` |"
             echo "| Source digest | \`${SRC_DIGEST}\` |"
-            echo "| Prod digest | \`${PROD_DIGEST}\` |"
+            echo "| Force | \`${FORCE}\` |"
+            echo "| Dry run | \`${DRY_RUN}\` |"
             echo ""
-            if [ "${SRC_DIGEST}" = "${PROD_DIGEST}" ]; then
-              echo ":white_check_mark: Digests match — manifest-only retag succeeded."
+            if [ "${DRY_RUN}" = "true" ]; then
+              echo ":information_source: Dry run — no git tags or image tags were moved."
             else
-              echo ":x: Digest mismatch — investigate."
-              exit 1
+              echo ":white_check_mark: Promoted commit \`${SHORT}\` to prod."
+              echo ""
+              echo "- Git: \`refs/tags/${VERSION}\` and \`refs/tags/prod\` both at \`${SHA}\`."
+              echo "- Image: \`${IMAGE_NAME}:${VERSION}\` and \`${IMAGE_NAME}:prod\` both at \`${SRC_DIGEST}\`."
+              echo ""
+              echo "### Gitops reminder"
+              echo ""
+              echo "Flux's prod \`Kustomization\` should pin \`spec.ref.tag: prod\` (or \`${VERSION}\` for an immutable pin). The \`images[0].newTag\` should be \`prod\` (or \`${VERSION}\`). If your setup does not auto-discover, bump the gitops repo now so manifests and image move together."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-        env:
-          FROM_TAG: ${{ inputs.from_tag }}
-          SRC_DIGEST: ${{ steps.src.outputs.digest }}
-          PROD_DIGEST: ${{ steps.prod.outputs.digest }}
