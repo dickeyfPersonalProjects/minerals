@@ -71,10 +71,11 @@ module owns:
 
 - **Realm `minerals`** — token lifespans, password policy, optional
   SMTP, optional self-registration.
-- **Clients** — `minerals-frontend` (public, PKCE) and
-  `minerals-backend` (confidential, with a `view-users`
-  realm-management role on its service account). Optional
-  `minerals-test` password-grant client when `test_environment = true`.
+- **Clients** — `minerals-frontend` (confidential — the Go backend's
+  BFF OAuth client, mi-1d5i) and `minerals-backend` (confidential, with
+  a `view-users` realm-management role on its service account).
+  Optional `minerals-test` password-grant client when
+  `test_environment = true`.
 - **Roles** — `devops-viewer`, `devops-admin` (devops/staff only;
   normal users have no realm role and are authorized by per-row rules
   in [`CONTRACT.md`](../../CONTRACT.md) §13).
@@ -373,37 +374,97 @@ inline via `-var`).
 terraform output realm_issuer
 terraform output oidc_discovery_url
 terraform output frontend_client_id
+terraform output -raw frontend_client_secret   # sensitive
 terraform output backend_client_id
 terraform output -raw backend_client_secret    # sensitive
 terraform output -raw admin_password           # sensitive — capture once
 ```
 
-The two sensitive outputs are the load-bearing ones:
+The three sensitive outputs are the load-bearing ones:
 
-- **`backend_client_secret`** — the Go backend's confidential-client
-  credential. Goes into a SealedSecret consumed by the Deployment.
+- **`frontend_client_secret`** — the BFF backend's confidential-client
+  credential for the user-facing OAuth flow (mi-1d5i). Goes into the
+  `minerals-oidc-secret` SealedSecret as the `OIDC_CLIENT_SECRET` key,
+  consumed by the app Deployment via `envFrom`. See
+  [`secrets.md`](./secrets.md) for the inventory row.
+- **`backend_client_secret`** — the service-account credential for
+  the separate `minerals-backend` confidential client (used for
+  server-to-server admin operations, not the user OAuth flow). Not
+  consumed by the app today; capture if and when a service-to-service
+  bead lands.
 - **`admin_password`** — the realm admin's initial password. Capture
   it once, store it in a password manager, then it can be rotated
   out-of-band.
 
 ### Wiring outputs into k8s Secrets for the Go backend
 
-The pattern (manual, gitops-side; not automated by the module today):
+The user-facing OAuth flow is BFF (mi-1d5i): the Go backend is the
+confidential OAuth client, so it needs `OIDC_CLIENT_SECRET` at runtime.
+That value comes from Terraform's `frontend_client_secret` output and
+is propagated to the cluster as the `minerals-oidc-secret`
+SealedSecret. The pattern (manual, gitops-side; not automated by the
+module today):
 
-1. `terraform output -raw backend_client_secret` to retrieve the value.
-2. Place it in a plaintext `.sec/minerals-oidc.yaml` Secret manifest
-   alongside the issuer URL and client ID.
-3. Run kubeseal per [`encrypt.md`](./encrypt.md) to produce
-   `minerals-oidc.yaml` in the env overlay.
-4. Add it to the env's `kustomization.yaml` resources list.
-5. Reference it from `kustomize/base/deployment.yaml` via `envFrom`
-   when the auth implementation bead lands.
+1. `cd terraform/keycloak && terraform output -raw frontend_client_secret`
+   to retrieve the value.
+2. Stage a plaintext Secret in `.sec/minerals-oidc-secret.yaml`:
+   ```yaml
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: minerals-oidc-secret
+     namespace: mineral-<env>
+   type: Opaque
+   stringData:
+     OIDC_CLIENT_SECRET: <value from step 1>
+   ```
+3. Run `kubeseal` per [`encrypt.md`](./encrypt.md) to produce
+   `minerals-oidc-secret.yaml` in the env overlay. The example stubs
+   are at
+   [`example/staging/minerals-oidc-secret.yaml`](./example/staging/minerals-oidc-secret.yaml)
+   and
+   [`example/prod/minerals-oidc-secret.yaml`](./example/prod/minerals-oidc-secret.yaml);
+   replace the `REPLACE_WITH_KUBESEAL_OUTPUT` placeholder with the real
+   ciphertext.
+4. The example overlays already list `minerals-oidc-secret.yaml` in
+   their `kustomization.yaml` resources, and `kustomize/base/deployment.yaml`
+   wires `OIDC_CLIENT_SECRET` into the app via `envFrom: secretRef`
+   when the BFF backend bead lands. Inventory entry in
+   [`secrets.md`](./secrets.md).
+5. Per [`encrypt.md`](./encrypt.md) "Commit rules", committing the
+   sealed manifest to the GitOps repository is a human-approved step.
+   Polecats and other automated agents stop at the example stub.
+
+The `backend_client_secret` output corresponds to the separate
+`minerals-backend` service-account client (admin operations); the app
+does not consume it today, so no SealedSecret is provisioned for it
+yet.
 
 The "auto-rotate the SealedSecret when Terraform rotates the secret"
 loop is out of scope today — the secret is set once and rotated
 manually if needed. External-Secrets + Vault would close that loop;
 see [`encrypt.md`](./encrypt.md) for the broader external-secrets
 discussion.
+
+### Apply order for a fresh environment
+
+Initial rollout (one-time per env):
+
+1. `terraform apply -var-file=<env>.tfvars` — provisions the realm,
+   creates the confidential `minerals-frontend` client, and Keycloak
+   generates `client_secret`. Output `frontend_client_secret` exposes
+   it.
+2. Operator runs kubeseal (steps above) to produce a per-env
+   `minerals-oidc-secret.yaml` SealedSecret. Ciphertext is bound to
+   `mineral-<env>` + `minerals-oidc-secret`; staging and prod each need
+   their own pass.
+3. Commit the sealed manifest to the GitOps repository (human approval).
+4. Flux reconciles. `sealed-secrets` decrypts into a `Secret`; the app
+   Deployment's `envFrom: secretRef` surfaces `OIDC_CLIENT_SECRET` to
+   the container.
+5. `kubectl rollout restart deployment/minerals -n mineral-<env>` if
+   the deployment was already running with an old (or absent) value —
+   env vars are read once at container start.
 
 ---
 

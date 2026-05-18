@@ -1,26 +1,45 @@
-# Public SPA client used by the minerals frontend (browser-based OIDC,
-# PKCE, no client secret).
+# Confidential OAuth client for the V2 BFF auth flow (mi-1d5i). The
+# browser does not speak OAuth — it hits `GET /auth/login` on the Go
+# backend, which performs a server-side authorization-code exchange
+# against Keycloak using `client_secret`. The SPA only ever sees an
+# opaque session cookie. See `docs/design/auth-bff.md`.
 resource "keycloak_openid_client" "frontend" {
   realm_id  = keycloak_realm.minerals.id
   client_id = "minerals-frontend"
   name      = "Minerals Frontend"
   enabled   = true
 
-  access_type = "PUBLIC"
+  # Confidential: the backend holds the secret; the browser never does.
+  # The secret reaches the cluster as the `minerals-oidc-secret`
+  # SealedSecret in the per-env GitOps overlay — see
+  # `docs/deploy/secrets.md`.
+  access_type = "CONFIDENTIAL"
 
   standard_flow_enabled        = true
   direct_access_grants_enabled = false
   implicit_flow_enabled        = false
 
-  pkce_code_challenge_method = "S256"
+  # No PKCE: a confidential client authenticates to the token endpoint
+  # with `client_secret`, which is what PKCE substitutes for in the
+  # public-client case. Setting `pkce_code_challenge_method` here would
+  # be a no-op.
 
+  # Backend-served callback. The URL string is unchanged from the
+  # pre-BFF (PKCE-in-SPA) design — same hostname, same path — but
+  # `/auth/callback` is now a backend route, not a SPA route. Do NOT
+  # 'fix' this back to a SPA wildcard.
   valid_redirect_uris = concat(
     [
-      "${local.frontend_url}/*",
+      "${local.frontend_url}/auth/callback",
     ],
     var.additional_redirect_uris,
   )
 
+  # web_origins stays scoped to the public frontend origin. The BFF
+  # design removes the SPA's cross-origin POSTs to Keycloak, but leaving
+  # the registered origin costs nothing and supports any future
+  # SPA-to-Keycloak interactions (e.g. silent-renewal iframe attempts)
+  # without a Terraform change.
   web_origins = concat(
     [local.frontend_url],
     var.additional_web_origins,

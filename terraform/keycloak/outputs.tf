@@ -44,8 +44,14 @@ output "oidc_discovery_url" {
 }
 
 output "frontend_client_id" {
-  description = "Public client ID used by the SPA."
+  description = "Client ID for the BFF backend's confidential OAuth client (mi-1d5i)."
   value       = keycloak_openid_client.frontend.client_id
+}
+
+output "frontend_client_secret" {
+  description = "Confidential client secret for the BFF backend (mi-1d5i). Feeds OIDC_CLIENT_SECRET via the minerals-oidc-secret SealedSecret."
+  value       = keycloak_openid_client.frontend.client_secret
+  sensitive   = true
 }
 
 output "backend_client_id" {
