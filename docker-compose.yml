@@ -110,6 +110,32 @@ services:
       PUBLIC_OIDC_ISSUER_URL: http://localhost:8081/realms/minerals
       PUBLIC_OIDC_CLIENT_ID: minerals-frontend
       PUBLIC_OIDC_REDIRECT_URI: http://localhost:8080/auth/callback
+      #
+      # V2 BFF auth (mi-1d5i). Both values are required to enable the
+      # /auth/login → /auth/callback → cookie-session flow; when either
+      # is empty the BFF handlers stay unregistered and the SPA shows
+      # a Login link that 404s. Dev workflow:
+      #
+      #   docker compose --profile keycloak up -d keycloak postgres minio
+      #   bash terraform/keycloak/dev-seed.sh   # writes .env.bff
+      #   docker compose --env-file .env.bff --profile keycloak up -d
+      #
+      # The two values flow into the container via env interpolation
+      # below — `${VAR:-}` defaults to empty when the env file is
+      # absent. Empty values are explicit "feature off" signals (see
+      # cmd/minerals/serve.go buildBFFAuth) so a polecat working on
+      # something unrelated can still bring the stack up without
+      # running dev-seed.sh.
+      OIDC_CLIENT_SECRET: "${OIDC_CLIENT_SECRET:-}"
+      OAUTH_STATE_HMAC_KEY: "${OAUTH_STATE_HMAC_KEY:-}"
+      # Dev runs on plain-HTTP localhost, so the cookie Secure flag
+      # MUST be false — otherwise the browser refuses to send the
+      # session cookie back. CONFIG.md documents the default.
+      COOKIE_SECURE: "false"
+      # Enforce CSRF on /auth/logout once SPA + middleware land.
+      # Belt-and-suspenders with the generic CSRFMiddleware (which
+      # is scoped to /api/v1/* and does not fire on /auth/*).
+      BFF_ENFORCE_CSRF_LOGOUT: "true"
     ports:
       - "8080:8080"
       # Admin listener (mi-2b1k): Prometheus `/metrics` + health probes.
