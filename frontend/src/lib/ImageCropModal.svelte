@@ -4,6 +4,7 @@
   import 'cropperjs/dist/cropper.css';
   import { client } from './api';
   import { SUPPRESS_TOAST_HEADERS, envelopeMessage } from './api/wrapper';
+  import { loadAuthedBlobUrl } from './photos/blob-url';
   import { toastError, toastSuccess } from './toasts';
 
   interface Props {
@@ -25,7 +26,41 @@
   let imageError = $state(false);
   let rotation = $state(0);
 
-  const imageUrl = $derived(`/api/v1/photos/${photoId}/display`);
+  // Source path for the photo bytes — kept as a stable string for
+  // `data-src` on the rendered <img> so tests can still assert
+  // against a meaningful URL.
+  const imagePath = $derived(`/api/v1/photos/${photoId}/display`);
+  // Blob URL holding the authenticated bytes (mi-lrqt). Null while
+  // the request is in flight; set to the URL once resolved. Revoked
+  // in the cleanup return below when the component teardown or the
+  // path changes.
+  let imageUrl: string | null = $state(null);
+
+  $effect(() => {
+    const path = imagePath;
+    imageUrl = null;
+    const ctrl = new AbortController();
+    let createdUrl: string | null = null;
+    let alive = true;
+    loadAuthedBlobUrl(path, { signal: ctrl.signal })
+      .then((url) => {
+        if (!alive || ctrl.signal.aborted) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        createdUrl = url;
+        imageUrl = url;
+      })
+      .catch(() => {
+        if (!alive || ctrl.signal.aborted) return;
+        imageError = true;
+      });
+    return () => {
+      alive = false;
+      ctrl.abort();
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  });
 
   function markDirty() {
     if (!dirty) dirty = true;
@@ -228,12 +263,14 @@
         >
           Couldn't load this image for cropping.
         </p>
-      {:else}
+      {:else if imageUrl}
         <!-- cropperjs replaces this <img> with its own DOM after init.
-             It needs a real <img> on first render. -->
+             It needs a real <img> on first render. We only render it
+             once the authenticated blob URL is in hand (mi-lrqt). -->
         <img
           bind:this={imgEl}
           src={imageUrl}
+          data-src={imagePath}
           alt="Crop preview"
           class="block max-h-[60vh] w-full"
           data-testid="crop-modal-image"
