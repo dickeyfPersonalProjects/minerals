@@ -530,7 +530,6 @@ jobs:
       # job (not via dev-seed.sh) so the staging-vs-dev configuration
       # drift the original bugs lived in cannot hide here either.
       - name: Default-shaped user — provision via Keycloak Admin API (mi-2xa4)
-        id: default_user
         env:
           DEFAULT_USERNAME: smoke-default@localhost
           DEFAULT_PASSWORD: MineralsDev123!
@@ -578,8 +577,6 @@ jobs:
             exit 1
           fi
           echo "default-shaped user provisioned: $DEFAULT_USERNAME (HTTP $code)"
-          echo "username=$DEFAULT_USERNAME" >> "$GITHUB_OUTPUT"
-          echo "password=$DEFAULT_PASSWORD" >> "$GITHUB_OUTPUT"
 
       - name: Default-shaped user — token claims match snapshot (mi-2xa4)
         # Mint a token via the same minerals-test password-grant client
@@ -589,20 +586,46 @@ jobs:
         # The snapshot lives at internal/oidc/testdata/keycloak-default-token-claims.json
         # and is documented in docs/design/08-keycloak-default-token-shape.md.
         env:
-          DEFAULT_USERNAME: ${{ steps.default_user.outputs.username }}
-          DEFAULT_PASSWORD: ${{ steps.default_user.outputs.password }}
+          # Same literals as the provision step. The fixture-user smoke
+          # also uses literals (not step outputs); keep the two
+          # consistent so the only source of drift between this and
+          # the working fixture path is the user shape.
+          DEFAULT_USERNAME: smoke-default@localhost
+          DEFAULT_PASSWORD: MineralsDev123!
         run: |
           set -euo pipefail
-          token=$(curl -fsS -X POST \
-            http://localhost:8081/realms/minerals/protocol/openid-connect/token \
+          # Capture body + HTTP code separately so a non-2xx from
+          # Keycloak surfaces in CI output (curl -fsS exits silently on
+          # HTTP errors when piped into jq, masking what actually broke
+          # — PR #205's first run hit exactly this and produced an
+          # empty log).
+          code=$(curl -sS -o /tmp/default-token-resp.json -w '%{http_code}' \
+            -X POST http://localhost:8081/realms/minerals/protocol/openid-connect/token \
             -d grant_type=password \
             -d client_id=minerals-test \
-            -d "username=${DEFAULT_USERNAME}" \
-            -d "password=${DEFAULT_PASSWORD}" \
-            -d scope=openid \
-            | jq -r '.access_token')
+            --data-urlencode "username=${DEFAULT_USERNAME}" \
+            --data-urlencode "password=${DEFAULT_PASSWORD}" \
+            -d scope=openid)
+          if [ "$code" != "200" ]; then
+            echo "FAIL: default-shaped user password grant returned HTTP $code" >&2
+            echo "request: username=${DEFAULT_USERNAME} client_id=minerals-test" >&2
+            echo "response body:" >&2
+            cat /tmp/default-token-resp.json >&2 || true
+            echo "" >&2
+            echo "Keycloak user record for this email:" >&2
+            admin_token=$(curl -fsS -X POST \
+              http://localhost:8081/realms/master/protocol/openid-connect/token \
+              -d grant_type=password -d client_id=admin-cli \
+              -d username=admin -d password=admin | jq -r '.access_token')
+            curl -sS -H "Authorization: Bearer ${admin_token}" \
+              "http://localhost:8081/admin/realms/minerals/users?username=${DEFAULT_USERNAME}&exact=true" \
+              | jq '.' >&2 || true
+            exit 1
+          fi
+          token=$(jq -r '.access_token' /tmp/default-token-resp.json)
           if [ -z "$token" ] || [ "$token" = "null" ]; then
-            echo "default-shaped user could not obtain a token from Keycloak" >&2
+            echo "FAIL: default-shaped user token response had no access_token" >&2
+            cat /tmp/default-token-resp.json >&2 || true
             exit 1
           fi
           # Persist the token for the steps below — only readable by
