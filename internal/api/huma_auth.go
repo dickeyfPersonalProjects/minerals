@@ -261,6 +261,19 @@ func requireCompleteProfile(ctx huma.Context, next func(huma.Context)) {
 	next(ctx)
 }
 
+// ResolveOrCreateUser is the exported form of resolveOrCreateUser
+// — the same code path the JWT middleware uses on first-login
+// (mi-2hf), made callable from outside the api package so the BFF
+// callback (mi-bm5b) lands on the same users row as the bearer
+// path. Both auth flows MUST share this resolver or a Keycloak
+// identity logging in via cookie would shadow its own
+// bearer-token row.
+func ResolveOrCreateUser(
+	ctx context.Context, repo domain.UserRepo, u auth.User,
+) (domain.User, error) {
+	return resolveOrCreateUser(ctx, repo, u)
+}
+
 // resolveOrCreateUser is the resolver's idempotent core: look up the
 // row by sub, insert a pending row when missing, and re-read on the
 // rare race where two concurrent first-login requests both miss.
