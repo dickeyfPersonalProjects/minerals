@@ -1,6 +1,7 @@
 <script lang="ts">
   import { link } from 'svelte-spa-router';
   import { client } from './api';
+  import AuthedImage from './photos/AuthedImage.svelte';
   import type { components } from './api/schema';
   import {
     addSpecimenToSheet,
@@ -174,7 +175,7 @@
       class="relative flex aspect-[4/3] items-center justify-center overflow-hidden bg-[var(--color-surface-2)]"
     >
       {#if thumbUrl && !thumbFailed}
-        <img
+        <AuthedImage
           src={thumbUrl}
           alt={`Photo of ${specimen.name}`}
           class="h-full w-full bg-black object-contain"
