@@ -107,6 +107,16 @@ services:
       OIDC_ISSUER_URL: http://localhost:8081/realms/minerals
       OIDC_CLIENT_ID: minerals-frontend
       OIDC_JWKS_URL: http://keycloak:8080/realms/minerals/protocol/openid-connect/certs
+      # OIDC_DISCOVERY_URL is the sister of OIDC_JWKS_URL for the BFF
+      # OAuth client (mi-8tnv). The BFF performs OIDC discovery at
+      # construction time to learn the token and end-session endpoints;
+      # the canonical OIDC_ISSUER_URL above is unreachable from inside
+      # this container (host-side :8081), so discovery is pointed at
+      # the in-network address instead. The `iss` claim on issued
+      # tokens — and the `issuer` field in the discovery doc — still
+      # match OIDC_ISSUER_URL because Keycloak emits URLs based on
+      # KC_HOSTNAME (set on the keycloak service). Unset in prod.
+      OIDC_DISCOVERY_URL: http://keycloak:8080/realms/minerals
       PUBLIC_OIDC_ISSUER_URL: http://localhost:8081/realms/minerals
       PUBLIC_OIDC_CLIENT_ID: minerals-frontend
       PUBLIC_OIDC_REDIRECT_URI: http://localhost:8080/auth/callback
@@ -159,6 +169,17 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       KC_HOSTNAME: http://localhost:8081
+      # Make the backchannel URLs in the discovery doc (token,
+      # userinfo, jwks, etc.) reflect the request's Host header rather
+      # than KC_HOSTNAME (mi-8tnv). The app container fetches discovery
+      # via `keycloak:8080`; without this flag the token_endpoint in
+      # the response would still be `http://localhost:8081/...token`
+      # — the host-side URL, unreachable from inside the container.
+      # Frontchannel URLs (authorization, end_session) keep using
+      # KC_HOSTNAME, which is what the browser needs. Dev-only: prod
+      # leaves backchannel strict so a malicious Host header can't
+      # rewrite the well-known doc.
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
     ports:
       - "8081:8080"
 

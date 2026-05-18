@@ -184,6 +184,31 @@ func TestLoad_OIDCJWKSURL(t *testing.T) {
 	}
 }
 
+func TestLoad_OIDCDiscoveryURL(t *testing.T) {
+	t.Parallel()
+	// Unset → empty: the BFF OAuth client discovers at OIDC_ISSUER_URL.
+	cfg, err := loadFrom(envFunc(nil))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.OIDCDiscoveryURL != "" {
+		t.Errorf("OIDCDiscoveryURL default = %q, want empty", cfg.OIDCDiscoveryURL)
+	}
+
+	// Set → propagates verbatim (mi-8tnv: needed when the canonical
+	// issuer URL is not reachable from inside the backend container —
+	// same situation OIDC_JWKS_URL covers for the verifier).
+	cfg, err = loadFrom(envFunc(map[string]string{
+		"OIDC_DISCOVERY_URL": "http://keycloak:8080/realms/minerals",
+	}))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.OIDCDiscoveryURL != "http://keycloak:8080/realms/minerals" {
+		t.Errorf("OIDCDiscoveryURL = %q", cfg.OIDCDiscoveryURL)
+	}
+}
+
 func TestLoad_DevExplicit(t *testing.T) {
 	t.Parallel()
 	cfg, err := loadFrom(envFunc(map[string]string{"ENV": "dev"}))

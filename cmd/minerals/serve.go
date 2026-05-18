@@ -378,6 +378,12 @@ func buildBFFAuth(
 		Issuer:       cfg.OIDCIssuerURL,
 		ClientID:     cfg.OIDCClientID,
 		ClientSecret: cfg.OIDCClientSecret,
+		// Discovery URL override (mi-8tnv) — see the sister
+		// OIDC_JWKS_URL setting in serve.go above. Empty in prod;
+		// set in docker-compose so discovery uses the in-network
+		// `keycloak:8080` address while the canonical issuer stays
+		// the host-facing `localhost:8081` URL.
+		DiscoveryURL: cfg.OIDCDiscoveryURL,
 		// Standard Keycloak claim-emitting scopes — `openid` is
 		// required for OIDC, the others surface the email + roles
 		// the resolver needs on first-login (docs/design/auth-bff.md
