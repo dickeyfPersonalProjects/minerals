@@ -27,6 +27,7 @@ setting" — updating this inventory is the first and mandatory step.
 | `OIDC_ISSUER_URL` | env | `http://localhost:8081/realms/minerals` | no | Keycloak realm URL used by the backend for JWT verification. Discovery (`{OIDC_ISSUER_URL}/.well-known/openid-configuration`) yields the JWKS endpoint. Consumed by `internal/oidc` via the auth middleware (mi-aw3a). | `internal/config/config.go` |
 | `OIDC_CLIENT_ID` | env | `minerals-frontend` | no | Expected `aud` claim on bearer tokens reaching the backend. Audience check only — no client secret on the backend (pure resource server, JWKS validation). Consumed by `internal/oidc` via the auth middleware (mi-aw3a). | `internal/config/config.go` |
 | `OIDC_JWKS_URL` | env | _(unset)_ | no | Overrides OIDC discovery for locating the realm's JWKS endpoint. When unset, the verifier discovers it from `OIDC_ISSUER_URL/.well-known/openid-configuration`. Set this when the canonical `OIDC_ISSUER_URL` (which must match browser-issued tokens' `iss` claim) is not reachable from inside the backend container — e.g. the docker-compose dev stack where the issuer is `http://localhost:8081/realms/minerals` (host-side) but the backend reaches Keycloak in-network at `http://keycloak:8080`. Consumed by `internal/oidc` (mi-dau). | `internal/config/config.go` |
+| `OIDC_DISCOVERY_URL` | env | _(unset)_ | no | Overrides the URL the BFF OAuth client uses to fetch the OIDC discovery document. When unset, discovery happens at `OIDC_ISSUER_URL/.well-known/openid-configuration` (the production path). When set, the well-known doc is fetched from `{OIDC_DISCOVERY_URL}/.well-known/openid-configuration` and the canonical `OIDC_ISSUER_URL` is still used to validate the discovery doc's `iss` field and token `iss` claims. Sister setting to `OIDC_JWKS_URL` — same rationale (host-side `OIDC_ISSUER_URL` is unreachable from inside the backend container in dev compose), applied to the BFF OAuth client's discovery instead of the verifier's JWKS lookup. Consumed by `internal/auth/bff` (mi-8tnv). | `internal/config/config.go` |
 | `PUBLIC_OIDC_ISSUER_URL` | env | `http://localhost:8081/realms/minerals` | no | Keycloak realm URL exposed to the SPA via `/api/v1/runtime-config` (the SPA uses it to discover the authorization endpoint for the PKCE login flow). The `PUBLIC_` prefix marks "safe to send to the browser". Consumed by `internal/api` (mi-5ew). | `internal/config/config.go` |
 | `PUBLIC_OIDC_CLIENT_ID` | env | `minerals-frontend` | no | Public OIDC `client_id` the SPA uses for the auth-code-with-PKCE flow. Same value as `OIDC_CLIENT_ID` today (the backend's expected audience and the SPA's client id are the `minerals-frontend` Keycloak client). Served to the SPA via `/api/v1/runtime-config`. | `internal/config/config.go` |
 | `PUBLIC_OIDC_REDIRECT_URI` | env | `http://localhost:5173/auth/callback` | no | Absolute URL the SPA hands Keycloak as the `redirect_uri` in the auth-code flow. Must match a `valid_redirect_uris` entry on the `minerals-frontend` Keycloak client (`terraform/keycloak/clients.tf`). Served to the SPA via `/api/v1/runtime-config`. Under V2 BFF (mi-1d5i) this is also the URL the BFF passes to Keycloak on `/auth/login` and reuses on `/auth/callback`'s code exchange — same URL, but backend-served. | `internal/config/config.go` |
@@ -64,9 +65,10 @@ into two sources:
   verification wired by mi-aw3a) but are not in the base ConfigMap —
   values are hostname-dependent and supplied by per-env overlays (see
   [`docs/deploy/example/`](./docs/deploy/example/)). `OIDC_JWKS_URL`
-  is left unset in prod (OIDC discovery against `OIDC_ISSUER_URL` is
-  the canonical path) — it exists for dev stacks where the host-side
-  issuer URL is unreachable from inside the backend container.
+  and `OIDC_DISCOVERY_URL` are both left unset in prod (OIDC discovery
+  against `OIDC_ISSUER_URL` is the canonical path) — they exist for
+  dev stacks where the host-side issuer URL is unreachable from
+  inside the backend container.
 - Secret `minerals-s3-creds` supplies `S3_ACCESS_KEY_ID` and
   `S3_SECRET_ACCESS_KEY`.
 - Secret `minerals-pg-app` (CNPG-managed) supplies `DATABASE_URL` via

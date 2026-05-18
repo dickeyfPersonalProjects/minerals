@@ -642,6 +642,9 @@ Backend retains its own:
 - `OIDC_ISSUER_URL`
 - `OIDC_CLIENT_ID`
 - `OIDC_CLIENT_SECRET` (new — was not needed for public PKCE client)
+- `OIDC_DISCOVERY_URL` (optional dev-only override; in-network discovery URL
+  when the public issuer is unreachable from the backend container — see
+  CONFIG.md and mi-8tnv; sister to the verifier's `OIDC_JWKS_URL`)
 
 ### Keycloak (Terraform) changes
 

@@ -81,6 +81,16 @@ type Config struct {
 	// Empty in prod — OIDC discovery handles it.
 	OIDCJWKSURL string
 
+	// OIDCDiscoveryURL, when non-empty, overrides the URL the BFF
+	// OAuth client uses to fetch the OIDC discovery document (mi-8tnv).
+	// The canonical OIDCIssuerURL is still used to validate the
+	// discovery doc's `iss` field (and the `iss` claim on issued
+	// tokens) — OIDCDiscoveryURL only changes where the well-known
+	// document is fetched from. Sister setting to OIDCJWKSURL: same
+	// rationale, applied to the BFF OAuth client's discovery instead
+	// of the verifier's JWKS lookup. Empty in prod.
+	OIDCDiscoveryURL string
+
 	// OIDCClientSecret is the Keycloak confidential-client secret
 	// the BFF uses on the server-to-server code exchange (mi-bm5b).
 	// Required to enable the /auth/login → /auth/callback flow; when
@@ -206,6 +216,7 @@ func loadFrom(get func(string) string) (*Config, error) {
 	cfg.OIDCIssuerURL = orDefault(get("OIDC_ISSUER_URL"), defaultOIDCIssuerURL)
 	cfg.OIDCClientID = orDefault(get("OIDC_CLIENT_ID"), defaultOIDCClientID)
 	cfg.OIDCJWKSURL = strings.TrimSpace(get("OIDC_JWKS_URL"))
+	cfg.OIDCDiscoveryURL = strings.TrimSpace(get("OIDC_DISCOVERY_URL"))
 	cfg.OIDCClientSecret = strings.TrimSpace(get("OIDC_CLIENT_SECRET"))
 	cfg.OAuthStateHMACKey = strings.TrimSpace(get("OAUTH_STATE_HMAC_KEY"))
 	cfg.PostLogoutRedirectURI = strings.TrimSpace(get("POST_LOGOUT_REDIRECT_URI"))

@@ -294,6 +294,68 @@ func TestEndSessionURL_EmptyDiscoveryReturnsEmpty(t *testing.T) {
 	}
 }
 
+// TestNewKeycloakOAuthClient_DiscoveryURLOverride proves the
+// OIDC_DISCOVERY_URL escape hatch (mi-8tnv) really does fetch the
+// well-known doc from DiscoveryURL while keeping Issuer as the
+// canonical `iss` value. The httptest server stands in for the
+// in-network address (`http://keycloak:8080/...` in compose); the
+// canonical Issuer URL is a literal that nothing actually serves —
+// if discovery were going there, NewKeycloakOAuthClient would fail.
+func TestNewKeycloakOAuthClient_DiscoveryURLOverride(t *testing.T) {
+	t.Parallel()
+	const canonicalIssuer = "https://auth.example.invalid/realms/minerals"
+
+	disco := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/openid-configuration" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		// gosec G101: well-known OIDC discovery doc literals — public
+		// metadata, no secrets. The hardcoded URLs are httptest /
+		// fake-network strings, not credentials.
+		_ = json.NewEncoder(w).Encode(map[string]any{ //nolint:gosec
+			// The discovery doc reports the canonical issuer — exactly
+			// the split Keycloak produces with KC_HOSTNAME=<public> +
+			// KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true.
+			"issuer":                                canonicalIssuer,
+			"authorization_endpoint":                canonicalIssuer + "/protocol/openid-connect/auth",
+			"token_endpoint":                        "http://keycloak:8080/realms/minerals/protocol/openid-connect/token",
+			"jwks_uri":                              "http://keycloak:8080/realms/minerals/protocol/openid-connect/certs",
+			"end_session_endpoint":                  canonicalIssuer + "/protocol/openid-connect/logout",
+			"id_token_signing_alg_values_supported": []string{"RS256"},
+		})
+	}))
+	t.Cleanup(disco.Close)
+
+	c, err := NewKeycloakOAuthClient(context.Background(), OAuthConfig{
+		Issuer:       canonicalIssuer,
+		DiscoveryURL: disco.URL,
+		ClientID:     "minerals-frontend",
+		ClientSecret: "test-secret",
+		Scopes:       []string{"openid"},
+	})
+	if err != nil {
+		t.Fatalf("NewKeycloakOAuthClient with DiscoveryURL: %v", err)
+	}
+
+	// Endpoints from the discovery doc must reach the in-network
+	// addresses — proves the override flowed through the constructor.
+	kc, ok := c.(*keycloakClient)
+	if !ok {
+		t.Fatalf("returned client type = %T, want *keycloakClient", c)
+	}
+	if kc.endpoints.TokenURL != "http://keycloak:8080/realms/minerals/protocol/openid-connect/token" {
+		t.Errorf("token endpoint = %q, want in-network keycloak:8080 URL", kc.endpoints.TokenURL)
+	}
+	if kc.endpoints.AuthURL != canonicalIssuer+"/protocol/openid-connect/auth" {
+		t.Errorf("auth endpoint = %q, want canonical public URL", kc.endpoints.AuthURL)
+	}
+	if kc.endSessionURL != canonicalIssuer+"/protocol/openid-connect/logout" {
+		t.Errorf("end_session = %q, want canonical public URL", kc.endSessionURL)
+	}
+}
+
 // TestNewKeycloakOAuthClient_RequiredFields locks the constructor
 // invariants so a missing env var fails at boot rather than at the
 // first user login.

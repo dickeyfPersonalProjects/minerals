@@ -123,6 +123,7 @@ contract.
 | `OIDC_ISSUER_URL` | **yes** | `https://auth.example.com/realms/minerals` | Keycloak realm URL. Backend uses it to discover JWKS and verify the `iss` claim. Must match the SPA's `iss`. |
 | `OIDC_CLIENT_ID` | **yes** | `minerals-frontend` | Expected `aud` on bearer tokens (audience check only — no client secret). |
 | `OIDC_JWKS_URL` | no | _(leave unset in prod)_ | Override discovery only when the in-cluster issuer differs from the public one (dev-only escape hatch). |
+| `OIDC_DISCOVERY_URL` | no | _(leave unset in prod)_ | Override the BFF OAuth client's OIDC discovery URL. Sister setting to `OIDC_JWKS_URL` — same dev-only escape hatch, applied to the BFF's discovery call instead of the verifier's JWKS fetch. |
 
 ### SPA OIDC (ConfigMap patch — required for login)
 

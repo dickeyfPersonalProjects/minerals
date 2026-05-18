@@ -69,6 +69,16 @@ type OAuthConfig struct {
 	Issuer       string
 	ClientID     string
 	ClientSecret string
+	// DiscoveryURL, when non-empty, is the base URL used to fetch the
+	// OIDC discovery document (`{DiscoveryURL}/.well-known/openid-configuration`)
+	// instead of `{Issuer}/.well-known/openid-configuration`. The
+	// canonical Issuer URL is still used to validate the `iss` claim
+	// in the discovery doc and in issued tokens — DiscoveryURL is
+	// only the network address. Used in the dev compose stack where
+	// the public Issuer URL (host-side) is unreachable from inside
+	// the backend container; same pattern (and rationale) as OIDC_JWKS_URL
+	// for the verifier (mi-dau).
+	DiscoveryURL string
 	// Scopes are the OAuth scopes requested at AuthCodeURL time.
 	// "openid" is required for OIDC; "profile" + "email" + "roles"
 	// match Keycloak's standard claim-emitting scopes.
@@ -117,7 +127,20 @@ func NewKeycloakOAuthClient(ctx context.Context, cfg OAuthConfig) (OAuthClient, 
 		return nil, errors.New("bff: OAuthConfig.ClientSecret is required")
 	}
 
-	provider, err := gooidc.NewProvider(ctx, cfg.Issuer)
+	discoveryCtx := ctx
+	discoveryURL := cfg.Issuer
+	if cfg.DiscoveryURL != "" {
+		// Fetch the well-known doc from DiscoveryURL but keep the
+		// canonical Issuer string for `iss` validation — see the
+		// DiscoveryURL field docs above. InsecureIssuerURLContext is
+		// the go-oidc seam for this exact split (its godoc cites
+		// Azure-style multi-tenant providers; the dev-compose case
+		// here is structurally the same: discovery is fetched from
+		// one URL, issuer claims are emitted with another).
+		discoveryCtx = gooidc.InsecureIssuerURLContext(ctx, cfg.Issuer)
+		discoveryURL = cfg.DiscoveryURL
+	}
+	provider, err := gooidc.NewProvider(discoveryCtx, discoveryURL)
 	if err != nil {
 		return nil, fmt.Errorf("bff: OIDC discovery: %w", err)
 	}
