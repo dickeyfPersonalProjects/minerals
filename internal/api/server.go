@@ -123,6 +123,19 @@ type Deps struct {
 	// wiring in cmd/minerals sets this whenever OIDC_CLIENT_SECRET
 	// and OAUTH_STATE_HMAC_KEY are both present.
 	BFFAuth *bff.Handlers
+	// SessionMW wraps the mux when BFF auth is configured. The
+	// middleware resolves the session cookie, refreshes the access
+	// token when due, and attaches auth.User to the context — so
+	// downstream huma handlers see the cookie-authenticated user the
+	// same way they see a bearer-token one. nil leaves the chain on
+	// the legacy bearer-token-only path (mi-sap2 / mi-1d5i #8).
+	SessionMW func(http.Handler) http.Handler
+	// CSRFMW enforces the stored-synchronizer CSRF check on /api/v1/*
+	// writes when a session is attached. Composes UNDER SessionMW.
+	// nil leaves CSRF off, which matches the bearer-token-only legacy
+	// path (bearer auth in an Authorization header is not subject to
+	// CSRF; cookies are).
+	CSRFMW func(http.Handler) http.Handler
 }
 
 // RuntimeOIDCConfig captures the SPA-facing OIDC settings the backend
@@ -210,6 +223,16 @@ func New(deps Deps) http.Handler {
 		deps.BFFAuth.RegisterRoutes(mux)
 	}
 
+	// V2 BFF CSRF endpoint (mi-gbzs / mi-sap2 #8). Mounted only when
+	// the session middleware is wired — anonymous callers receive
+	// 401, and a session-less deployment has nothing to serve here.
+	// The handler reads the session attached by SessionMW from the
+	// request context; SessionMW is applied at the top-level wrapper
+	// below, so it has already run by the time this route fires.
+	if deps.SessionMW != nil {
+		mux.Handle("GET /api/v1/csrf", http.HandlerFunc(bff.CSRFHandler))
+	}
+
 	// Protected /api/v1/* fallback. Real handlers land in feature
 	// beads; for now any unmatched /api/v1/ path falls through to a
 	// 404 envelope after the auth chain has run.
@@ -223,14 +246,43 @@ func New(deps Deps) http.Handler {
 		mux.Handle("/", deps.WebHandler)
 	}
 
+	// Wrap the mux: SessionMW (when configured) runs first so cookie
+	// auth populates auth.User before huma operations evaluate their
+	// per-operation middleware; CSRFMW runs only on /api/v1/* writes
+	// for cookie-authenticated requests (bearer-token callers carry
+	// no session and pass through). Both default to no-ops when BFF
+	// is disabled — the legacy bearer-token chain stays intact.
+	var top http.Handler = mux
+	if deps.CSRFMW != nil {
+		top = scopeToPath("/api/v1/", deps.CSRFMW, top)
+	}
+	if deps.SessionMW != nil {
+		top = deps.SessionMW(top)
+	}
+
 	// Apply public middleware to the entire mux. The /api/v1/*
 	// chain composes with auth wrappers above, preserving the
 	// historical order: Recovery → RequestID → SecHeaders → CSP →
-	// Logging → [auth.Auth → auth.RequireUser →] handler.
+	// Logging → [SessionMW → CSRFMW (on /api/v1/* writes) →]
+	// [auth.Auth → auth.RequireUser →] handler.
 	publicMW := []func(http.Handler) http.Handler{
 		Recovery, RequestID, SecurityHeaders, CSP(deps.CSPIssuerOrigin), Logging,
 	}
-	return Chain(mux, publicMW...)
+	return Chain(top, publicMW...)
+}
+
+// scopeToPath wraps next with mw only when the request URL has the
+// given prefix. Used to limit CSRFMiddleware to /api/v1/* without
+// touching /auth/* or the SPA fallback.
+func scopeToPath(prefix string, mw func(http.Handler) http.Handler, next http.Handler) http.Handler {
+	wrapped := mw(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if len(r.URL.Path) >= len(prefix) && r.URL.Path[:len(prefix)] == prefix {
+			wrapped.ServeHTTP(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // healthzOutput uses a body callback so the handler can write the
