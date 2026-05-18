@@ -333,26 +333,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/runtime-config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Browser-facing runtime config
-         * @description Serves the PUBLIC_OIDC_* settings the SPA needs to drive the PKCE login flow (mi-5ew). The `oidc` block is omitted when login is not configured in this environment. Public endpoint — no auth required.
-         */
-        get: operations["runtime-config"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/specimens": {
         parameters: {
             query?: never;
@@ -1221,24 +1201,6 @@ export interface components {
             composition?: string;
             formation_context?: string;
             rock_type?: string;
-        };
-        RuntimeConfigBody: {
-            /**
-             * Format: uri
-             * @description A URL to the JSON Schema for this object.
-             * @example //schemas/RuntimeConfigBody.json
-             */
-            readonly $schema?: string;
-            /** @description OIDC client config; absent when login is not configured. */
-            oidc?: components["schemas"]["RuntimeOIDCBody"];
-        };
-        RuntimeOIDCBody: {
-            /** @description Public OIDC client_id for the PKCE flow. */
-            client_id: string;
-            /** @description Keycloak realm URL the SPA uses to discover the auth endpoint. */
-            issuer_url: string;
-            /** @description Absolute callback URL registered with Keycloak. */
-            redirect_uri: string;
         };
         SpecimenCollectorLinkView: {
             /** @description The collector at this position in the chain. */
@@ -3085,35 +3047,6 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    "runtime-config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RuntimeConfigBody"];
-                };
-            };
-            /** @description Error */
-            default: {
                 headers: {
                     [name: string]: unknown;
                 };
