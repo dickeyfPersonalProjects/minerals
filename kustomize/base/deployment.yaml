@@ -105,6 +105,12 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+            # Admin listener (mi-2b1k): Prometheus `/metrics` plus the
+            # kubelet's liveness/readiness probes. Never wired into the
+            # public Ingress — see kustomize/base/service.yaml comment.
+            - name: admin
+              containerPort: 9090
+              protocol: TCP
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -142,17 +148,21 @@ spec:
                   name: minerals-mindat
                   key: MINDAT_API_KEY
                   optional: true
+          # Probes target the admin port (mi-2b1k). Rationale: probe
+          # traffic shouldn't compete with API requests for handler
+          # capacity, and the probe surface stays off the public
+          # Ingress (which only points at the `http` port).
           livenessProbe:
             httpGet:
               path: /healthz
-              port: http
+              port: admin
             periodSeconds: 10
             timeoutSeconds: 2
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /readyz
-              port: http
+              port: admin
             # Migration runs in initContainer, so the main container starts
             # against a ready DB. 10s gives the app a beat to dial Postgres
             # and MinIO before the first probe.

@@ -302,3 +302,48 @@ func TestReadyzReports503OnDBFailure(t *testing.T) {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 }
+
+// TestReadyzHTTPHandler_AdminPath checks the plain http.Handler the
+// admin-port mux uses (mi-2b1k). It must report the same status and
+// body shape as the API's `/readyz` huma operation.
+func TestReadyzHTTPHandler_AdminPath(t *testing.T) {
+	t.Parallel()
+	h := ReadyzHTTPHandler(Deps{
+		DB:      fakePinger{},
+		Storage: fakeBucket{},
+		SchemaVersion: func(_ context.Context) (uint, bool, error) {
+			return 1, false, nil
+		},
+		ExpectedVersion: 1,
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Ready  bool `json:"ready"`
+		Checks map[string]struct {
+			OK bool `json:"ok"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !body.Ready {
+		t.Errorf("ready=false; body=%s", rec.Body.String())
+	}
+
+	// 503 path: database down.
+	h = ReadyzHTTPHandler(Deps{
+		DB:      fakePinger{err: context.DeadlineExceeded},
+		Storage: fakeBucket{},
+	})
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}

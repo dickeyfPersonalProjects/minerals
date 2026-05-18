@@ -217,6 +217,7 @@ docs/deploy/
     │   ├── certificate.yaml         ← cert-manager cert → web-crt Secret
     │   ├── ingress.yaml             ← v1 Ingress, TLS via web-crt
     │   ├── mineral.yaml             ← Flux Kustomization (image, ENV patch)
+    │   ├── servicemonitor.yaml     ← Prometheus Operator scrape target (mi-2b1k)
     │   ├── minerals-minio-config.yaml  ← SealedSecret (REDACTED)
     │   └── minerals-s3-creds.yaml      ← SealedSecret (REDACTED)
     └── prod/
@@ -238,7 +239,10 @@ Each per-env `kustomization.yaml` lists resources in lifecycle order:
 3. `ingress.yaml` — references `web-crt` for TLS.
 4. `minerals-minio-config.yaml`, `minerals-s3-creds.yaml` —
    SealedSecrets the base's pods need before they can start.
-5. `mineral.yaml` — the Flux `Kustomization` that pulls
+5. `servicemonitor.yaml` — Prometheus Operator scrape target
+   (mi-2b1k). Independent of the app pods; can land before or after
+   the Flux Kustomization without affecting the rollout.
+6. `mineral.yaml` — the Flux `Kustomization` that pulls
    `kustomize/base/` into this namespace.
 
 Flux applies in dependency order regardless of file ordering, but the
@@ -311,6 +315,102 @@ that the overlay's behavior is obvious from the overlay itself.
    approval).
 8. After merge, the cluster's flux-system reconciles the new env on
    its next poll.
+
+---
+
+## Observability
+
+The app exposes a Prometheus-scrapable `/metrics` endpoint on a separate
+**admin port** (default `9090`, settable via `ADMIN_PORT` — see
+[`CONFIG.md`](../../CONFIG.md)). The admin listener serves three paths
+and nothing else:
+
+| Path | Purpose |
+|------|---------|
+| `/metrics` | Prometheus exposition. Default Go runtime collectors (`go_*`, `process_*`) ship for free; feature beads register their own collectors against the same default registry. |
+| `/healthz` | Liveness — plain-text `ok`, no dependency checks. |
+| `/readyz`  | Readiness — same DB / storage / schema checks as the API's `/readyz`. |
+
+### The two-port design
+
+The user-facing port (`http`, `8080`) and the operator-facing port
+(`admin`, `9090`) are bound by separate `http.Server` instances in the
+same process. The base `Service` lists both as named ports; only `http`
+is wired into the per-env Ingress backends. **The admin port is never
+exposed publicly.** This is defense-in-depth: even if a future Ingress
+edit mistakenly maps "all Service ports", scrape and probe traffic stays
+in-cluster.
+
+The kubelet's liveness/readiness probes target the admin port for the
+same reason — probe traffic should not compete with API requests for
+handler capacity, and the probe paths should not be visible to the
+public Ingress.
+
+### ServiceMonitor
+
+Prometheus Operator (kube-prometheus-stack and similar) discovers scrape
+targets through the `ServiceMonitor` CRD. The example overlay for each
+environment ships one — see
+[`example/staging/servicemonitor.yaml`](./example/staging/servicemonitor.yaml)
+and [`example/prod/servicemonitor.yaml`](./example/prod/servicemonitor.yaml).
+Both reference the `admin` named port on the base `Service`, so the
+operator scrapes via the in-cluster ClusterIP DNS (`minerals.<ns>.svc`)
+on `9090/metrics`.
+
+The example sets `release: kube-prometheus-stack` on the ServiceMonitor's
+labels — the default `serviceMonitorSelector` for the kube-prometheus
+Helm chart. **Verify this against your cluster before relying on it:**
+
+```bash
+kubectl get prometheus -A \
+  -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}: {.spec.serviceMonitorSelector}{"\n"}{end}'
+```
+
+If the operator's selector differs (e.g. a custom-deployed Prometheus
+selecting on `prometheus: minerals`), update the ServiceMonitor's
+labels to match. A label mismatch is silent — `kubectl apply` succeeds
+and the CR exists, but Prometheus never picks it up.
+
+### Verifying Prometheus is scraping
+
+After the overlay applies and the next Prometheus reconcile:
+
+```bash
+# 1. The Operator sees the CR.
+kubectl get servicemonitor -n mineral-<env> minerals -o yaml
+
+# 2. Prometheus loaded the scrape config.
+kubectl -n monitoring port-forward svc/<prometheus-svc> 9090
+#   then in the UI: Status → Service Discovery → minerals
+#                   Status → Targets → search "minerals"
+
+# 3. Spot-check from inside the cluster.
+kubectl run -n mineral-<env> --rm -it --image=curlimages/curl scrape-test -- \
+  curl -sS http://minerals.mineral-<env>.svc:9090/metrics | head
+```
+
+A successful scrape shows `up == 1` for the minerals target in
+Prometheus, and `go_goroutines{job="minerals"}` returns a non-empty
+series.
+
+### Ingress invariant
+
+**The admin port MUST NOT be added to any Ingress backend.** Future
+edits to `example/<env>/ingress.yaml` that introduce path-based
+routing should keep targeting the `http` named port only. The two-port
+design only works if this stays true; once `/metrics` is reachable
+publicly, runtime introspection (Go version, build info, request
+counts, memory layout) leaks to the open web.
+
+### Custom application metrics
+
+The admin endpoint exposes the default runtime collectors out of the
+box. Application metrics — request latency histograms, business
+counters, session-lookup timings (e.g. the V2 BFF design in
+[`docs/design/auth-bff.md`](../design/auth-bff.md)) — are registered
+by individual feature beads against
+`prometheus.DefaultRegisterer`. No additional wiring is required to
+surface them on `/metrics`; registration alone is sufficient.
 
 ---
 

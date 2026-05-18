@@ -207,6 +207,13 @@ func runServe(_ []string) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	// Admin listener: Prometheus `/metrics`, plus the k8s probe paths.
+	// Separate port keeps scrape/probe traffic off the user-facing
+	// listener and out of the public Ingress (mi-2b1k / design §7.3).
+	adminShutdown, adminErr := startAdminServer(":"+cfg.AdminPort, newAdminHandler(adminProbes{
+		readyz: api.ReadyzHTTPHandler(deps),
+	}))
+
 	srvErr := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -222,12 +229,21 @@ func runServe(_ []string) error {
 		if err != nil {
 			return fmt.Errorf("serve: listen: %w", err)
 		}
+	case err := <-adminErr:
+		if err != nil {
+			return fmt.Errorf("serve: admin listen: %w", err)
+		}
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("serve: shutdown: %w", err)
+	}
+	if err := adminShutdown(shutdownCtx); err != nil {
+		// Don't fail the whole shutdown for the admin listener — the
+		// API server is what matters; the admin port is operator-only.
+		slog.Warn("admin listener shutdown error", "err", err)
 	}
 	slog.Info("shutdown complete")
 	return nil

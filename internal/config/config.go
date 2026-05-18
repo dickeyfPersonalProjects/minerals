@@ -16,7 +16,14 @@ import (
 // Config is the v1 runtime configuration. All fields correspond to
 // entries in the §15 inventory.
 type Config struct {
-	Port              string
+	Port string
+	// AdminPort is the operator-facing HTTP listener that serves
+	// `/metrics` (Prometheus exposition) and the k8s probe paths
+	// (`/healthz`, `/readyz`). Separate from the user-facing Port so
+	// scrape and probe traffic doesn't compete with API requests for
+	// handler capacity, and so the admin surface can stay off the
+	// public Ingress (see mi-2b1k / `kustomize/base/service.yaml`).
+	AdminPort         string
 	DatabaseURL       string
 	S3Endpoint        string
 	S3AccessKeyID     string
@@ -79,7 +86,8 @@ type Config struct {
 // §15. Required-in-prod variables are not defaulted when ENV=prod;
 // see Load.
 const (
-	defaultPort = "8080"
+	defaultPort      = "8080"
+	defaultAdminPort = "9090"
 	// defaultDatabaseURL embeds the dev-only minerals/minerals credentials matching
 	// docker-compose.yml. Load() rejects this URL when ENV=prod, so the embedded
 	// password cannot be used in production.
@@ -124,6 +132,7 @@ func loadFrom(get func(string) string) (*Config, error) {
 	cfg := &Config{Env: env}
 
 	cfg.Port = orDefault(get("PORT"), defaultPort)
+	cfg.AdminPort = orDefault(get("ADMIN_PORT"), defaultAdminPort)
 	cfg.LogLevel = orDefault(get("LOG_LEVEL"), defaultLogLevel)
 	cfg.S3Region = orDefault(get("S3_REGION"), defaultS3Region)
 	cfg.MindatAPIKey = strings.TrimSpace(get("MINDAT_API_KEY"))

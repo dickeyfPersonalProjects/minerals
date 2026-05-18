@@ -343,77 +343,101 @@ func makeRuntimeConfigHandler(oidc RuntimeOIDCConfig) func(context.Context, *str
 	}
 }
 
+// evaluateReadiness runs the per-dependency probes and returns the
+// readyz response body plus the HTTP status to send (200 when every
+// check passes, 503 otherwise). Shared between the huma operation
+// served at `/readyz` on the API port and the plain http.Handler
+// exposed on the admin port (mi-2b1k).
+func evaluateReadiness(ctx context.Context, deps Deps) (readyzBody, int) {
+	body := readyzBody{Checks: map[string]readyzCheck{}}
+	ready := true
+
+	dbCheck := readyzCheck{OK: true}
+	if deps.DB != nil {
+		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		if err := deps.DB.Ping(cctx); err != nil {
+			dbCheck = readyzCheck{OK: false, Error: err.Error()}
+			ready = false
+		}
+		cancel()
+	} else {
+		dbCheck = readyzCheck{OK: false, Error: "no db wired"}
+		ready = false
+	}
+	body.Checks["database"] = dbCheck
+
+	storageCheck := readyzCheck{OK: true}
+	if deps.Storage != nil {
+		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		if err := deps.Storage.HeadBucket(cctx); err != nil {
+			storageCheck = readyzCheck{OK: false, Error: err.Error()}
+			ready = false
+		}
+		cancel()
+	} else {
+		storageCheck = readyzCheck{OK: false, Error: "no storage wired"}
+		ready = false
+	}
+	body.Checks["storage"] = storageCheck
+
+	var schemaCheck readyzCheck
+	if deps.SchemaVersion != nil {
+		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		ver, dirty, err := deps.SchemaVersion(cctx)
+		cancel()
+		switch {
+		case err != nil:
+			schemaCheck = readyzCheck{OK: false, Error: err.Error()}
+			ready = false
+		case dirty:
+			schemaCheck = readyzCheck{OK: false, Error: "schema is dirty", Version: ver}
+			ready = false
+		case deps.ExpectedVersion != 0 && ver != deps.ExpectedVersion:
+			schemaCheck = readyzCheck{
+				OK:      false,
+				Error:   fmt.Sprintf("expected version %d, found %d", deps.ExpectedVersion, ver),
+				Version: ver,
+			}
+			ready = false
+		default:
+			schemaCheck = readyzCheck{OK: true, Version: ver}
+		}
+	} else {
+		// Treat as "no migrations yet" — readyz still requires DB
+		// and storage to be up but doesn't gate on schema-version
+		// evidence.
+		schemaCheck = readyzCheck{OK: true}
+	}
+	body.Checks["schema"] = schemaCheck
+
+	body.Ready = ready
+	if ready {
+		return body, http.StatusOK
+	}
+	return body, http.StatusServiceUnavailable
+}
+
 func makeReadyzHandler(deps Deps) func(context.Context, *struct{}) (*readyzOutput, error) {
 	return func(ctx context.Context, _ *struct{}) (*readyzOutput, error) {
-		body := readyzBody{Checks: map[string]readyzCheck{}}
-		ready := true
+		body, status := evaluateReadiness(ctx, deps)
+		return &readyzOutput{Status: status, Body: body}, nil
+	}
+}
 
-		dbCheck := readyzCheck{OK: true}
-		if deps.DB != nil {
-			cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			if err := deps.DB.Ping(cctx); err != nil {
-				dbCheck = readyzCheck{OK: false, Error: err.Error()}
-				ready = false
-			}
-			cancel()
-		} else {
-			dbCheck = readyzCheck{OK: false, Error: "no db wired"}
-			ready = false
+// ReadyzHTTPHandler returns a plain http.Handler that runs the same
+// readiness checks as the API's `/readyz` huma operation and writes
+// the JSON response shape documented in design §7.3. Used by the
+// admin-port mux (mi-2b1k) so the k8s probe and the API see the same
+// answer.
+func ReadyzHTTPHandler(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		body, status := evaluateReadiness(r.Context(), deps)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(status)
+		if err := json.NewEncoder(w).Encode(body); err != nil {
+			// Best-effort; status header is already written.
+			return
 		}
-		body.Checks["database"] = dbCheck
-
-		storageCheck := readyzCheck{OK: true}
-		if deps.Storage != nil {
-			cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			if err := deps.Storage.HeadBucket(cctx); err != nil {
-				storageCheck = readyzCheck{OK: false, Error: err.Error()}
-				ready = false
-			}
-			cancel()
-		} else {
-			storageCheck = readyzCheck{OK: false, Error: "no storage wired"}
-			ready = false
-		}
-		body.Checks["storage"] = storageCheck
-
-		var schemaCheck readyzCheck
-		if deps.SchemaVersion != nil {
-			cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			ver, dirty, err := deps.SchemaVersion(cctx)
-			cancel()
-			switch {
-			case err != nil:
-				schemaCheck = readyzCheck{OK: false, Error: err.Error()}
-				ready = false
-			case dirty:
-				schemaCheck = readyzCheck{OK: false, Error: "schema is dirty", Version: ver}
-				ready = false
-			case deps.ExpectedVersion != 0 && ver != deps.ExpectedVersion:
-				schemaCheck = readyzCheck{
-					OK:      false,
-					Error:   fmt.Sprintf("expected version %d, found %d", deps.ExpectedVersion, ver),
-					Version: ver,
-				}
-				ready = false
-			default:
-				schemaCheck = readyzCheck{OK: true, Version: ver}
-			}
-		} else {
-			// Treat as "no migrations yet" — readyz still requires DB
-			// and storage to be up but doesn't gate on schema-version
-			// evidence.
-			schemaCheck = readyzCheck{OK: true}
-		}
-		body.Checks["schema"] = schemaCheck
-
-		body.Ready = ready
-		out := &readyzOutput{Body: body}
-		if ready {
-			out.Status = http.StatusOK
-		} else {
-			out.Status = http.StatusServiceUnavailable
-		}
-		return out, nil
 	}
 }
 

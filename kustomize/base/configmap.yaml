@@ -14,6 +14,9 @@ metadata:
   name: minerals-config
 data:
   PORT: "8080"
+  # Operator-facing admin listener (mi-2b1k): serves /metrics + probes.
+  # Must match the `admin` containerPort in deployment.yaml.
+  ADMIN_PORT: "9090"
   ENV: "prod"
   S3_BUCKET: "minerals"
   S3_REGION: "us-east-1"
