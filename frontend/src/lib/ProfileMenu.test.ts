@@ -86,6 +86,17 @@ describe('ProfileMenu (V2 BFF cookie flow, mi-3vc4)', () => {
     });
   });
 
+  it('navigates to the settings page and closes the menu on Settings click (mi-1ygd)', async () => {
+    __authenticate({ display_name: 'Ada Lovelace' });
+    render(ProfileMenu);
+    screen.getByTestId('profile-menu-button').click();
+    (await screen.findByTestId('profile-menu-settings')).click();
+    expect(mockPush).toHaveBeenCalledWith('/settings');
+    await waitFor(() => {
+      expect(screen.queryByTestId('profile-menu')).not.toBeInTheDocument();
+    });
+  });
+
   it('POSTs /auth/logout with the X-CSRF-Token header and reboots the SPA', async () => {
     __authenticate({ display_name: 'Ada Lovelace' });
     __setCsrf('token-from-csrf-store');
