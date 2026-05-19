@@ -4,6 +4,7 @@ package migrations_test
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -16,7 +17,10 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/dickeyfPersonalProjects/minerals/internal/dbtest"
 )
 
 // migrationsDir resolves the absolute path to the repo's migrations/
@@ -51,41 +55,87 @@ func dsnWithSearchPath(t *testing.T, raw, schema string) string {
 	return u.String()
 }
 
+// dsnWithDatabase returns the DSN with its path component replaced by
+// dbname. Used by TestMigrations_UpDownUp to point migrate at an
+// isolated temporary database.
+func dsnWithDatabase(t *testing.T, raw, dbname string) string {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse DATABASE_URL: %v", err)
+	}
+	u.Path = "/" + dbname
+	return u.String()
+}
+
 // TestMigrations_UpDownUp exercises the full round-trip required by the
-// bead: up → introspect → down → introspect → up. Each test run uses a
-// unique schema so concurrent runs and prior failures don't collide.
+// bead: up → introspect → down → introspect → up.
+//
+// Runs against a dedicated temporary DATABASE (not just a search_path
+// schema) because migration 0015 manipulates the database-global `auth`
+// schema (schema names ignore search_path). m.Down would otherwise
+// DROP that schema while other concurrent integration tests are mid-
+// use of auth.sessions, surfacing as "schema auth does not exist" or
+// "relation auth.sessions does not exist" failures on main (mi-omqp).
+// A dedicated database isolates this test's auth-schema lifecycle.
 func TestMigrations_UpDownUp(t *testing.T) {
 	rawDSN := os.Getenv("DATABASE_URL")
 	if rawDSN == "" {
 		t.Skip("DATABASE_URL not set; skipping migrations integration test")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	schema := "mig_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+	dbname := "mig_test_db_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
 
-	adminPool, err := pgxpool.New(ctx, rawDSN)
+	// Admin connection on the source database used only to CREATE/DROP
+	// the temporary database. CREATE DATABASE cannot run inside a
+	// transaction, so we use a single Conn (not a pool — pool can wrap
+	// statements in implicit transactions for some operations).
+	adminConn, err := pgx.Connect(ctx, rawDSN)
 	if err != nil {
-		t.Fatalf("connect admin pool: %v", err)
+		t.Fatalf("admin conn: %v", err)
 	}
-
-	if _, err := adminPool.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
-		adminPool.Close()
-		t.Fatalf("create schema: %v", err)
+	if _, err := adminConn.Exec(ctx, fmt.Sprintf(`CREATE DATABASE %q`, dbname)); err != nil {
+		_ = adminConn.Close(ctx)
+		t.Fatalf("create database %s: %v", dbname, err)
 	}
-	// t.Cleanup runs LIFO: drop the schema first (while the pool is
-	// still open), then close the pool.
-	t.Cleanup(adminPool.Close)
 	t.Cleanup(func() {
-		cleanCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if _, err := adminPool.Exec(cleanCtx, "DROP SCHEMA "+schema+" CASCADE"); err != nil {
-			t.Logf("cleanup: drop schema %s: %v", schema, err)
+		bg := context.Background()
+		// Force-close any lingering connections to the temp DB so the
+		// drop doesn't error with "is being accessed by other users".
+		_, _ = adminConn.Exec(bg,
+			`SELECT pg_terminate_backend(pid)
+			 FROM pg_stat_activity
+			 WHERE datname = $1 AND pid != pg_backend_pid()`,
+			dbname,
+		)
+		if _, err := adminConn.Exec(bg,
+			fmt.Sprintf(`DROP DATABASE IF EXISTS %q`, dbname),
+		); err != nil {
+			t.Logf("cleanup: drop database %s: %v", dbname, err)
 		}
+		_ = adminConn.Close(bg)
 	})
 
-	scopedDSN := dsnWithSearchPath(t, rawDSN, schema)
+	testDSN := dsnWithDatabase(t, rawDSN, dbname)
+
+	// Per-test schema inside the temporary database — keeps the
+	// assertion helpers (parameterized by schema name) working as-is.
+	schema := "mig_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+
+	pool, err := pgxpool.New(ctx, testDSN)
+	if err != nil {
+		t.Fatalf("temp db pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	if _, err := pool.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+
+	scopedDSN := dsnWithSearchPath(t, testDSN, schema)
 	migrationsURL := "file://" + migrationsDir(t)
 
 	m, err := migrate.New(migrationsURL, scopedDSN)
@@ -98,23 +148,26 @@ func TestMigrations_UpDownUp(t *testing.T) {
 		}
 	}()
 
+	// No advisory lock needed — the dedicated database means we're the
+	// only migrator that can touch this auth schema.
+
 	// Up.
 	if err := m.Up(); err != nil {
 		t.Fatalf("migrate up: %v", err)
 	}
-	assertSchemaPresent(ctx, t, adminPool, schema)
+	assertSchemaPresent(ctx, t, pool, schema)
 
 	// Down.
 	if err := m.Down(); err != nil {
 		t.Fatalf("migrate down: %v", err)
 	}
-	assertSchemaAbsent(ctx, t, adminPool, schema)
+	assertSchemaAbsent(ctx, t, pool, schema)
 
 	// Up again — idempotent reapply must succeed cleanly.
 	if err := m.Up(); err != nil {
 		t.Fatalf("migrate up (second): %v", err)
 	}
-	assertSchemaPresent(ctx, t, adminPool, schema)
+	assertSchemaPresent(ctx, t, pool, schema)
 }
 
 // expectedTables is the list of tables 0001_init.up.sql creates.
@@ -242,8 +295,16 @@ func TestMigration0009_NormalizesChemicalFormula(t *testing.T) {
 
 	// Migrate up to 0008 (everything BEFORE the backfill). This ensures
 	// specimens + mineral_species exist and we can seed dirty rows.
-	if err := m.Migrate(8); err != nil {
-		t.Fatalf("migrate up to 8: %v", err)
+	// Lock-guarded because earlier migrations don't touch `auth`, but
+	// later steps in this test do; serializing every migrate call keeps
+	// the helper's contract uniform (mi-omqp).
+	{
+		unlock := dbtest.AcquireMigrateLock(ctx, t, rawDSN)
+		err := m.Migrate(8)
+		unlock()
+		if err != nil {
+			t.Fatalf("migrate up to 8: %v", err)
+		}
 	}
 
 	// Seed dirty data through a scoped pool.
@@ -286,8 +347,13 @@ func TestMigration0009_NormalizesChemicalFormula(t *testing.T) {
 	}
 
 	// Apply 0009.
-	if err := m.Migrate(9); err != nil {
-		t.Fatalf("migrate up to 9: %v", err)
+	{
+		unlock := dbtest.AcquireMigrateLock(ctx, t, rawDSN)
+		err := m.Migrate(9)
+		unlock()
+		if err != nil {
+			t.Fatalf("migrate up to 9: %v", err)
+		}
 	}
 
 	// Dirty rows are now clean.
@@ -316,8 +382,13 @@ func TestMigration0009_NormalizesChemicalFormula(t *testing.T) {
 	}
 
 	// Down is a documented no-op for the data; should run cleanly.
-	if err := m.Migrate(8); err != nil {
-		t.Fatalf("migrate down to 8: %v", err)
+	{
+		unlock := dbtest.AcquireMigrateLock(ctx, t, rawDSN)
+		err := m.Migrate(8)
+		unlock()
+		if err != nil {
+			t.Fatalf("migrate down to 8: %v", err)
+		}
 	}
 }
 

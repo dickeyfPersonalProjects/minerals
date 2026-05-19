@@ -21,6 +21,7 @@ import (
 
 	"github.com/dickeyfPersonalProjects/minerals/internal/auth"
 	"github.com/dickeyfPersonalProjects/minerals/internal/db"
+	"github.com/dickeyfPersonalProjects/minerals/internal/dbtest"
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
 )
 
@@ -65,8 +66,14 @@ func scopedDB(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(func() { _, _ = m.Close() })
 
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		t.Fatalf("migrate up: %v", err)
+	// Serialize the migrate window: `auth` is a database-global schema
+	// (mi-omqp), so parallel migrate.Up/Down across per-test schemas
+	// race on its create/drop. Released immediately after Up returns.
+	unlock := dbtest.AcquireMigrateLock(ctx, t, rawDSN)
+	upErr := m.Up()
+	unlock()
+	if upErr != nil && !errors.Is(upErr, migrate.ErrNoChange) {
+		t.Fatalf("migrate up: %v", upErr)
 	}
 
 	pool, err := pgxpool.New(ctx, scoped)
