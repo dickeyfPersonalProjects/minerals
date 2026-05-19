@@ -14,6 +14,7 @@ import CollectorEdit from './routes/CollectorEdit.svelte';
 import QRPreview from './routes/QRPreview.svelte';
 import ProfileSetup from './routes/ProfileSetup.svelte';
 import Profile from './routes/Profile.svelte';
+import Settings from './routes/Settings.svelte';
 
 // V2 BFF cookie flow (mi-3vc4): /auth/callback is no longer a SPA
 // route — Keycloak redirects back to the BACKEND's /auth/callback
@@ -22,6 +23,7 @@ export const routes: RouteDefinition = {
   '/': Specimens,
   '/profile': Profile,
   '/profile/setup': ProfileSetup,
+  '/settings': Settings,
   '/specimens': Specimens,
   '/specimens/new': SpecimenNew,
   // Static routes must precede the `:id` capture (svelte-spa-router

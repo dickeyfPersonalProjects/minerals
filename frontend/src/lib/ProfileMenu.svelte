@@ -50,6 +50,11 @@
     void push('/profile');
   }
 
+  function goSettings(): void {
+    open = false;
+    void push('/settings');
+  }
+
   async function signOut(): Promise<void> {
     if (busy) return;
     busy = true;
@@ -139,6 +144,15 @@
         class="block w-full px-3 py-1.5 text-left text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
       >
         Profile
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onclick={goSettings}
+        data-testid="profile-menu-settings"
+        class="block w-full px-3 py-1.5 text-left text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+      >
+        Settings
       </button>
       <button
         type="button"
