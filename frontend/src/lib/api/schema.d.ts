@@ -646,8 +646,8 @@ export interface components {
              */
             readonly $schema?: string;
             /**
-             * Format: date-time
-             * @description Acquisition date.
+             * Format: date
+             * @description Acquisition date as RFC 3339 full-date (YYYY-MM-DD).
              */
             acquired_at?: string;
             /** @description Where the specimen was acquired. */
@@ -974,8 +974,8 @@ export interface components {
              */
             readonly $schema?: string;
             /**
-             * Format: date-time
-             * @description Omit to leave unchanged.
+             * Format: date
+             * @description Omit to leave unchanged. RFC 3339 full-date (YYYY-MM-DD).
              */
             acquired_at?: string;
             /** @description Omit to leave unchanged. */
@@ -1253,8 +1253,8 @@ export interface components {
              */
             readonly $schema?: string;
             /**
-             * Format: date-time
-             * @description Acquisition date (RFC 3339, time component ignored). Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property.
+             * Format: date
+             * @description Acquisition date as RFC 3339 full-date (YYYY-MM-DD). Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property.
              */
             acquired_at?: string;
             /** @description Where the specimen was acquired (free text). Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property. */

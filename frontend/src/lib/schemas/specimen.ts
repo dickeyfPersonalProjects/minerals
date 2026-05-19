@@ -385,7 +385,7 @@ export function formToCreateBody(values: SpecimenFormValues): CreateBody {
   if (values.catalog_number) body.catalog_number = values.catalog_number;
   if (values.description) body.description = values.description;
   body.visibility = values.visibility;
-  const acquiredAt = toRfc3339(values.acquired_at);
+  const acquiredAt = toAcquiredAtWire(values.acquired_at);
   if (acquiredAt) body.acquired_at = acquiredAt;
   if (values.acquired_from) body.acquired_from = values.acquired_from;
   if (values.source_notes) body.source_notes = values.source_notes;
@@ -423,10 +423,8 @@ export function formToPatchBody(initial: SpecimenView, values: SpecimenFormValue
   if (values.description !== initial.description) body.description = values.description;
   if (values.visibility !== initial.visibility) body.visibility = values.visibility;
 
-  const newAcquiredAt = toRfc3339(values.acquired_at);
-  const initAcquiredAt = initial.acquired_at
-    ? toRfc3339(toDateInputValue(initial.acquired_at))
-    : '';
+  const newAcquiredAt = toAcquiredAtWire(values.acquired_at);
+  const initAcquiredAt = initial.acquired_at ? toDateInputValue(initial.acquired_at) : '';
   if (newAcquiredAt !== initAcquiredAt) {
     if (newAcquiredAt) body.acquired_at = newAcquiredAt;
   }
@@ -521,6 +519,16 @@ function priceDollarsToCents(s: string | number | null | undefined): number | nu
   return Math.round(dollars * 100);
 }
 
+// toAcquiredAtWire normalizes the form's <input type="date"> value
+// ("YYYY-MM-DD", "" or null) into the API's RFC 3339 full-date wire
+// shape. The acquired_at field uses `format: date` (mi-s2ma): a
+// time-of-day is meaningless for a calendar acquisition date, and
+// strict date-time previously rejected the SPA's own input.
+function toAcquiredAtWire(dateInput: string | null | undefined): string {
+  if (!dateInput) return '';
+  return dateInput;
+}
+
 function toRfc3339(dateInput: string | null | undefined): string {
   // dateInput is the value of <input type="date"> ("YYYY-MM-DD"),
   // empty, or null (felte coerces an empty date input to null).
@@ -529,10 +537,10 @@ function toRfc3339(dateInput: string | null | undefined): string {
   return `${dateInput}T12:00:00Z`;
 }
 
-function toDateInputValue(rfc3339: string): string {
-  // Pull just YYYY-MM-DD off an RFC 3339 string for prefilling
-  // <input type="date">.
-  const m = /^(\d{4}-\d{2}-\d{2})/.exec(rfc3339);
+function toDateInputValue(rfc3339OrDate: string): string {
+  // Pull just YYYY-MM-DD off either an RFC 3339 string or a full-date
+  // ("YYYY-MM-DD") for prefilling <input type="date">.
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(rfc3339OrDate);
   return m ? m[1]! : '';
 }
 

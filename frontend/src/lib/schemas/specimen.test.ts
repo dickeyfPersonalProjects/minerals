@@ -157,13 +157,15 @@ describe('formToCreateBody', () => {
     expect(body).not.toHaveProperty('mass_g');
   });
 
-  it('converts acquired_at YYYY-MM-DD to RFC3339 with midday UTC', () => {
+  it('sends acquired_at as an RFC 3339 full-date (mi-s2ma)', () => {
+    // mi-s2ma flipped acquired_at to `format: date`; the wire shape
+    // is now the bare YYYY-MM-DD calendar value, not a date-time.
     const v: SpecimenFormValues = {
       ...emptyFormValues('mineral'),
       name: 'X',
       acquired_at: '2024-06-15',
     };
-    expect(formToCreateBody(v).acquired_at).toBe('2024-06-15T12:00:00Z');
+    expect(formToCreateBody(v).acquired_at).toBe('2024-06-15');
   });
 
   it('omits acquired_at when the date input is empty', () => {
@@ -730,7 +732,7 @@ describe('round-trip: specimenToFormValues ∘ formToCreateBody', () => {
       catalog_number: 'C-9',
       description: 'sample',
       visibility: 'public',
-      acquired_at: '2024-06-15T12:00:00Z',
+      acquired_at: '2024-06-15',
       acquired_from: 'Alice',
       price_cents: 4200,
       source_notes: 'notes',
