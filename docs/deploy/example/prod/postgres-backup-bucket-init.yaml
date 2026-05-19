@@ -1,0 +1,73 @@
+# One-shot bootstrap Job: create the dedicated MinIO bucket for CNPG
+# (Barman) backups and enable versioning on it.
+#
+# Why a Job, not the Tenant CRD's `buckets` field:
+#   The MinIO Operator's `Tenant.spec.buckets[]` creates a bucket but
+#   does NOT toggle versioning. Versioning is a bucket-level setting we
+#   need ON (defends against accidental or malicious overwrite/delete of
+#   backup artifacts — versioned objects keep their prior contents
+#   under a previous VersionId even if "deleted").
+#
+#   This Job uses `mc` (MinIO client) to do both in one shot. It is
+#   idempotent: `mc mb --ignore-existing` no-ops if the bucket exists;
+#   `mc version enable` no-ops if versioning is already on.
+#
+# Lifecycle:
+#   - Applied by Flux on every reconcile. The Job's spec is immutable
+#     once Succeeded, so Flux sees no diff and does nothing further.
+#   - To rerun (e.g. after recreating the tenant from scratch), delete
+#     the Job manually: `kubectl -n mineral-prod delete job
+#     minerals-pg-backups-bucket-init`. Flux re-creates it on next pass.
+#
+# Credentials:
+#   The Job mounts `minerals-minio-config` (MinIO root creds) and sources
+#   its `config.env` to authenticate `mc`. Same Secret the MinIO Operator
+#   itself uses; no extra surface.
+#
+# Why root creds and not the dedicated backup user:
+#   Creating the bucket and toggling versioning require admin/owner
+#   rights. The dedicated `minerals-pg-backup-creds` user has only
+#   object-level read/write on this bucket once it exists.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minerals-pg-backups-bucket-init
+  namespace: mineral-prod
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: minerals
+        component: pg-backup-bucket-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              # config.env exports MINIO_ROOT_USER + MINIO_ROOT_PASSWORD
+              # (shell-style; same format the MinIO Operator consumes).
+              . /etc/minio-config/config.env
+
+              mc alias set local http://minerals-hl:9000 \
+                "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+
+              mc mb --ignore-existing local/minerals-postgres-backups
+              mc version enable local/minerals-postgres-backups
+
+              # Sanity-check: print the bucket's versioning state so the
+              # Job's log doubles as evidence the toggle landed.
+              mc version info local/minerals-postgres-backups
+          volumeMounts:
+            - name: minio-config
+              mountPath: /etc/minio-config
+              readOnly: true
+      volumes:
+        - name: minio-config
+          secret:
+            secretName: minerals-minio-config

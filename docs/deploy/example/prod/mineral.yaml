@@ -57,3 +57,53 @@ spec:
           OIDC_ISSUER_URL: https://auth.example.com/realms/minerals
           OIDC_CLIENT_ID: minerals-frontend
           PUBLIC_OIDC_REDIRECT_URI: https://www.example.com/auth/callback
+    # CNPG backup → in-cluster MinIO (mi-jgzi). Prod-only; staging has
+    # no Cluster patch and therefore no backups. The companion resources
+    # (bucket-init Job, ScheduledBackup, dedicated SealedSecret) are
+    # listed in kustomization.yaml.
+    #
+    # Storage choice (in-cluster MinIO) is deliberately limited:
+    #   - Protects against bad migrations, accidental DELETE/UPDATE,
+    #     and app-level data corruption via point-in-time recovery.
+    #   - Does NOT protect against catastrophic cluster loss (the
+    #     backup lives on the same cluster). Migration to external
+    #     S3 (B2/AWS/etc.) is a two-field swap on this patch when
+    #     scale + risk justify the cost; see docs/deploy/restore.md
+    #     "Migrating to external storage".
+    #
+    # endpointURL: short DNS works because the Cluster and MinIO
+    # Tenant are both in mineral-prod. Headless service name follows
+    # the MinIO Operator's `<tenant>-hl` convention (same as
+    # configmap.yaml's S3_ENDPOINT for the app).
+    #
+    # destinationPath uses an s3:// URI with no key prefix — Barman
+    # lays out its own `<cluster-name>/base/` and `<cluster-name>/wals/`
+    # subtrees under the bucket root.
+    #
+    # retentionPolicy '30d' bounds storage growth; older base backups
+    # AND the WAL needed to bridge to them are pruned by CNPG.
+    - target:
+        kind: Cluster
+        name: minerals-pg
+      patch: |-
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        metadata:
+          name: minerals-pg
+        spec:
+          backup:
+            barmanObjectStore:
+              destinationPath: s3://minerals-postgres-backups/
+              endpointURL: http://minerals-hl:9000
+              s3Credentials:
+                accessKeyId:
+                  name: minerals-pg-backup-creds
+                  key: ACCESS_KEY_ID
+                secretAccessKey:
+                  name: minerals-pg-backup-creds
+                  key: SECRET_ACCESS_KEY
+              wal:
+                compression: gzip
+              data:
+                compression: gzip
+            retentionPolicy: "30d"

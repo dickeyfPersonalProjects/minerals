@@ -1,0 +1,61 @@
+# SealedSecret stub for the MinIO IAM credentials CNPG (Barman) uses to
+# write base backups + WAL archives to the dedicated backup bucket.
+#
+# Why a separate Secret from `minerals-s3-creds`:
+#   - Blast-radius isolation. If app creds leak, the attacker cannot
+#     tamper with backup artifacts.
+#   - The backup user is scoped to ONLY the `minerals-postgres-backups`
+#     bucket (read/write/list/delete-version on that bucket; nothing else).
+#     The app user is scoped to the `minerals` data bucket.
+#
+# Generating the credentials (operator-side, one-time per env):
+#
+#   1. Create the MinIO user in the running tenant:
+#        mc admin user add local <ACCESS_KEY_ID> <SECRET_ACCESS_KEY>
+#
+#   2. Create a policy granting access only to the backup bucket:
+#        cat > /tmp/pgbackup-policy.json <<'EOF'
+#        {
+#          "Version": "2012-10-17",
+#          "Statement": [
+#            { "Effect": "Allow",
+#              "Action": ["s3:ListBucket","s3:GetBucketLocation"],
+#              "Resource": ["arn:aws:s3:::minerals-postgres-backups"] },
+#            { "Effect": "Allow",
+#              "Action": ["s3:GetObject","s3:PutObject","s3:DeleteObject",
+#                         "s3:GetObjectVersion","s3:DeleteObjectVersion"],
+#              "Resource": ["arn:aws:s3:::minerals-postgres-backups/*"] }
+#          ]
+#        }
+#        EOF
+#        mc admin policy create local pgbackup-rw /tmp/pgbackup-policy.json
+#        mc admin policy attach local pgbackup-rw --user <ACCESS_KEY_ID>
+#
+#   3. Seal the credentials (per docs/deploy/encrypt.md):
+#        Write plaintext to .sec/minerals-pg-backup-creds.yaml with both
+#        keys under stringData, then kubeseal --scope strict --format yaml
+#        and replace the encryptedData below with the output.
+#
+# Key contract (must equal the keys CNPG references in the Cluster patch
+# — see docs/deploy/example/prod/mineral.yaml, the backup.s3Credentials
+# block):
+#   - ACCESS_KEY_ID
+#   - SECRET_ACCESS_KEY
+#
+# Ciphertext is namespace-scoped: re-seal per env if this overlay is
+# ever copied; do not reuse a different env's ciphertext.
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: minerals-pg-backup-creds
+  namespace: mineral-prod
+spec:
+  encryptedData:
+    ACCESS_KEY_ID: REPLACE_WITH_KUBESEAL_OUTPUT
+    SECRET_ACCESS_KEY: REPLACE_WITH_KUBESEAL_OUTPUT
+  template:
+    metadata:
+      name: minerals-pg-backup-creds
+      namespace: mineral-prod
+    type: Opaque

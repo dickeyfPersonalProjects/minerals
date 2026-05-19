@@ -1,5 +1,8 @@
 # Per-env overlay for prod. Same resource ordering and structure as
-# staging/kustomization.yaml — symmetric on purpose.
+# staging/kustomization.yaml — symmetric on purpose, except for the
+# Postgres-backup resources at the end (mi-jgzi), which are prod-only by
+# design. Staging intentionally has no backups; restore exercises run
+# against prod artifacts in a throwaway namespace (see docs/deploy/restore.md).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -9,5 +12,14 @@ resources:
   - minerals-minio-config.yaml
   - minerals-s3-creds.yaml
   - minerals-oidc-secret.yaml
+  - minerals-pg-backup-creds.yaml
   - servicemonitor.yaml
   - mineral.yaml
+  # Postgres backup → MinIO (prod-only). Order:
+  #   - bucket-init Job runs first reconcile; creates the bucket and
+  #     enables versioning before CNPG's first base backup needs it.
+  #   - ScheduledBackup defines the weekly cadence; safe to apply even
+  #     before the bucket exists (CNPG retries until backup destination
+  #     is reachable).
+  - postgres-backup-bucket-init.yaml
+  - scheduledbackup.yaml
