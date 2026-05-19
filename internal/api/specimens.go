@@ -161,7 +161,7 @@ type SpecimenView struct {
 	Description   string              `json:"description" doc:"Markdown description; defaults to empty string."`
 	Visibility    domain.Visibility   `json:"visibility" enum:"private,unlisted,public" doc:"Sharing visibility."`
 	AuthorID      uuid.UUID           `json:"author_id" doc:"UUID of the user who created the row (CONTRACT.md §13)."`
-	AcquiredAt    *time.Time          `json:"acquired_at,omitempty" doc:"Acquisition date (RFC 3339, time component ignored). Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property."`
+	AcquiredAt    *Date               `json:"acquired_at,omitempty" doc:"Acquisition date as RFC 3339 full-date (YYYY-MM-DD). Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property."`
 	AcquiredFrom  *string             `json:"acquired_from,omitempty" doc:"Where the specimen was acquired (free text). Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property."`
 	PriceCents    *int64              `json:"price_cents,omitempty" doc:"Acquisition price in cents. Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset'."`
 	SourceNotes   *string             `json:"source_notes" doc:"Free-form provenance notes."`
@@ -192,7 +192,7 @@ func toSpecimenView(s domain.Specimen) SpecimenView {
 		Description:            s.Description,
 		Visibility:             s.Visibility,
 		AuthorID:               s.AuthorID,
-		AcquiredAt:             s.AcquiredAt,
+		AcquiredAt:             DateFromTimePtr(s.AcquiredAt),
 		AcquiredFrom:           s.AcquiredFrom,
 		PriceCents:             s.PriceCents,
 		SourceNotes:            s.SourceNotes,
@@ -251,7 +251,7 @@ type createSpecimenBody struct {
 	Name          string              `json:"name" minLength:"1" maxLength:"500" doc:"Display name."`
 	Description   string              `json:"description,omitempty" doc:"Markdown description; defaults to empty."`
 	Visibility    domain.Visibility   `json:"visibility,omitempty" enum:"private,unlisted,public" doc:"Sharing visibility; defaults to private."`
-	AcquiredAt    *time.Time          `json:"acquired_at,omitempty" doc:"Acquisition date."`
+	AcquiredAt    *Date               `json:"acquired_at,omitempty" doc:"Acquisition date as RFC 3339 full-date (YYYY-MM-DD)."`
 	AcquiredFrom  *string             `json:"acquired_from,omitempty" doc:"Where the specimen was acquired."`
 	PriceCents    *int64              `json:"price_cents,omitempty" doc:"Acquisition price in cents."`
 	SourceNotes   *string             `json:"source_notes,omitempty" doc:"Free-form provenance notes."`
@@ -282,7 +282,7 @@ type patchSpecimenBody struct {
 	Name          *string              `json:"name,omitempty" minLength:"1" maxLength:"500" doc:"Omit to leave unchanged."`
 	Description   *string              `json:"description,omitempty" doc:"Omit to leave unchanged."`
 	Visibility    *domain.Visibility   `json:"visibility,omitempty" enum:"private,unlisted,public" doc:"Omit to leave unchanged."`
-	AcquiredAt    *time.Time           `json:"acquired_at,omitempty" doc:"Omit to leave unchanged."`
+	AcquiredAt    *Date                `json:"acquired_at,omitempty" doc:"Omit to leave unchanged. RFC 3339 full-date (YYYY-MM-DD)."`
 	AcquiredFrom  *string              `json:"acquired_from,omitempty" doc:"Omit to leave unchanged."`
 	PriceCents    *int64               `json:"price_cents,omitempty" doc:"Omit to leave unchanged."`
 	SourceNotes   *string              `json:"source_notes,omitempty" doc:"Omit to leave unchanged."`
@@ -516,7 +516,7 @@ func (s *SpecimenService) create(ctx context.Context, in *createSpecimenInput) (
 		Description:   b.Description,
 		Visibility:    visibility,
 		AuthorID:      authorID,
-		AcquiredAt:    b.AcquiredAt,
+		AcquiredAt:    b.AcquiredAt.TimePtr(),
 		AcquiredFrom:  b.AcquiredFrom,
 		PriceCents:    b.PriceCents,
 		SourceNotes:   b.SourceNotes,
@@ -580,7 +580,7 @@ func (s *SpecimenService) patch(ctx context.Context, in *patchSpecimenInput) (*s
 		current.CatalogNumber = b.CatalogNumber
 	}
 	if b.AcquiredAt != nil {
-		current.AcquiredAt = b.AcquiredAt
+		current.AcquiredAt = b.AcquiredAt.TimePtr()
 	}
 	if b.AcquiredFrom != nil {
 		current.AcquiredFrom = b.AcquiredFrom
