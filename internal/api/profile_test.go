@@ -409,6 +409,56 @@ func TestProfilePatch_DisplayName_NullRejected(t *testing.T) {
 	}
 }
 
+// TestProfilePatch_NewFieldsRoundTrip exercises the two field_defaults
+// keys added by mi-z3d0: acquired_at and catalog_number. The existing
+// matrix above already covers price/acquired_from/images; this test
+// pins the wiring for the new keys so the openapi schema, the merge
+// path, and the GET projection all agree on their shape.
+func TestProfilePatch_NewFieldsRoundTrip(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	seedActiveProfile(t, repo, "Alice", nil)
+	h := New(Deps{Users: repo})
+
+	patched := decodeProfile(t, doProfileRequest(t, h, http.MethodPatch,
+		`{"field_defaults":{"acquired_at":"unlisted","catalog_number":"private"}}`))
+	if patched.FieldDefaults == nil ||
+		patched.FieldDefaults.AcquiredAt == nil || *patched.FieldDefaults.AcquiredAt != domain.VisibilityUnlisted ||
+		patched.FieldDefaults.CatalogNumber == nil || *patched.FieldDefaults.CatalogNumber != domain.VisibilityPrivate {
+		t.Fatalf("PATCH new keys lost: %+v", patched.FieldDefaults)
+	}
+
+	got := decodeProfile(t, doProfileRequest(t, h, http.MethodGet, ""))
+	if got.FieldDefaults == nil ||
+		got.FieldDefaults.AcquiredAt == nil || *got.FieldDefaults.AcquiredAt != domain.VisibilityUnlisted ||
+		got.FieldDefaults.CatalogNumber == nil || *got.FieldDefaults.CatalogNumber != domain.VisibilityPrivate {
+		t.Errorf("GET after PATCH new keys = %+v", got.FieldDefaults)
+	}
+	// Other keys must remain nil — partial-key patch must not leak.
+	if got.FieldDefaults.Price != nil || got.FieldDefaults.AcquiredFrom != nil || got.FieldDefaults.Images != nil {
+		t.Errorf("absent keys leaked into the response: %+v", got.FieldDefaults)
+	}
+}
+
+func TestProfilePatch_UnknownKeyMessageListsNewKeys(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	seedActiveProfile(t, repo, "Alice", nil)
+	h := New(Deps{Users: repo})
+
+	rec := doProfileRequest(t, h, http.MethodPatch,
+		`{"field_defaults":{"nope":"public"}}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	got := decodeError(t, rec.Body)
+	for _, want := range []string{"acquired_at", "catalog_number"} {
+		if !strings.Contains(got.Error.Message, want) {
+			t.Errorf("error message %q does not list the new allowed key %q", got.Error.Message, want)
+		}
+	}
+}
+
 func TestProfilePatch_RejectsPendingUser(t *testing.T) {
 	t.Parallel()
 	repo := newFakeUserRepo()
