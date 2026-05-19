@@ -720,6 +720,11 @@ type UserRepo interface {
 	// the row identified by id. Returns ErrUserNotFound if no row
 	// matched. The caller has already bumped updatedAt.
 	MarkActive(ctx context.Context, tx Tx, id uuid.UUID, displayName string, updatedAt time.Time) error
+	// UpdateDisplayName overwrites display_name on the row identified
+	// by id without touching status. The Profile editor (mi-j3kn) uses
+	// this for post-setup name edits — MarkActive is reserved for the
+	// pending→active flip. Returns ErrUserNotFound when no row matched.
+	UpdateDisplayName(ctx context.Context, tx Tx, id uuid.UUID, displayName string, updatedAt time.Time) error
 	// UpdateFieldDefaults writes the per-user visibility defaults
 	// map (mi-fo8 / migration 0012). Passing nil clears the column
 	// (SQL NULL). Returns ErrUserNotFound when no row matched.

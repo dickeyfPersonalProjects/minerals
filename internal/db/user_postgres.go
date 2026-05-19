@@ -106,6 +106,27 @@ func (r *UserPostgres) MarkActive(
 	return nil
 }
 
+// UpdateDisplayName overwrites display_name on the row identified by
+// id. Used by PATCH /api/v1/profile (mi-j3kn) for post-setup name
+// edits — MarkActive is reserved for the pending→active flip.
+func (r *UserPostgres) UpdateDisplayName(
+	ctx context.Context, tx domain.Tx, id uuid.UUID, displayName string, updatedAt time.Time,
+) error {
+	exec := r.execer(tx)
+	const q = `
+		UPDATE users
+		   SET display_name = $2, updated_at = $3
+		 WHERE id = $1`
+	tag, err := exec.Exec(ctx, q, id, displayName, updatedAt)
+	if err != nil {
+		return fmt.Errorf("user repo: update display name: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrUserNotFound
+	}
+	return nil
+}
+
 // UpdateFieldDefaults writes the per-user visibility defaults map
 // (mi-fo8 / migration 0012). Passing nil clears the column to SQL
 // NULL — the all-fields-fall-through state. Returns

@@ -39,7 +39,20 @@
 </script>
 
 <div class="flex min-h-screen flex-col bg-[var(--color-bg)] text-[var(--color-text)]">
-  <header class="border-b border-[var(--color-border)] bg-[var(--color-surface)]/80 backdrop-blur">
+  <!--
+    `relative z-20` lifts the header above <main> in the root stacking
+    context. The header creates its own stacking context via
+    backdrop-blur (per CSS spec: `backdrop-filter !== none` opens a new
+    context), which traps the ProfileMenu dropdown's z-10 inside the
+    header. Without an explicit z-index on the header itself, the
+    dropdown can extend visually beyond the header's box but `<main>`
+    (later in DOM, also static in the root context) paints over the
+    overflow — and the Specimens search input intercepts pointer events
+    aimed at the dropdown's Sign out item (mi-9ekl).
+  -->
+  <header
+    class="relative z-20 border-b border-[var(--color-border)] bg-[var(--color-surface)]/80 backdrop-blur"
+  >
     <div class="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
       <a
         href="/specimens"

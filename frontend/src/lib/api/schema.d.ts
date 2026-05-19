@@ -236,7 +236,7 @@ export interface paths {
         head?: never;
         /**
          * Patch the caller's profile
-         * @description Partial update of the caller's profile. v1 accepts `field_defaults` only (per-field default visibility, mi-fo8). Keys present in the patch replace the stored value; keys absent are preserved; an explicit JSON `null` per key clears the entry. Sending `field_defaults: null` at the top level is rejected — use omission to mean 'don't change'. Unknown keys and invalid values are rejected with 400.
+         * @description Partial update of the caller's profile. Accepts `display_name` (mi-j3kn) and `field_defaults` (per-field default visibility, mi-fo8). Keys present in the patch replace the stored value; keys absent are preserved. For field_defaults, an explicit JSON `null` per inner key clears that entry; sending `field_defaults: null` at the top level is rejected. A display_name that is empty after trimming, longer than 80 chars, or `null` is rejected with `invalid_display_name`. Unknown keys and invalid values are rejected with 400.
          */
         patch: operations["patch-profile"];
         trace?: never;
@@ -1107,6 +1107,8 @@ export interface components {
              * @example //schemas/ProfilePatchBody.json
              */
             readonly $schema?: string;
+            /** @description Replacement display_name; trimmed, required non-empty, max 80 chars. Omit to leave unchanged. */
+            display_name?: string;
             /** @description Per-field default visibility map; see FieldDefaultsPatch schema. */
             field_defaults?: {
                 [key: string]: unknown;
