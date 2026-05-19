@@ -1,103 +1,76 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  // Profile is the post-setup editor for "info about the user".
+  // v1 (mi-j3kn) surfaces Name (editable) and Email (read-only).
+  // Future beads add bio, avatar, and an email change + verify flow.
+  // Field-visibility defaults live on /settings (mi-1ygd).
+  import { authStore, setAuthUser } from '../lib/auth';
   import { client } from '../lib/api';
+  import { SUPPRESS_TOAST_HEADERS } from '../lib/api/wrapper';
   import { toastSuccess } from '../lib/toasts';
-  import type { components } from '../lib/api/schema';
 
-  type Visibility = 'private' | 'unlisted' | 'public';
-  type FieldKey = 'price' | 'acquired_from' | 'images';
-  type FieldDefaults = components['schemas']['FieldDefaultsView'];
+  // MAX_LEN must match MaxDisplayNameLen on the backend
+  // (internal/api/profile.go). Duplicated rather than threaded
+  // through runtime-config because the backend re-validates on every
+  // submit — the client cap is a UX courtesy, not a security boundary.
+  const MAX_LEN = 80;
 
-  // Sentinel for the "no user default" selection. The select's
-  // value attribute can't be JSON null, and an empty string would
-  // collide if backend ever added it as an enum value. A reserved
-  // literal makes the unset state unambiguous.
-  const UNSET = '__unset__';
+  const user = $derived($authStore.user);
+  const email = $derived(user?.email ?? '');
 
-  const FIELDS: { key: FieldKey; label: string }[] = [
-    { key: 'price', label: 'Price' },
-    { key: 'acquired_from', label: 'Acquired from' },
-    { key: 'images', label: 'Images' },
-  ];
+  // The input reflects the persisted name until edited, so authStore
+  // updates (after save or re-login) flow into the field. We track
+  // initial separately to compute the dirty state for Save.
+  let initialName: string = $state('');
+  let displayName: string = $state('');
+  let saving: boolean = $state(false);
+  let errorMessage: string | null = $state(null);
 
-  type SelectValue = Visibility | typeof UNSET;
-
-  let loading = $state(true);
-  let loadError: string | null = $state(null);
-  let saving = $state(false);
-  // Initial values from the server — the diff for the PATCH body
-  // is computed against this snapshot, and clearing back to it
-  // means "no change" so nothing is sent for that key.
-  let initial: Record<FieldKey, SelectValue> = $state({
-    price: UNSET,
-    acquired_from: UNSET,
-    images: UNSET,
-  });
-  let current: Record<FieldKey, SelectValue> = $state({
-    price: UNSET,
-    acquired_from: UNSET,
-    images: UNSET,
+  // Reset the input whenever the authStore's display_name changes.
+  // This catches both the first load (store hydrates after probeAuth)
+  // and a successful save (setAuthUser refreshes the store) without
+  // racing the user's typing — equality guards prevent overwriting a
+  // dirty field with the same value.
+  $effect(() => {
+    const next = user?.display_name ?? '';
+    if (next !== initialName) {
+      initialName = next;
+      displayName = next;
+    }
   });
 
-  function toSelectValue(v: Visibility | undefined): SelectValue {
-    return v ?? UNSET;
+  function trimmedLen(): number {
+    return displayName.trim().length;
   }
 
-  function loadInto(defaults: FieldDefaults | null | undefined): void {
-    const fd = defaults ?? {};
-    for (const { key } of FIELDS) {
-      const v = toSelectValue(fd[key]);
-      initial[key] = v;
-      current[key] = v;
-    }
-  }
-
-  onMount(async () => {
-    const { data, error } = await client.GET('/api/v1/profile');
-    loading = false;
-    if (error || !data) {
-      // Toast middleware already surfaced the error; show an
-      // inline note so the form doesn't appear blank without
-      // explanation.
-      loadError = error?.error?.message ?? error?.error?.code ?? 'Failed to load profile';
-      return;
-    }
-    loadInto(data.field_defaults);
-  });
-
-  // dirty drives the Save button — disable when nothing changed
-  // so an accidental click can't fire an empty PATCH.
-  const dirty = $derived(FIELDS.some(({ key }) => current[key] !== initial[key]));
-
-  // buildPatch returns the field_defaults payload for the PATCH.
-  // Only changed keys are included. A change from a value back to
-  // UNSET sends explicit null (delete). A change from UNSET to a
-  // value, or value→value, sends the new value. Unchanged keys
-  // are omitted so the backend leaves them alone.
-  function buildPatch(): Record<FieldKey, Visibility | null> {
-    const out: Partial<Record<FieldKey, Visibility | null>> = {};
-    for (const { key } of FIELDS) {
-      if (current[key] === initial[key]) continue;
-      out[key] = current[key] === UNSET ? null : (current[key] as Visibility);
-    }
-    return out as Record<FieldKey, Visibility | null>;
-  }
+  const trimmedName = $derived(displayName.trim());
+  const dirty = $derived(trimmedName !== initialName.trim());
+  const valid = $derived(trimmedLen() > 0 && trimmedLen() <= MAX_LEN);
 
   async function save(event: SubmitEvent): Promise<void> {
     event.preventDefault();
-    if (saving || !dirty) return;
+    if (saving || !dirty || !valid) return;
     saving = true;
+    errorMessage = null;
+
+    // Suppress the global auto-toast for this call — the form
+    // surfaces validation errors inline. Success uses toastSuccess
+    // for the standard 'Saved' confirmation.
     const { data, error } = await client.PATCH('/api/v1/profile', {
-      body: { field_defaults: buildPatch() },
+      body: { display_name: trimmedName },
+      headers: SUPPRESS_TOAST_HEADERS,
     });
+
     saving = false;
     if (error || !data) {
-      // Toast middleware already surfaced the error; keep current
-      // selections so the user can retry without losing input.
+      const code = error?.error?.code;
+      errorMessage =
+        code === 'invalid_display_name'
+          ? (error?.error?.message ?? 'Invalid display name')
+          : (error?.error?.message ?? code ?? 'Failed to save profile');
       return;
     }
-    loadInto(data.field_defaults);
-    toastSuccess('Field defaults saved');
+    setAuthUser(data);
+    toastSuccess('Profile saved');
   }
 </script>
 
@@ -106,56 +79,63 @@
     <h1 class="text-2xl font-semibold tracking-tight text-[var(--color-text)]">Profile</h1>
   </header>
 
-  <form onsubmit={save} class="space-y-6" data-testid="profile-field-defaults-form">
-    <fieldset class="space-y-4" disabled={loading || saving}>
-      <legend class="text-lg font-medium text-[var(--color-text)]">Field defaults</legend>
-      <p class="text-sm text-[var(--color-text-muted)]">
-        These defaults apply to new specimens you create unless you override per specimen. They
-        never make existing data more visible — only an explicit per-specimen setting does.
-      </p>
-
-      {#if loadError}
-        <p
-          role="alert"
-          data-testid="profile-field-defaults-error"
-          class="text-sm text-[var(--color-danger)]"
+  {#if user}
+    <form onsubmit={save} class="space-y-6" data-testid="profile-form">
+      <div>
+        <label
+          for="profile-display-name"
+          class="mb-1 block text-sm font-medium text-[var(--color-text)]"
         >
-          {loadError}
+          Name
+        </label>
+        <input
+          id="profile-display-name"
+          data-testid="profile-display-name"
+          type="text"
+          bind:value={displayName}
+          maxlength={MAX_LEN}
+          autocomplete="nickname"
+          required
+          disabled={saving}
+          class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+        />
+        <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+          {trimmedLen()} / {MAX_LEN} characters
+        </p>
+      </div>
+
+      <div>
+        <label for="profile-email" class="mb-1 block text-sm font-medium text-[var(--color-text)]">
+          Email
+        </label>
+        <input
+          id="profile-email"
+          data-testid="profile-email"
+          type="email"
+          value={email}
+          readonly
+          disabled
+          class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface-muted,var(--color-surface))] px-3 py-2 text-sm text-[var(--color-text-muted)] disabled:cursor-not-allowed"
+        />
+        <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+          Email changes coming soon — will require email verification.
+        </p>
+      </div>
+
+      {#if errorMessage}
+        <p role="alert" data-testid="profile-error" class="text-sm text-[var(--color-danger)]">
+          {errorMessage}
         </p>
       {/if}
 
-      <div class="grid gap-4 sm:grid-cols-3">
-        {#each FIELDS as { key, label } (key)}
-          <div>
-            <label
-              for={`profile-default-${key}`}
-              class="mb-1 block text-sm font-medium text-[var(--color-text)]"
-            >
-              {label}
-            </label>
-            <select
-              id={`profile-default-${key}`}
-              data-testid={`profile-default-${key}`}
-              bind:value={current[key]}
-              class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
-            >
-              <option value={UNSET}>System default (owner-only)</option>
-              <option value="private">Private</option>
-              <option value="unlisted">Unlisted</option>
-              <option value="public">Public</option>
-            </select>
-          </div>
-        {/each}
-      </div>
-    </fieldset>
-
-    <button
-      type="submit"
-      data-testid="profile-field-defaults-save"
-      disabled={loading || saving || !dirty}
-      class="inline-flex items-center justify-center rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-accent)] disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      {saving ? 'Saving…' : 'Save'}
-    </button>
-  </form>
+      <button
+        type="submit"
+        data-testid="profile-save"
+        disabled={saving || !dirty || !valid}
+        class="inline-flex items-center justify-center rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {saving ? 'Saving…' : 'Save'}
+      </button>
+    </form>
+  {/if}
 </section>

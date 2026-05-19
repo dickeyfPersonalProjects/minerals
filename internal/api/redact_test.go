@@ -89,6 +89,12 @@ func (r *redactFakeUserRepo) Create(context.Context, domain.Tx, domain.User) err
 func (r *redactFakeUserRepo) MarkActive(context.Context, domain.Tx, uuid.UUID, string, time.Time) error {
 	return nil
 }
+func (r *redactFakeUserRepo) UpdateDisplayName(_ context.Context, _ domain.Tx, id uuid.UUID, name string, _ time.Time) error {
+	u := r.byID[id]
+	u.DisplayName = &name
+	r.byID[id] = u
+	return nil
+}
 func (r *redactFakeUserRepo) UpdateFieldDefaults(_ context.Context, _ domain.Tx, id uuid.UUID, defaults *domain.FieldDefaults, _ time.Time) error {
 	u := r.byID[id]
 	u.FieldDefaults = defaults
@@ -545,6 +551,9 @@ func (r *countingUserRepo) Create(ctx context.Context, tx domain.Tx, u domain.Us
 }
 func (r *countingUserRepo) MarkActive(ctx context.Context, tx domain.Tx, id uuid.UUID, n string, t time.Time) error {
 	return r.inner.MarkActive(ctx, tx, id, n, t)
+}
+func (r *countingUserRepo) UpdateDisplayName(ctx context.Context, tx domain.Tx, id uuid.UUID, n string, t time.Time) error {
+	return r.inner.UpdateDisplayName(ctx, tx, id, n, t)
 }
 func (r *countingUserRepo) UpdateFieldDefaults(ctx context.Context, tx domain.Tx, id uuid.UUID, defaults *domain.FieldDefaults, t time.Time) error {
 	return r.inner.UpdateFieldDefaults(ctx, tx, id, defaults, t)

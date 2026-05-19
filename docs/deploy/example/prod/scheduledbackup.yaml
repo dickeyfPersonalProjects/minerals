@@ -1,0 +1,38 @@
+# Weekly base backup of the prod Postgres cluster.
+#
+# Combined with continuous WAL archiving (configured on the Cluster
+# resource via backup.barmanObjectStore — see the patch in
+# mineral.yaml), this gives point-in-time recovery to any second within
+# the cluster's `retentionPolicy` window (30 days, declared on the
+# Cluster patch).
+#
+# Schedule format:
+#   CNPG uses a 6-field cron (seconds first), per the robfig/cron parser.
+#   "0 0 3 * * 0"  =  every Sunday at 03:00:00 UTC (cluster runs in UTC).
+#   Sunday 03:00 is low-traffic for this app and gives the rest of the
+#   week clear of base-backup I/O headroom.
+#
+# Why weekly base + continuous WAL (not daily/hourly base):
+#   Base backups are full copies of $PGDATA. Weekly cadence is a balance
+#   between recovery time (more recent base = less WAL replay) and
+#   storage cost in MinIO. WAL is small and continuous; replaying a
+#   week of WAL on top of a base is well within the recovery-time
+#   budget for an app of this size.
+#
+# backupOwnerReference: self
+#   The completed Backup object's ownerReference points at this
+#   ScheduledBackup. Deleting the schedule garbage-collects its
+#   historical Backup objects in-cluster (the S3 artifacts themselves
+#   are governed by the Cluster's `retentionPolicy`, not by these
+#   in-cluster CRs).
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: minerals-pg-weekly
+  namespace: mineral-prod
+spec:
+  cluster:
+    name: minerals-pg
+  schedule: "0 0 3 * * 0"
+  backupOwnerReference: self

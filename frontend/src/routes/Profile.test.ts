@@ -3,84 +3,84 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { get } from 'svelte/store';
 import { toasts, _clearToasts } from '../lib/toasts';
 
-const { mockGET, mockPATCH } = vi.hoisted(() => ({
-  mockGET: vi.fn(),
+const { mockPATCH } = vi.hoisted(() => ({
   mockPATCH: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
-  client: { GET: mockGET, PATCH: mockPATCH },
+  client: { PATCH: mockPATCH },
 }));
 
 import Profile from './Profile.svelte';
+import { __authenticate, __resetAuthStore, authStore } from '../lib/auth';
 
-function profileBody(field_defaults: Record<string, string> | null) {
+function profileBody(over: { display_name?: string; email?: string } = {}) {
   return {
     id: 'user-1',
-    email: 'a@b.test',
-    display_name: 'Ada',
+    email: over.email ?? 'ada@example.com',
+    display_name: over.display_name ?? 'Ada Lovelace',
     pending: false,
-    field_defaults: field_defaults ?? {},
+    field_defaults: {},
   };
 }
 
 beforeEach(() => {
-  mockGET.mockReset();
   mockPATCH.mockReset();
   _clearToasts();
+  __resetAuthStore();
 });
 
 afterEach(() => {
   cleanup();
+  __resetAuthStore();
 });
 
-describe('Profile route — field defaults', () => {
-  it('renders the three dropdowns showing "System default" when the API returns no defaults', async () => {
-    mockGET.mockResolvedValue({ data: profileBody(null), error: undefined });
+describe('Profile route', () => {
+  it('renders heading, editable Name pre-filled from the auth store, and read-only Email', () => {
+    __authenticate({ display_name: 'Ada Lovelace', email: 'ada@example.com' });
     render(Profile);
 
-    const price = (await screen.findByTestId('profile-default-price')) as HTMLSelectElement;
-    const acq = screen.getByTestId('profile-default-acquired_from') as HTMLSelectElement;
-    const img = screen.getByTestId('profile-default-images') as HTMLSelectElement;
+    expect(screen.getByRole('heading', { name: 'Profile' })).toBeInTheDocument();
 
-    expect(price.value).toBe('__unset__');
-    expect(acq.value).toBe('__unset__');
-    expect(img.value).toBe('__unset__');
+    const name = screen.getByTestId('profile-display-name') as HTMLInputElement;
+    expect(name.value).toBe('Ada Lovelace');
+    expect(name.readOnly).toBe(false);
 
-    // The sentinel option is the user-visible "System default" label.
-    expect(price.selectedOptions[0]?.textContent?.trim()).toBe('System default (owner-only)');
+    const email = screen.getByTestId('profile-email') as HTMLInputElement;
+    expect(email.value).toBe('ada@example.com');
+    // Email is non-editable — both readonly and disabled are set so
+    // the field is visibly inert and cannot be focused/typed into.
+    expect(email.readOnly).toBe(true);
+    expect(email.disabled).toBe(true);
   });
 
-  it('reflects values from the API when defaults are populated', async () => {
-    mockGET.mockResolvedValue({
-      data: profileBody({ price: 'public', acquired_from: 'unlisted', images: 'private' }),
-      error: undefined,
-    });
+  it('shows the future-capability note next to the read-only email', () => {
+    __authenticate();
     render(Profile);
-
-    const price = (await screen.findByTestId('profile-default-price')) as HTMLSelectElement;
-    expect(price.value).toBe('public');
-    expect((screen.getByTestId('profile-default-acquired_from') as HTMLSelectElement).value).toBe(
-      'unlisted',
-    );
-    expect((screen.getByTestId('profile-default-images') as HTMLSelectElement).value).toBe(
-      'private',
-    );
+    expect(screen.getByText(/email changes coming soon/i)).toBeInTheDocument();
   });
 
-  it('disables Save until a value changes, then PATCHes only the changed keys', async () => {
-    mockGET.mockResolvedValue({ data: profileBody(null), error: undefined });
+  it('does not render the field-defaults section (moved to /settings in mi-1ygd)', () => {
+    __authenticate();
+    render(Profile);
+    expect(screen.queryByTestId('profile-field-defaults-form')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('profile-default-price')).not.toBeInTheDocument();
+    expect(screen.queryByText('Field defaults')).not.toBeInTheDocument();
+  });
+
+  it('disables Save until the Name changes, then PATCHes and refreshes auth store on success', async () => {
+    __authenticate({ display_name: 'Ada', email: 'ada@example.com' });
     render(Profile);
 
-    const save = (await screen.findByTestId('profile-field-defaults-save')) as HTMLButtonElement;
+    const save = screen.getByTestId('profile-save') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
 
-    const price = screen.getByTestId('profile-default-price') as HTMLSelectElement;
-    await fireEvent.change(price, { target: { value: 'public' } });
+    const name = screen.getByTestId('profile-display-name') as HTMLInputElement;
+    await fireEvent.input(name, { target: { value: 'Ada Lovelace' } });
     await waitFor(() => expect(save.disabled).toBe(false));
 
     mockPATCH.mockResolvedValue({
-      data: profileBody({ price: 'public' }),
+      data: profileBody({ display_name: 'Ada Lovelace' }),
       error: undefined,
     });
     await fireEvent.click(save);
@@ -88,65 +88,74 @@ describe('Profile route — field defaults', () => {
     await waitFor(() => expect(mockPATCH).toHaveBeenCalled());
     const [path, opts] = mockPATCH.mock.calls[0] as [
       string,
-      { body: { field_defaults: Record<string, unknown> } },
+      { body: { display_name: string }; headers: Record<string, string> },
     ];
     expect(path).toBe('/api/v1/profile');
-    expect(opts.body).toEqual({ field_defaults: { price: 'public' } });
+    expect(opts.body).toEqual({ display_name: 'Ada Lovelace' });
+    // Inline error path uses suppress-toast — the global toast
+    // middleware would otherwise double-surface validation errors.
+    expect(opts.headers['x-suppress-toast']).toBe('1');
 
-    const list = get(toasts);
-    expect(list[0]?.type).toBe('success');
-    // After save, Save disables again (no dirty diff vs the new server state).
+    // Success toast, store updated, save disables again.
+    await waitFor(() => {
+      const list = get(toasts);
+      expect(list[0]?.type).toBe('success');
+    });
+    expect(get(authStore).user?.display_name).toBe('Ada Lovelace');
     await waitFor(() => expect(save.disabled).toBe(true));
   });
 
-  it('sends explicit null for a key cleared back to System default', async () => {
-    mockGET.mockResolvedValue({
-      data: profileBody({ price: 'public', acquired_from: 'unlisted' }),
-      error: undefined,
-    });
+  it('trims whitespace before sending the PATCH', async () => {
+    __authenticate({ display_name: 'Ada' });
     render(Profile);
 
-    const price = (await screen.findByTestId('profile-default-price')) as HTMLSelectElement;
-    expect(price.value).toBe('public');
-    await fireEvent.change(price, { target: { value: '__unset__' } });
+    const name = screen.getByTestId('profile-display-name') as HTMLInputElement;
+    await fireEvent.input(name, { target: { value: '  Bob  ' } });
 
     mockPATCH.mockResolvedValue({
-      data: profileBody({ acquired_from: 'unlisted' }),
+      data: profileBody({ display_name: 'Bob' }),
       error: undefined,
     });
-    await fireEvent.click(screen.getByTestId('profile-field-defaults-save'));
+    await fireEvent.click(screen.getByTestId('profile-save'));
 
     await waitFor(() => expect(mockPATCH).toHaveBeenCalled());
-    const [, opts] = mockPATCH.mock.calls[0] as [
-      string,
-      { body: { field_defaults: Record<string, unknown> } },
-    ];
-    expect(opts.body).toEqual({ field_defaults: { price: null } });
+    const [, opts] = mockPATCH.mock.calls[0] as [string, { body: { display_name: string } }];
+    expect(opts.body.display_name).toBe('Bob');
   });
 
-  it('renders inline load-error text when GET fails', async () => {
-    mockGET.mockResolvedValue({
-      data: undefined,
-      error: { error: { code: 'internal_error', message: 'boom' } },
-    });
-    render(Profile);
-    await waitFor(() =>
-      expect(screen.getByTestId('profile-field-defaults-error')).toHaveTextContent('boom'),
-    );
-  });
-
-  it('does not PATCH on submit when nothing is dirty', async () => {
-    mockGET.mockResolvedValue({
-      data: profileBody({ price: 'public' }),
-      error: undefined,
-    });
+  it('keeps Save disabled when the field is blank or whitespace-only', async () => {
+    __authenticate({ display_name: 'Ada' });
     render(Profile);
 
-    const save = (await screen.findByTestId('profile-field-defaults-save')) as HTMLButtonElement;
-    expect(save.disabled).toBe(true);
-    // Click is a no-op while disabled, but submitting the form
-    // directly is defended by the dirty-guard too.
-    await fireEvent.submit(screen.getByTestId('profile-field-defaults-form'));
+    const name = screen.getByTestId('profile-display-name') as HTMLInputElement;
+    const save = screen.getByTestId('profile-save') as HTMLButtonElement;
+
+    await fireEvent.input(name, { target: { value: '' } });
+    await waitFor(() => expect(save.disabled).toBe(true));
+
+    await fireEvent.input(name, { target: { value: '   ' } });
+    await waitFor(() => expect(save.disabled).toBe(true));
+
     expect(mockPATCH).not.toHaveBeenCalled();
+  });
+
+  it('surfaces invalid_display_name as an inline error and preserves the field', async () => {
+    __authenticate({ display_name: 'Ada' });
+    render(Profile);
+
+    const name = screen.getByTestId('profile-display-name') as HTMLInputElement;
+    await fireEvent.input(name, { target: { value: 'Newname' } });
+
+    mockPATCH.mockResolvedValue({
+      data: undefined,
+      error: { error: { code: 'invalid_display_name', message: 'display_name is required' } },
+    });
+    await fireEvent.click(screen.getByTestId('profile-save'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('profile-error')).toHaveTextContent('display_name is required'),
+    );
+    // The unsaved input stays so the user can correct and retry.
+    expect((screen.getByTestId('profile-display-name') as HTMLInputElement).value).toBe('Newname');
   });
 });
