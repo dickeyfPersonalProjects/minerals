@@ -77,6 +77,17 @@ export function probeAuth(): Promise<AuthUser | null> {
 }
 
 /**
+ * Replace the cached profile body. Called after a successful write
+ * to /api/v1/profile (e.g. Profile name edit, mi-j3kn) so the UI
+ * reflects the new state without round-tripping through probeAuth.
+ * The store always represents "the current user as last seen by the
+ * server", so callers should pass the response body verbatim.
+ */
+export function setAuthUser(user: AuthUser): void {
+  store.set({ user, loaded: true });
+}
+
+/**
  * Clear the in-memory user. Called by tests; production code does
  * not log out client-side — sign-out is a form POST to /auth/logout
  * and the resulting redirect tears the SPA down anyway.

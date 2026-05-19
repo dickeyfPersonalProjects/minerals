@@ -300,6 +300,115 @@ func TestProfilePatch_NonObjectValueRejected(t *testing.T) {
 	}
 }
 
+func TestProfilePatch_DisplayName_UpdatesAndTrims(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	seedActiveProfile(t, repo, "Alice", nil)
+	h := New(Deps{Users: repo})
+
+	got := decodeProfile(t, doProfileRequest(t, h, http.MethodPatch,
+		`{"display_name":"  Bob  "}`))
+	if got.DisplayName != "Bob" {
+		t.Errorf("display_name = %q, want %q (trimmed)", got.DisplayName, "Bob")
+	}
+
+	// GET reflects the persisted change.
+	again := decodeProfile(t, doProfileRequest(t, h, http.MethodGet, ""))
+	if again.DisplayName != "Bob" {
+		t.Errorf("GET display_name = %q, want Bob", again.DisplayName)
+	}
+}
+
+func TestProfilePatch_DisplayName_PreservesFieldDefaults(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	seedActiveProfile(t, repo, "Alice", &domain.FieldDefaults{
+		Price: ptrVis(domain.VisibilityPublic),
+	})
+	h := New(Deps{Users: repo})
+
+	got := decodeProfile(t, doProfileRequest(t, h, http.MethodPatch,
+		`{"display_name":"Bob"}`))
+	if got.DisplayName != "Bob" {
+		t.Errorf("display_name = %q, want Bob", got.DisplayName)
+	}
+	if got.FieldDefaults == nil || got.FieldDefaults.Price == nil ||
+		*got.FieldDefaults.Price != domain.VisibilityPublic {
+		t.Errorf("field_defaults lost: %+v", got.FieldDefaults)
+	}
+}
+
+func TestProfilePatch_DisplayName_CombinedWithFieldDefaults(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	seedActiveProfile(t, repo, "Alice", nil)
+	h := New(Deps{Users: repo})
+
+	got := decodeProfile(t, doProfileRequest(t, h, http.MethodPatch,
+		`{"display_name":"Bob","field_defaults":{"price":"public"}}`))
+	if got.DisplayName != "Bob" {
+		t.Errorf("display_name = %q, want Bob", got.DisplayName)
+	}
+	if got.FieldDefaults == nil || got.FieldDefaults.Price == nil ||
+		*got.FieldDefaults.Price != domain.VisibilityPublic {
+		t.Errorf("field_defaults = %+v, want price=public", got.FieldDefaults)
+	}
+}
+
+func TestProfilePatch_DisplayName_EmptyAfterTrimRejected(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	seedActiveProfile(t, repo, "Alice", nil)
+	h := New(Deps{Users: repo})
+
+	rec := doProfileRequest(t, h, http.MethodPatch, `{"display_name":"   "}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	got := decodeError(t, rec.Body)
+	if got.Error.Code != "invalid_display_name" {
+		t.Errorf("code = %q, want invalid_display_name", got.Error.Code)
+	}
+	// Existing display_name must not have been overwritten.
+	again := decodeProfile(t, doProfileRequest(t, h, http.MethodGet, ""))
+	if again.DisplayName != "Alice" {
+		t.Errorf("display_name mutated to %q despite rejected PATCH", again.DisplayName)
+	}
+}
+
+func TestProfilePatch_DisplayName_TooLongRejected(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	seedActiveProfile(t, repo, "Alice", nil)
+	h := New(Deps{Users: repo})
+
+	tooLong := strings.Repeat("a", MaxDisplayNameLen+1)
+	rec := doProfileRequest(t, h, http.MethodPatch,
+		`{"display_name":"`+tooLong+`"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	got := decodeError(t, rec.Body)
+	if got.Error.Code != "invalid_display_name" {
+		t.Errorf("code = %q, want invalid_display_name", got.Error.Code)
+	}
+}
+
+func TestProfilePatch_DisplayName_NullRejected(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	seedActiveProfile(t, repo, "Alice", nil)
+	h := New(Deps{Users: repo})
+
+	// JSON null reaches the handler as a nil *string — same as absent.
+	// The handler should NOT update the name, and absent + no other
+	// keys means no-op. Verify the name is preserved.
+	got := decodeProfile(t, doProfileRequest(t, h, http.MethodPatch, `{"display_name":null}`))
+	if got.DisplayName != "Alice" {
+		t.Errorf("display_name = %q, want Alice (null should be no-op)", got.DisplayName)
+	}
+}
+
 func TestProfilePatch_RejectsPendingUser(t *testing.T) {
 	t.Parallel()
 	repo := newFakeUserRepo()

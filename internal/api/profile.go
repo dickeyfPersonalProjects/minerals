@@ -141,13 +141,18 @@ func (FieldDefaultsPatch) Schema(_ huma.Registry) *huma.Schema {
 }
 
 // profilePatchInput is the PATCH /api/v1/profile request body.
-// v1 supports partial update of field_defaults only; further patchable
-// keys (display_name, etc.) land in later beads.
+// Supports partial update of display_name (mi-j3kn) and field_defaults
+// (mi-fo8). Both keys are optional; absent means "leave unchanged".
 type profilePatchInput struct {
 	Body profilePatchBody
 }
 
 type profilePatchBody struct {
+	// DisplayName is a pointer so the handler can distinguish absent
+	// (preserve) from present (validate + write). An explicit empty
+	// string (after trim) is a 400; a JSON `null` value is also a 400
+	// — use omission to mean "don't change".
+	DisplayName   *string            `json:"display_name,omitempty" doc:"Replacement display_name; trimmed, required non-empty, max 80 chars. Omit to leave unchanged."`
 	FieldDefaults FieldDefaultsPatch `json:"field_defaults,omitempty" doc:"Per-field default visibility map; see FieldDefaultsPatch schema."`
 }
 
@@ -197,13 +202,15 @@ func registerProfileOperations(api huma.API, mws authMiddlewares, repo domain.Us
 		Method:      http.MethodPatch,
 		Path:        "/api/v1/profile",
 		Summary:     "Patch the caller's profile",
-		Description: "Partial update of the caller's profile. v1 accepts " +
-			"`field_defaults` only (per-field default visibility, mi-fo8). " +
-			"Keys present in the patch replace the stored value; keys absent " +
-			"are preserved; an explicit JSON `null` per key clears the entry. " +
-			"Sending `field_defaults: null` at the top level is rejected — use " +
-			"omission to mean 'don't change'. Unknown keys and invalid values " +
-			"are rejected with 400.",
+		Description: "Partial update of the caller's profile. Accepts " +
+			"`display_name` (mi-j3kn) and `field_defaults` (per-field default " +
+			"visibility, mi-fo8). Keys present in the patch replace the stored " +
+			"value; keys absent are preserved. For field_defaults, an explicit " +
+			"JSON `null` per inner key clears that entry; sending " +
+			"`field_defaults: null` at the top level is rejected. A " +
+			"display_name that is empty after trimming, longer than 80 chars, " +
+			"or `null` is rejected with `invalid_display_name`. Unknown keys " +
+			"and invalid values are rejected with 400.",
 		Tags:        []string{"profile"},
 		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound},
 		Middlewares: mws.Protected(),
@@ -286,6 +293,32 @@ func (s *profileService) patch(ctx context.Context, in *profilePatchInput) (*pro
 		return nil, err
 	}
 
+	now := time.Now().UTC()
+
+	if in.Body.DisplayName != nil {
+		name := strings.TrimSpace(*in.Body.DisplayName)
+		if name == "" {
+			return nil, newAPIError(http.StatusBadRequest,
+				"invalid_display_name", "display_name is required",
+				map[string]any{"field": "display_name"})
+		}
+		if len(name) > MaxDisplayNameLen {
+			return nil, newAPIError(http.StatusBadRequest,
+				"invalid_display_name",
+				"display_name exceeds the maximum length",
+				map[string]any{"field": "display_name", "max": MaxDisplayNameLen})
+		}
+		if err := s.repo.UpdateDisplayName(ctx, nil, full.ID, name, now); err != nil {
+			if errors.Is(err, domain.ErrUserNotFound) {
+				return nil, newAPIError(http.StatusNotFound,
+					"user_not_found", "user record disappeared", nil)
+			}
+			return nil, err
+		}
+		full.DisplayName = &name
+		full.UpdatedAt = now
+	}
+
 	patchBytes := bytes.TrimSpace(in.Body.FieldDefaults)
 	if len(patchBytes) != 0 {
 		// `{"field_defaults": null}` reaches UnmarshalJSON as `null`
@@ -300,7 +333,6 @@ func (s *profileService) patch(ctx context.Context, in *profilePatchInput) (*pro
 		if mErr != nil {
 			return nil, mErr
 		}
-		now := time.Now().UTC()
 		if err := s.repo.UpdateFieldDefaults(ctx, nil, full.ID, merged, now); err != nil {
 			if errors.Is(err, domain.ErrUserNotFound) {
 				return nil, newAPIError(http.StatusNotFound,

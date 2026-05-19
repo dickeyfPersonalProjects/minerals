@@ -114,6 +114,22 @@ func (r *fakeUserRepo) MarkActive(
 	return domain.ErrUserNotFound
 }
 
+func (r *fakeUserRepo) UpdateDisplayName(
+	_ context.Context, _ domain.Tx, id uuid.UUID, displayName string, updatedAt time.Time,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for sub, u := range r.bySub {
+		if u.ID == id {
+			u.DisplayName = &displayName
+			u.UpdatedAt = updatedAt
+			r.bySub[sub] = u
+			return nil
+		}
+	}
+	return domain.ErrUserNotFound
+}
+
 func (r *fakeUserRepo) UpdateFieldDefaults(
 	_ context.Context, _ domain.Tx, id uuid.UUID, defaults *domain.FieldDefaults, updatedAt time.Time,
 ) error {
