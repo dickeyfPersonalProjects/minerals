@@ -126,6 +126,15 @@ spec:
             # what the app reads — no further mapping needed).
             - secretRef:
                 name: minerals-s3-creds
+            # BFF OIDC secrets (mi-1d5i — V2 BFF auth migration). Carries
+            # OIDC_CLIENT_SECRET (confidential minerals-frontend client
+            # secret) and OAUTH_STATE_HMAC_KEY (HMAC key for the BFF
+            # state cookie). Both keys are required at app boot; the
+            # GitOps overlay provides them via SealedSecret (see
+            # docs/deploy/example/<env>/minerals-oidc-secret.yaml). Keys
+            # match env-var names verbatim — no remapping.
+            - secretRef:
+                name: minerals-oidc-secret
           env:
             # CNPG provides the DSN under the `uri` key in its auto-generated
             # app Secret <cluster-name>-app. Map it to DATABASE_URL.
