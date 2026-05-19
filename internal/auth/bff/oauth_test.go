@@ -134,6 +134,84 @@ func TestAuthCodeURL_ContainsRequiredParams(t *testing.T) {
 	}
 }
 
+// TestRegisterURL_PointsAtRegistrationsEndpoint asserts the
+// register redirect carries the same OAuth code-flow parameters as
+// AuthCodeURL but points at Keycloak's `/registrations` sibling.
+// This is the entry point for self-signup: same callback, same
+// state-cookie handshake, only the IdP-side form differs.
+func TestRegisterURL_PointsAtRegistrationsEndpoint(t *testing.T) {
+	t.Parallel()
+	fk := newFakeKeycloak(t)
+	c := newTestClient(t, fk)
+
+	got := c.RegisterURL("state-reg-1", "https://app.example.com/auth/callback")
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("parse register URL: %v", err)
+	}
+	if u.Path != "/protocol/openid-connect/registrations" {
+		t.Errorf("Path = %q, want /protocol/openid-connect/registrations", u.Path)
+	}
+	q := u.Query()
+	if q.Get("client_id") != "minerals-frontend" {
+		t.Errorf("client_id = %q, want minerals-frontend", q.Get("client_id"))
+	}
+	if q.Get("response_type") != "code" {
+		t.Errorf("response_type = %q, want code", q.Get("response_type"))
+	}
+	if q.Get("redirect_uri") != "https://app.example.com/auth/callback" {
+		t.Errorf("redirect_uri = %q, want https://app.example.com/auth/callback", q.Get("redirect_uri"))
+	}
+	if q.Get("state") != "state-reg-1" {
+		t.Errorf("state = %q, want state-reg-1", q.Get("state"))
+	}
+	gotScopes := strings.Fields(q.Get("scope"))
+	wantScopes := map[string]bool{"openid": true, "profile": true, "email": true}
+	if len(gotScopes) != len(wantScopes) {
+		t.Errorf("scope count = %d, want %d (got=%v)", len(gotScopes), len(wantScopes), gotScopes)
+	}
+	for _, s := range gotScopes {
+		if !wantScopes[s] {
+			t.Errorf("unexpected scope %q in %v", s, gotScopes)
+		}
+	}
+}
+
+// TestRegisterURL_FallsBackWhenAuthPathMissing covers the
+// non-Keycloak path: a provider whose authorization_endpoint
+// doesn't end in `/auth` has no /registrations sibling we can
+// derive. In that case the builder returns a working (login-only)
+// URL rather than producing a guaranteed-404 path.
+func TestRegisterURL_FallsBackWhenAuthPathMissing(t *testing.T) {
+	t.Parallel()
+	fk := newFakeKeycloak(t)
+	// Build a client whose AuthURL doesn't follow the Keycloak
+	// `/auth` convention. Re-point the oauth endpoint to a path
+	// the helper cannot rewrite; RegisterURL should return that
+	// same path unchanged.
+	c := newKeycloakClientFromEndpoints(
+		OAuthConfig{
+			Issuer:       fk.server.URL,
+			ClientID:     "minerals-frontend",
+			ClientSecret: "test-secret",
+			Scopes:       []string{"openid"},
+		},
+		oauth2.Endpoint{
+			AuthURL:  fk.server.URL + "/oauth2/authorize",
+			TokenURL: fk.server.URL + "/oauth2/token",
+		},
+		"",
+	)
+	got := c.RegisterURL("s", "https://app.example.com/cb")
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("parse fallback register URL: %v", err)
+	}
+	if u.Path != "/oauth2/authorize" {
+		t.Errorf("Path = %q, want unchanged /oauth2/authorize (fallback)", u.Path)
+	}
+}
+
 // TestExchange_RoundTrip exercises code→tokens. The fake Keycloak
 // returns a Keycloak-shaped payload (separate refresh_expires_in,
 // id_token in the response body); the client must surface those

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	gooidc "github.com/coreos/go-oidc/v3/oidc"
@@ -40,6 +41,15 @@ type OAuthClient interface {
 	// configured default — the same URI used here MUST be passed
 	// to Exchange so Keycloak's redirect_uri validation succeeds.
 	AuthCodeURL(state, redirectURI string) string
+
+	// RegisterURL is the Keycloak self-registration counterpart to
+	// AuthCodeURL: same OAuth code-flow parameters, but points at
+	// `/protocol/openid-connect/registrations` so Keycloak shows the
+	// registration form first. After the user submits it (and any
+	// realm-required email verification completes) Keycloak issues
+	// an authorization code and redirects back to redirectURI —
+	// identical callback handling to the login path.
+	RegisterURL(state, redirectURI string) string
 
 	// Exchange swaps an authorization code for tokens. redirectURI
 	// must match the one used in AuthCodeURL for the same state.
@@ -176,6 +186,40 @@ func (c *keycloakClient) AuthCodeURL(state, redirectURI string) string {
 	cfg := *c.oauth2Config
 	cfg.RedirectURL = redirectURI
 	return cfg.AuthCodeURL(state)
+}
+
+// RegisterURL builds the Keycloak registration redirect URL. The
+// underlying oauth2.Config emits the same parameter set as
+// AuthCodeURL (client_id, response_type, redirect_uri, scope, state);
+// we just point it at `/protocol/openid-connect/registrations`
+// instead of `/auth`. Keycloak treats the two endpoints as siblings
+// — same OIDC flow, the registration variant shows the signup form
+// before issuing the authorization code.
+//
+// The /registrations sibling is a Keycloak convention rather than a
+// standardized OIDC discovery field, so we derive its path from the
+// already-discovered authorization_endpoint by swapping the trailing
+// `/auth` segment. A non-Keycloak provider without this naming
+// convention would fall through to the unmodified auth URL, which
+// is still a working (login-only) fallback.
+func (c *keycloakClient) RegisterURL(state, redirectURI string) string {
+	cfg := *c.oauth2Config
+	ep := c.endpoints
+	ep.AuthURL = keycloakRegistrationURL(ep.AuthURL)
+	cfg.Endpoint = ep
+	cfg.RedirectURL = redirectURI
+	return cfg.AuthCodeURL(state)
+}
+
+// keycloakRegistrationURL swaps the trailing `/auth` path segment for
+// `/registrations`. Returns the input unchanged when the suffix is
+// absent (non-Keycloak provider, or a deployment that re-routes the
+// endpoint) — a working login URL is a safer fallback than a 404.
+func keycloakRegistrationURL(authURL string) string {
+	if strings.HasSuffix(authURL, "/auth") {
+		return strings.TrimSuffix(authURL, "/auth") + "/registrations"
+	}
+	return authURL
 }
 
 // Exchange performs the server-to-server code exchange against

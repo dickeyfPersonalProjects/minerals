@@ -27,6 +27,10 @@ type fakeOAuth struct {
 
 	// AuthCodeURL: returns AuthURL with the state appended.
 	AuthURL string
+	// RegisterURL: returns RegisterURLBase with the state appended.
+	// Defaults to AuthURL with a `/register` suffix at New time so a
+	// test that doesn't care can rely on a non-empty distinct URL.
+	RegisterURLBase string
 	// Exchange: returns ExchangeResp / ExchangeErr.
 	ExchangeResp bff.Tokens
 	ExchangeErr  error
@@ -35,6 +39,9 @@ type fakeOAuth struct {
 
 	calls struct {
 		authCode struct {
+			state, redirect string
+		}
+		register struct {
 			state, redirect string
 		}
 		exchange struct {
@@ -52,6 +59,14 @@ func (f *fakeOAuth) AuthCodeURL(state, redirectURI string) string {
 	f.calls.authCode.state = state
 	f.calls.authCode.redirect = redirectURI
 	return f.AuthURL + "?state=" + url.QueryEscape(state) + "&redirect_uri=" + url.QueryEscape(redirectURI)
+}
+
+func (f *fakeOAuth) RegisterURL(state, redirectURI string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls.register.state = state
+	f.calls.register.redirect = redirectURI
+	return f.RegisterURLBase + "?state=" + url.QueryEscape(state) + "&redirect_uri=" + url.QueryEscape(redirectURI)
 }
 
 func (f *fakeOAuth) Exchange(_ context.Context, code, redirectURI string) (bff.Tokens, error) {
@@ -198,8 +213,9 @@ func defaultCookieCfg() bff.CookieConfig {
 func newHandlers(t *testing.T, opts ...func(*bff.HandlerConfig)) (*bff.Handlers, *fakeOAuth, *memSessions) {
 	t.Helper()
 	oauth := &fakeOAuth{
-		AuthURL: "https://keycloak.example/realms/minerals/protocol/openid-connect/auth",
-		EndURL:  "https://keycloak.example/realms/minerals/protocol/openid-connect/logout",
+		AuthURL:         "https://keycloak.example/realms/minerals/protocol/openid-connect/auth",
+		RegisterURLBase: "https://keycloak.example/realms/minerals/protocol/openid-connect/registrations",
+		EndURL:          "https://keycloak.example/realms/minerals/protocol/openid-connect/logout",
 	}
 	sessions := newMemSessions()
 	users := bff.UserResolver(func(_ context.Context, sub, _ string) (uuid.UUID, error) {
@@ -213,6 +229,7 @@ func newHandlers(t *testing.T, opts ...func(*bff.HandlerConfig)) (*bff.Handlers,
 		SessionAbsoluteMax:    7 * 24 * time.Hour,
 		Cookie:                defaultCookieCfg(),
 		StateCookieSecure:     false,
+		RegistrationEnabled:   true,
 		EnforceCSRFOnLogout:   true,
 	}
 	for _, opt := range opts {
@@ -324,6 +341,91 @@ func TestLogin_RejectsAbsoluteReturnTo(t *testing.T) {
 				t.Errorf("ReturnTo = %q for hostile input %q; want \"\"", sd.ReturnTo, raw)
 			}
 		})
+	}
+}
+
+// TestRegister_RedirectsToKeycloakRegistrationsEndpoint locks the
+// happy path for self-signup: a 302 to Keycloak's /registrations
+// endpoint with state + redirect_uri carried through, plus the
+// signed state cookie the callback handler will verify.
+func TestRegister_RedirectsToKeycloakRegistrationsEndpoint(t *testing.T) {
+	t.Parallel()
+	h, oauth, _ := newHandlers(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/register", nil)
+	rec := httptest.NewRecorder()
+	h.Register(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", rec.Code, rec.Body.String())
+	}
+	loc, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse Location: %v", err)
+	}
+	if !strings.HasPrefix(loc.String(), oauth.RegisterURLBase) {
+		t.Errorf("Location = %q, want prefix %q", loc.String(), oauth.RegisterURLBase)
+	}
+	if loc.Query().Get("state") == "" {
+		t.Error("Location missing state query param")
+	}
+	if loc.Query().Get("redirect_uri") != "https://app.example/auth/callback" {
+		t.Errorf("redirect_uri = %q, want https://app.example/auth/callback",
+			loc.Query().Get("redirect_uri"))
+	}
+
+	c := findCookie(t, rec.Result(), bff.StateCookieName)
+	if c.Value == "" {
+		t.Error("state cookie has empty value")
+	}
+	sd, verr := bff.VerifyState([]byte(testHMACKey), c.Value, time.Now())
+	if verr != nil {
+		t.Fatalf("VerifyState on emitted cookie: %v", verr)
+	}
+	if sd.State != loc.Query().Get("state") {
+		t.Errorf("cookie state = %q, query state = %q; must match",
+			sd.State, loc.Query().Get("state"))
+	}
+}
+
+// TestRegister_StashesValidReturnTo confirms the same return_to
+// allow-list that Login enforces also applies to Register — a user
+// who hit "Register" from /specimens/abc lands back there after
+// signup, with hostile inputs collapsed to "".
+func TestRegister_StashesValidReturnTo(t *testing.T) {
+	t.Parallel()
+	h, _, _ := newHandlers(t)
+	req := httptest.NewRequest(http.MethodGet, "/auth/register?return_to=/specimens/abc", nil)
+	rec := httptest.NewRecorder()
+	h.Register(rec, req)
+
+	c := findCookie(t, rec.Result(), bff.StateCookieName)
+	sd, err := bff.VerifyState([]byte(testHMACKey), c.Value, time.Now())
+	if err != nil {
+		t.Fatalf("VerifyState: %v", err)
+	}
+	if sd.ReturnTo != "/specimens/abc" {
+		t.Errorf("ReturnTo = %q, want /specimens/abc", sd.ReturnTo)
+	}
+}
+
+// TestRegister_DisabledReturns404 covers the operator-disabled
+// case: when RegistrationEnabled is false the route MUST 404 so an
+// inadvertent SPA click can't bypass the no-signup policy. No
+// state cookie is set — there is no flow to start.
+func TestRegister_DisabledReturns404(t *testing.T) {
+	t.Parallel()
+	h, _, _ := newHandlers(t, func(cfg *bff.HandlerConfig) {
+		cfg.RegistrationEnabled = false
+	})
+	req := httptest.NewRequest(http.MethodGet, "/auth/register", nil)
+	rec := httptest.NewRecorder()
+	h.Register(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if cookies := rec.Result().Cookies(); len(cookies) > 0 {
+		t.Errorf("disabled register set cookies: %v", cookies)
 	}
 }
 

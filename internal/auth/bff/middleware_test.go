@@ -129,6 +129,8 @@ type fakeOAuth struct {
 
 func (o *fakeOAuth) AuthCodeURL(_, _ string) string { panic("not used") }
 
+func (o *fakeOAuth) RegisterURL(_, _ string) string { panic("not used") }
+
 func (o *fakeOAuth) Exchange(_ context.Context, _, _ string) (Tokens, error) {
 	panic("not used")
 }

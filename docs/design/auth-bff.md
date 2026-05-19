@@ -90,6 +90,26 @@ an HttpOnly cookie.
    session row, clears the cookie, and 302s to Keycloak's end-session endpoint
    with the id_token as `id_token_hint`.
 
+#### Registration variant (mi-eb3b)
+
+The `GET /auth/register` route mirrors `/auth/login` end-to-end — same state
+cookie, same `return_to` allow-list, same `/auth/callback` handler — except
+the 302 target is Keycloak's `/protocol/openid-connect/registrations`
+endpoint instead of `/protocol/openid-connect/auth`. Keycloak shows the
+signup form first and, on submit (plus any realm-required email
+verification), issues an authorization code the callback handler turns into
+a session indistinguishable from a login.
+
+The application-level switch `REGISTRATION_ENABLED` (default `true`) gates
+the route: false makes it return 404 so an inadvertent Register click can't
+escape an operator's no-signup policy. The Keycloak realm's
+`registration_allowed` flag remains the IdP-side gate; this env var lets the
+application say no without a realm change.
+
+The SPA renders the Register link unconditionally alongside Login — same
+"don't gate the link on runtime-config" reasoning as Login (the backend is
+the authoritative gate; a 404 on click is acceptable for the false case).
+
 ---
 
 ## Sessions table

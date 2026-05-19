@@ -129,6 +129,16 @@ type Config struct {
 	// returns 204 after revoking the local session).
 	PostLogoutRedirectURI string
 
+	// RegistrationEnabled gates the BFF's GET /auth/register route
+	// and is the application-level switch for Keycloak self-signup.
+	// True (the default) wires the route and lets the SPA's Register
+	// link reach Keycloak's registration form; false makes the route
+	// return 404 so an inadvertent click stays inside the operator's
+	// no-signup policy. The Keycloak realm's `registration_allowed`
+	// flag is the ultimate gate at the IdP — this knob just lets
+	// the application say no without a realm change.
+	RegistrationEnabled bool
+
 	// BFFEnforceCSRFOnLogout gates the /auth/logout handler's CSRF
 	// check. False until the generic CSRF middleware (mi-gbzs) and
 	// the SPA wiring (mi-3vc4) ship; production flips it true once
@@ -240,6 +250,12 @@ func loadFrom(get func(string) string) (*Config, error) {
 		return nil, fmt.Errorf("config: BFF_ENFORCE_CSRF_LOGOUT: %w", err)
 	}
 	cfg.BFFEnforceCSRFOnLogout = ec
+
+	re, err := parseBoolWithDefault(get("REGISTRATION_ENABLED"), true)
+	if err != nil {
+		return nil, fmt.Errorf("config: REGISTRATION_ENABLED: %w", err)
+	}
+	cfg.RegistrationEnabled = re
 
 	tf, err := parseBoolWithDefault(get("TRUST_FORWARDED_FOR"), false)
 	if err != nil {

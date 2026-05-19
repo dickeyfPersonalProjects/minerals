@@ -3,6 +3,7 @@
   import { link } from 'svelte-spa-router';
   import ThemeToggle from './ThemeToggle.svelte';
   import LoginButton from './LoginButton.svelte';
+  import RegisterButton from './RegisterButton.svelte';
   import ProfileMenu from './ProfileMenu.svelte';
   import { qrSheetState, refreshQrSheet } from './qrSheet';
   import { authStore } from './auth';
@@ -78,6 +79,7 @@
         {#if showProfileMenu}
           <ProfileMenu />
         {:else if showLoginButton}
+          <RegisterButton />
           <LoginButton />
         {/if}
         <ThemeToggle />
