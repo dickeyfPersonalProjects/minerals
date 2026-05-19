@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/dickeyfPersonalProjects/minerals/internal/auth/bff"
+	"github.com/dickeyfPersonalProjects/minerals/internal/dbtest"
 )
 
 // TestCleanup_DeletesExpiredAndRevokedRows is the acceptance test
@@ -296,8 +297,14 @@ func setupPool(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(func() { _, _ = m.Close() })
 
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		t.Fatalf("migrate up: %v", err)
+	// Serialize the migrate window: `auth` is a database-global schema
+	// (mi-omqp), so parallel migrate.Up/Down across per-test schemas
+	// race on its create/drop. Released immediately after Up returns.
+	unlock := dbtest.AcquireMigrateLock(ctx, t, rawDSN)
+	upErr := m.Up()
+	unlock()
+	if upErr != nil && !errors.Is(upErr, migrate.ErrNoChange) {
+		t.Fatalf("migrate up: %v", upErr)
 	}
 
 	pool, err := pgxpool.New(ctx, scopedDSN)
