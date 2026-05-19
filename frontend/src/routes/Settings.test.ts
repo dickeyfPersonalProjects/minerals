@@ -35,37 +35,131 @@ afterEach(() => {
 });
 
 describe('Settings route — field defaults', () => {
-  it('renders the three dropdowns showing "System default" when the API returns no defaults', async () => {
+  it('renders all five dropdowns showing "System default" when the API returns no defaults', async () => {
     mockGET.mockResolvedValue({ data: profileBody(null), error: undefined });
     render(Settings);
 
     const price = (await screen.findByTestId('settings-default-price')) as HTMLSelectElement;
-    const acq = screen.getByTestId('settings-default-acquired_from') as HTMLSelectElement;
+    const acqAt = screen.getByTestId('settings-default-acquired_at') as HTMLSelectElement;
+    const acqFrom = screen.getByTestId('settings-default-acquired_from') as HTMLSelectElement;
+    const cat = screen.getByTestId('settings-default-catalog_number') as HTMLSelectElement;
     const img = screen.getByTestId('settings-default-images') as HTMLSelectElement;
 
-    expect(price.value).toBe('__unset__');
-    expect(acq.value).toBe('__unset__');
-    expect(img.value).toBe('__unset__');
+    for (const sel of [price, acqAt, acqFrom, cat, img]) {
+      expect(sel.value).toBe('__unset__');
+      expect(sel.selectedOptions[0]?.textContent?.trim()).toBe('System default (owner-only)');
+    }
+  });
 
-    // The sentinel option is the user-visible "System default" label.
-    expect(price.selectedOptions[0]?.textContent?.trim()).toBe('System default (owner-only)');
+  it('renders rows in vertical layout (one row per field) in the documented order', async () => {
+    mockGET.mockResolvedValue({ data: profileBody(null), error: undefined });
+    render(Settings);
+
+    const list = await screen.findByTestId('settings-field-defaults-list');
+    const rows = Array.from(
+      list.querySelectorAll('[data-testid^="settings-field-defaults-row-"]'),
+    ) as HTMLElement[];
+    expect(rows.map((r) => r.dataset.testid)).toEqual([
+      'settings-field-defaults-row-price',
+      'settings-field-defaults-row-acquired_at',
+      'settings-field-defaults-row-acquired_from',
+      'settings-field-defaults-row-catalog_number',
+      'settings-field-defaults-row-images',
+    ]);
+  });
+
+  it('shows accurate helper text describing the all-specimens scope (mi-z3d0)', async () => {
+    mockGET.mockResolvedValue({ data: profileBody(null), error: undefined });
+    render(Settings);
+
+    // Wait for the form to render. The lede is the explanatory copy
+    // immediately below the legend.
+    await screen.findByTestId('settings-field-defaults-form');
+    const body = document.body.textContent ?? '';
+    expect(body).toContain('apply to all your specimens');
+    expect(body).toContain("doesn't have its own per-field setting");
+    // The old misleading copy must be gone — defaults DO affect
+    // existing specimens (those without per-field overrides), so the
+    // "never make existing data more visible" line was wrong.
+    expect(body).not.toContain('never make existing data more visible');
+    expect(body).not.toContain('apply to new specimens you create');
   });
 
   it('reflects values from the API when defaults are populated', async () => {
     mockGET.mockResolvedValue({
-      data: profileBody({ price: 'public', acquired_from: 'unlisted', images: 'private' }),
+      data: profileBody({
+        price: 'public',
+        acquired_at: 'private',
+        acquired_from: 'unlisted',
+        catalog_number: 'public',
+        images: 'private',
+      }),
       error: undefined,
     });
     render(Settings);
 
     const price = (await screen.findByTestId('settings-default-price')) as HTMLSelectElement;
     expect(price.value).toBe('public');
+    expect((screen.getByTestId('settings-default-acquired_at') as HTMLSelectElement).value).toBe(
+      'private',
+    );
     expect((screen.getByTestId('settings-default-acquired_from') as HTMLSelectElement).value).toBe(
       'unlisted',
+    );
+    expect((screen.getByTestId('settings-default-catalog_number') as HTMLSelectElement).value).toBe(
+      'public',
     );
     expect((screen.getByTestId('settings-default-images') as HTMLSelectElement).value).toBe(
       'private',
     );
+  });
+
+  it('round-trips a new acquired_at default via PATCH (mi-z3d0 acceptance)', async () => {
+    mockGET.mockResolvedValue({ data: profileBody(null), error: undefined });
+    render(Settings);
+
+    const acqAt = (await screen.findByTestId('settings-default-acquired_at')) as HTMLSelectElement;
+    await fireEvent.change(acqAt, { target: { value: 'private' } });
+
+    const save = screen.getByTestId('settings-field-defaults-save') as HTMLButtonElement;
+    await waitFor(() => expect(save.disabled).toBe(false));
+
+    mockPATCH.mockResolvedValue({
+      data: profileBody({ acquired_at: 'private' }),
+      error: undefined,
+    });
+    await fireEvent.click(save);
+
+    await waitFor(() => expect(mockPATCH).toHaveBeenCalled());
+    const [, opts] = mockPATCH.mock.calls[0] as [
+      string,
+      { body: { field_defaults: Record<string, unknown> } },
+    ];
+    expect(opts.body).toEqual({ field_defaults: { acquired_at: 'private' } });
+  });
+
+  it('PATCHes only the catalog_number key when only that one changed', async () => {
+    mockGET.mockResolvedValue({
+      data: profileBody({ price: 'public' }),
+      error: undefined,
+    });
+    render(Settings);
+
+    const cat = (await screen.findByTestId('settings-default-catalog_number')) as HTMLSelectElement;
+    await fireEvent.change(cat, { target: { value: 'private' } });
+
+    mockPATCH.mockResolvedValue({
+      data: profileBody({ price: 'public', catalog_number: 'private' }),
+      error: undefined,
+    });
+    await fireEvent.click(screen.getByTestId('settings-field-defaults-save'));
+
+    await waitFor(() => expect(mockPATCH).toHaveBeenCalled());
+    const [, opts] = mockPATCH.mock.calls[0] as [
+      string,
+      { body: { field_defaults: Record<string, unknown> } },
+    ];
+    expect(opts.body).toEqual({ field_defaults: { catalog_number: 'private' } });
   });
 
   it('disables Save until a value changes, then PATCHes only the changed keys', async () => {

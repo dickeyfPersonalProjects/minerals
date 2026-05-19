@@ -699,10 +699,20 @@ export interface components {
         };
         FieldDefaultsView: {
             /**
+             * @description Default visibility for the acquired_at field; absent means fall through to the system default.
+             * @enum {string}
+             */
+            acquired_at?: "private" | "unlisted" | "public";
+            /**
              * @description Default visibility for the acquired_from field; absent means fall through to the system default.
              * @enum {string}
              */
             acquired_from?: "private" | "unlisted" | "public";
+            /**
+             * @description Default visibility for the catalog_number field; absent means fall through to the system default.
+             * @enum {string}
+             */
+            catalog_number?: "private" | "unlisted" | "public";
             /**
              * @description Default visibility for the images field; absent means fall through to the system default.
              * @enum {string}
@@ -1244,15 +1254,15 @@ export interface components {
             readonly $schema?: string;
             /**
              * Format: date-time
-             * @description Acquisition date (RFC 3339, time component ignored).
+             * @description Acquisition date (RFC 3339, time component ignored). Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property.
              */
-            acquired_at: string | null;
+            acquired_at?: string;
             /** @description Where the specimen was acquired (free text). Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property. */
             acquired_from?: string;
             /** @description UUID of the user who created the row (CONTRACT.md §13). */
             author_id: string;
-            /** @description Optional human catalog number; unique across all specimens when set. */
-            catalog_number: string | null;
+            /** @description Optional human catalog number; unique across all specimens when set. Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property. */
+            catalog_number?: string;
             /**
              * Format: date-time
              * @description RFC 3339 creation timestamp.
