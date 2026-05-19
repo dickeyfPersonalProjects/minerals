@@ -15,7 +15,9 @@ working deployment.
 > used by the SealedSecret manifests in the example,
 > [`secrets.md`](./secrets.md) for the inventory of every Secret the
 > deployment consumes, [`keycloak.md`](./keycloak.md) for the full
-> Keycloak/OIDC setup that auth depends on, and
+> Keycloak/OIDC setup that auth depends on,
+> [`../upgrade/v1-to-v2.md`](../upgrade/v1-to-v2.md) for the one-shot
+> V1 → V2 data-claim runbook (`bootstrap-claim-orphans`), and
 > [`CONFIG.md`](../../CONFIG.md) for the canonical list of every env
 > var the app reads.
 
