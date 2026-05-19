@@ -24,6 +24,8 @@
 // running the suite against the pre-BFF stack still gets a clear
 // signal instead of a hard failure.
 
+import { randomUUID } from 'node:crypto';
+
 import { expect, test, request as playwrightRequest } from '@playwright/test';
 
 const KEYCLOAK_BASE_URL = process.env.E2E_KEYCLOAK_BASE_URL ?? 'http://localhost:8081';
@@ -360,3 +362,223 @@ async function mintAccessToken(): Promise<string> {
     await kc.dispose();
   }
 }
+
+// Fresh-user → /profile/setup redirect under the BFF flow (mi-8f44,
+// post-BFF re-test of mi-4p4 / port of the closed mi-cg3 orphan spec).
+//
+// Bug class: a brand-new Keycloak identity logs in, the backend
+// creates a pending users row, the BFF cookie is set, and the SPA
+// boots at '/'. The home route's first protected fetch
+// (GET /api/v1/specimens) 403s with `details.redirect: /profile/setup`
+// and the wrapper middleware MUST push the hash route to
+// `/profile/setup` BEFORE any error UI renders — no global toast and
+// no Specimens "Couldn't load" banner can flash, even for a frame.
+//
+// The pre-BFF version (mi-cg3) caught the fresh-user timing: no
+// Layout already mounted, no profile cached, no prior auth state, so
+// the error UI snuck in between the 403 and the async push().
+// Under BFF the wrapper logic and Specimens guard are the same
+// (frontend/src/lib/api/wrapper.ts redirect path, Specimens.svelte's
+// `isProfileSetupRedirect(error)` early-return), but the surrounding
+// boot path is entirely different (cookie callback instead of
+// in-SPA token exchange). This is the regression net for the new
+// shape.
+//
+// The realm admin API is the same path dev-seed.sh uses to seed
+// users, so a one-shot user is provisioned and deleted per run —
+// works against a freshly-up dev compose AND a re-used local stack
+// without colliding on a stale email.
+test('fresh user lands directly on /profile/setup with no error UI', async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (err) => {
+    pageErrors.push(err.message);
+  });
+  page.on('console', (msg) => {
+    if (msg.type() === 'error' || msg.type() === 'warning') {
+      console.log(`[browser ${msg.type()}] ${msg.text()}`);
+    }
+  });
+
+  // Mint the fresh user lazily per-test so reruns (and any future
+  // parallel-workers config) never collide on the same email. The
+  // suffix is sourced from node:crypto's randomUUID (CSPRNG) — not
+  // because this is a security context (the user is deleted in
+  // finally and the email is never reused), but because the value
+  // flows into the Keycloak admin POST /users sink, which CodeQL
+  // js/insecure-randomness treats as security-relevant. Using a
+  // CSPRNG sidesteps the alert without per-line suppression.
+  const adminToken = await kcAdminToken();
+  const localPart = `pending-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const email = `${localPart}@localhost`;
+  const userId = await createFreshKcUser(adminToken, email, TEST_PASSWORD);
+
+  try {
+    // 1. SPA renders anonymous. Same mi-rvn precondition as the
+    //    other BFF specs — the Login button is a plain anchor.
+    await page.goto('/');
+    const loginButton = page.getByTestId('login-button');
+    await expect(loginButton).toBeVisible();
+
+    // 2. Click Login → backend 302 → Keycloak realm auth → fill the
+    //    fresh user's credentials → submit. After submission the
+    //    chain is: Keycloak 302 → backend /auth/callback (sets
+    //    HttpOnly cookie, resolves-or-creates the users row in
+    //    pending state) → 302 to the SPA at '/'.
+    await loginButton.click();
+    await page.waitForURL(/\/realms\/minerals\/protocol\/openid-connect\/auth/, {
+      timeout: 30_000,
+    });
+    await page.locator('#username').fill(email);
+    await page.locator('#password').fill(TEST_PASSWORD);
+    await page.locator('#kc-login').click();
+
+    // 3. Race the three outcomes that can win after the SPA boots
+    //    on '/':
+    //      a) the wrapper middleware pushes /profile/setup before any
+    //         error UI mounts (PASS — `redirect` wins),
+    //      b) the global toast renders the 403 envelope message (FAIL
+    //         — `toast` wins),
+    //      c) Specimens.svelte's "Couldn't load specimens" banner
+    //         mounts before the route changes (FAIL — `error` wins).
+    //    Promise.race against the URL change AND the two error
+    //    testids — if either error UI wins, fail with a clear cause
+    //    rather than waiting out the navigation timeout. The .catch
+    //    on the error branches keeps the race fair: a never-firing
+    //    toast/error must NOT throw the redirect branch's win away.
+    const redirectLanded = page
+      .waitForURL(/#\/profile\/setup$/, { timeout: 30_000 })
+      .then(() => 'redirect' as const);
+    const toastAppeared = page
+      .getByTestId('toast')
+      .first()
+      .waitFor({ state: 'visible', timeout: 30_000 })
+      .then(() => 'toast' as const)
+      .catch(() => 'toast-never' as const);
+    const specimensError = page
+      .getByTestId('error')
+      .first()
+      .waitFor({ state: 'visible', timeout: 30_000 })
+      .then(() => 'specimens-error' as const)
+      .catch(() => 'specimens-error-never' as const);
+
+    const winner = await Promise.race([redirectLanded, toastAppeared, specimensError]);
+    expect(
+      winner,
+      'redirect to /profile/setup must win over any error UI (mi-4p4 regression)',
+    ).toBe('redirect');
+
+    // 4. Positive-side proof that the route mounted (URL alone could
+    //    lie if a guard 404'd silently).
+    await expect(page.getByTestId('profile-setup')).toBeVisible();
+
+    // 5. Belt-and-braces: even though the race proved no error UI was
+    //    visible at the moment we landed, double-check neither testid
+    //    is in the DOM now. Catches a pathological case where an
+    //    error mounts AFTER the route change (e.g. a deferred fetch
+    //    firing post-navigation).
+    await expect(page.getByTestId('toast')).toHaveCount(0);
+    await expect(page.getByTestId('error')).toHaveCount(0);
+
+    expect(
+      pageErrors,
+      `unexpected page errors during fresh-user redirect: ${pageErrors.join(' | ')}`,
+    ).toEqual([]);
+  } finally {
+    // Always clean up the Keycloak user so reruns against the same
+    // stack stay isolated. The app's users-table row keyed on this
+    // user's sub becomes an orphan; harmless for the test (no FK
+    // constraints prevent reuse) and the dev compose volume gets
+    // wiped between CI jobs anyway.
+    await deleteKcUser(adminToken, userId);
+  }
+});
+
+// kcAdminToken mints an admin-cli token from the master realm — the
+// same path dev-seed.sh uses to provision the seeded users. Throws
+// loudly so a misconfigured stack fails the spec rather than silently
+// skipping the assertion.
+async function kcAdminToken(): Promise<string> {
+  const kc = await playwrightRequest.newContext({ baseURL: KEYCLOAK_BASE_URL });
+  try {
+    const res = await kc.post('/realms/master/protocol/openid-connect/token', {
+      form: {
+        grant_type: 'password',
+        client_id: 'admin-cli',
+        username: KC_ADMIN_USER,
+        password: KC_ADMIN_PASS,
+      },
+    });
+    if (!res.ok()) {
+      throw new Error(`Keycloak admin token request failed: ${res.status()} ${await res.text()}`);
+    }
+    const body = (await res.json()) as { access_token?: string };
+    if (!body.access_token) {
+      throw new Error('Keycloak admin token response missing access_token');
+    }
+    return body.access_token;
+  } finally {
+    await kc.dispose();
+  }
+}
+
+// createFreshKcUser provisions a one-shot user under the minerals
+// realm with a unique email so the SPA + backend have never seen
+// them before. Mirrors the field set dev-seed.sh's create_user()
+// uses: firstName/lastName are mandatory for the realm's
+// "fully set up" check, and emailVerified avoids a verify-email
+// required-action that would block the login form.
+async function createFreshKcUser(token: string, email: string, password: string): Promise<string> {
+  const kc = await playwrightRequest.newContext({ baseURL: KEYCLOAK_BASE_URL });
+  try {
+    const res = await kc.post(`/admin/realms/${KEYCLOAK_REALM}/users`, {
+      headers: { Authorization: `Bearer ${token}` },
+      data: {
+        username: email,
+        email,
+        firstName: 'Fresh',
+        lastName: 'Polecat',
+        enabled: true,
+        emailVerified: true,
+        credentials: [{ type: 'password', value: password, temporary: false }],
+      },
+    });
+    if (res.status() !== 201) {
+      throw new Error(`Keycloak create user failed: ${res.status()} ${await res.text()}`);
+    }
+    // Keycloak returns the new user's id in the Location header
+    // (`.../admin/realms/<realm>/users/<id>`), not the response body.
+    const location = res.headers()['location'];
+    if (!location) {
+      throw new Error('Keycloak create user response missing Location header');
+    }
+    const id = location.split('/').pop();
+    if (!id) {
+      throw new Error(`Keycloak create user Location header malformed: ${location}`);
+    }
+    return id;
+  } finally {
+    await kc.dispose();
+  }
+}
+
+async function deleteKcUser(token: string, userId: string): Promise<void> {
+  const kc = await playwrightRequest.newContext({ baseURL: KEYCLOAK_BASE_URL });
+  try {
+    const res = await kc.delete(`/admin/realms/${KEYCLOAK_REALM}/users/${userId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    // 204 deleted; 404 already gone (e.g. retry path) — both fine.
+    if (res.status() !== 204 && res.status() !== 404) {
+      throw new Error(`Keycloak delete user failed: ${res.status()} ${await res.text()}`);
+    }
+  } finally {
+    await kc.dispose();
+  }
+}
+
+// Admin creds for the dev Keycloak master realm. Defaults match
+// terraform/keycloak/dev-seed.sh — the realm/admin pair the CI
+// keycloak-smoke job spins up. Override via env when running against
+// a non-dev stack.
+const KC_ADMIN_USER = process.env.E2E_KEYCLOAK_ADMIN_USER ?? 'admin';
+const KC_ADMIN_PASS = process.env.E2E_KEYCLOAK_ADMIN_PASS ?? 'admin';
