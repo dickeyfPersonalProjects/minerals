@@ -31,12 +31,10 @@ function mineralView(overrides: Partial<SpecimenView> = {}): SpecimenView {
     type: 'mineral',
     visibility: 'private',
     description: '',
-    catalog_number: null,
-    acquired_at: null,
-    // acquired_from / price_cents are now optional in the response
-    // shape (mi-fo8 / mi-9ww — per-field visibility redaction omits
-    // the key entirely when the viewer can't see it). The fixture
-    // can still set them via overrides.
+    // catalog_number / acquired_at / acquired_from / price_cents are
+    // optional in the response shape (mi-fo8 / mi-9ww / mi-z3d0 —
+    // per-field visibility redaction omits the key entirely when the
+    // viewer can't see it). The fixture can still set them via overrides.
     source_notes: null,
     locality_text: null,
     mass_g: null,
@@ -599,8 +597,8 @@ describe('specimenToFormValues', () => {
     expect(v.acquired_at).toBe('2024-06-15');
   });
 
-  it('returns empty acquired_at when null', () => {
-    expect(specimenToFormValues(mineralView({ acquired_at: null })).acquired_at).toBe('');
+  it('returns empty acquired_at when absent', () => {
+    expect(specimenToFormValues(mineralView({ acquired_at: undefined })).acquired_at).toBe('');
   });
 
   it('coerces nullable common fields to empty strings', () => {
