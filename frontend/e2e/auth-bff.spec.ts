@@ -24,6 +24,8 @@
 // running the suite against the pre-BFF stack still gets a clear
 // signal instead of a hard failure.
 
+import { randomUUID } from 'node:crypto';
+
 import { expect, test, request as playwrightRequest } from '@playwright/test';
 
 const KEYCLOAK_BASE_URL = process.env.E2E_KEYCLOAK_BASE_URL ?? 'http://localhost:8081';
@@ -399,10 +401,14 @@ test('fresh user lands directly on /profile/setup with no error UI', async ({ pa
 
   // Mint the fresh user lazily per-test so reruns (and any future
   // parallel-workers config) never collide on the same email. The
-  // Date.now() + random suffix is enough entropy for this; the user
-  // is deleted in finally.
+  // suffix is sourced from node:crypto's randomUUID (CSPRNG) — not
+  // because this is a security context (the user is deleted in
+  // finally and the email is never reused), but because the value
+  // flows into the Keycloak admin POST /users sink, which CodeQL
+  // js/insecure-randomness treats as security-relevant. Using a
+  // CSPRNG sidesteps the alert without per-line suppression.
   const adminToken = await kcAdminToken();
-  const localPart = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const localPart = `pending-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const email = `${localPart}@localhost`;
   const userId = await createFreshKcUser(adminToken, email, TEST_PASSWORD);
 
