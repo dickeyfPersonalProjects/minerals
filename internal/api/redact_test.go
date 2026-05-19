@@ -132,6 +132,8 @@ func TestRedactor_Scalars(t *testing.T) {
 	}
 	cents := int64(12345)
 	from := "test-source"
+	acquiredAt := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
+	catalog := "AB-1234"
 	scalarFields := []field{
 		{
 			name: "price",
@@ -179,6 +181,63 @@ func TestRedactor_Scalars(t *testing.T) {
 			},
 			set: func(sp *domain.Specimen) { sp.AcquiredFrom = &from },
 		},
+		{
+			// acquired_at has no per-specimen override column —
+			// only the user-default and system-default layers exist
+			// for it. The specimen-field rows for this field are
+			// skipped below.
+			name: "acquired_at",
+			configure: func(_ *domain.Specimen, owner *domain.User, vis domain.Visibility, layer string) {
+				switch layer {
+				case "user-default":
+					if owner.FieldDefaults == nil {
+						owner.FieldDefaults = &domain.FieldDefaults{}
+					}
+					owner.FieldDefaults.AcquiredAt = visPtr(vis)
+				case "system-default":
+					// no-op.
+				}
+			},
+			peek: func(v SpecimenView) string {
+				if v.AcquiredAt == nil {
+					return "absent"
+				}
+				return "present"
+			},
+			set: func(sp *domain.Specimen) { sp.AcquiredAt = &acquiredAt },
+		},
+		{
+			// catalog_number has no per-specimen override column,
+			// same shape as acquired_at.
+			name: "catalog_number",
+			configure: func(_ *domain.Specimen, owner *domain.User, vis domain.Visibility, layer string) {
+				switch layer {
+				case "user-default":
+					if owner.FieldDefaults == nil {
+						owner.FieldDefaults = &domain.FieldDefaults{}
+					}
+					owner.FieldDefaults.CatalogNumber = visPtr(vis)
+				case "system-default":
+					// no-op.
+				}
+			},
+			peek: func(v SpecimenView) string {
+				if v.CatalogNumber == nil {
+					return "absent"
+				}
+				return "present"
+			},
+			set: func(sp *domain.Specimen) { sp.CatalogNumber = &catalog },
+		},
+	}
+
+	// fieldHasSpecimenOverride reports whether the named field has a
+	// per-specimen override column (visibility_price /
+	// visibility_acquired_from). Used to skip "specimen-field" chain
+	// rows for acquired_at and catalog_number, which only exist on
+	// the user-default and system-default layers.
+	fieldHasSpecimenOverride := func(name string) bool {
+		return name == "price" || name == "acquired_from"
 	}
 
 	// Each (resolved-visibility, layer) pair describes one chain
@@ -202,6 +261,9 @@ func TestRedactor_Scalars(t *testing.T) {
 	for _, v := range viewers {
 		for _, f := range scalarFields {
 			for _, c := range chains {
+				if c.layer == "specimen-field" && !fieldHasSpecimenOverride(f.name) {
+					continue
+				}
 				name := strings.Join([]string{f.name, v.name, c.layer, string(c.vis)}, "/")
 				t.Run(name, func(t *testing.T) {
 					// Fresh fixture per row — the redactor caches owners

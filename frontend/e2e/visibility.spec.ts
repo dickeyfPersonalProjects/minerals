@@ -115,18 +115,52 @@ test('per-field visibility — anonymous viewer sees public fields, redacted fie
     // `private`; we still patch it so the resolved chain layer is
     // user-default, not system-default, and any future regression that
     // accidentally skipped the user layer would surface here.
+    // The mi-z3d0 additions: acquired_at and catalog_number also
+    // default to private at the user level so anonymous browsers
+    // never see them on a specimen that doesn't override them
+    // per-row. There is no per-specimen override column for these
+    // two fields, so the user-default layer is the ONLY thing
+    // gating their visibility.
     await expectOk(
       await api.patch('/api/v1/profile', {
-        data: { field_defaults: { price: 'unlisted', acquired_from: 'private' } },
+        data: {
+          field_defaults: {
+            price: 'unlisted',
+            acquired_from: 'private',
+            acquired_at: 'private',
+            catalog_number: 'private',
+          },
+        },
       }),
       'PATCH /api/v1/profile (field_defaults)',
     );
 
-    // Step 4: create a public specimen carrying values for both
-    // protected scalar fields. The acquired_from string is deliberately
-    // distinctive so a regression that leaks the value into the DOM
-    // can be spotted in trace artefacts.
+    // Round-trip check (mi-z3d0): GET /api/v1/profile must reflect
+    // the keys just written, including the new ones.
+    const profileRes = await expectOk(
+      await api.get('/api/v1/profile'),
+      'GET /api/v1/profile (after PATCH)',
+    );
+    const profile = (await profileRes.json()) as {
+      field_defaults: Record<string, string> | null;
+    };
+    if (
+      profile.field_defaults?.acquired_at !== 'private' ||
+      profile.field_defaults?.catalog_number !== 'private'
+    ) {
+      throw new Error(
+        `GET /api/v1/profile did not round-trip new field_defaults keys: ${JSON.stringify(
+          profile.field_defaults,
+        )}`,
+      );
+    }
+
+    // Step 4: create a public specimen carrying values for every
+    // protected scalar field. The acquired_from / catalog_number
+    // strings are deliberately distinctive so a regression that
+    // leaks the value into the DOM can be spotted in trace artefacts.
     const distinctiveAcquiredFrom = `SecretSourceE2E-${Date.now()}`;
+    const distinctiveCatalog = `CAT-LEAK-${Date.now()}`;
     const specimenName = `Visibility E2E ${Date.now()}`;
     const createRes = await expectOk(
       await api.post('/api/v1/specimens', {
@@ -137,6 +171,8 @@ test('per-field visibility — anonymous viewer sees public fields, redacted fie
           visibility: 'public',
           price_cents: 12345,
           acquired_from: distinctiveAcquiredFrom,
+          acquired_at: '2024-01-02',
+          catalog_number: distinctiveCatalog,
         },
       }),
       'POST /api/v1/specimens',
@@ -239,6 +275,19 @@ test('per-field visibility — anonymous viewer sees public fields, redacted fie
     await expect(
       article.getByText(distinctiveAcquiredFrom, { exact: false }),
       'acquired_from value must not leak in any DOM text',
+    ).toHaveCount(0);
+
+    // mi-z3d0 — new redactable scalars. acquired_at and catalog_number
+    // have no per-specimen override column; the user-default = private
+    // is the only chain layer that gates them, so anon must NEVER see
+    // either the label or the value.
+    await expect(
+      article.getByText(/Acquired\b/i),
+      'acquired_at label must not appear (user-default = private)',
+    ).toHaveCount(0);
+    await expect(
+      article.getByText(distinctiveCatalog, { exact: false }),
+      'catalog_number value must not leak in any DOM text (user-default = private)',
     ).toHaveCount(0);
 
     // Image-visibility chain: exactly one photo should be reachable to

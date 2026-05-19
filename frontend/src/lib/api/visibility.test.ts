@@ -16,10 +16,44 @@ import {
 } from './visibility';
 
 const ALL_VISIBILITIES: Visibility[] = ['private', 'unlisted', 'public'];
-const ALL_SCALAR_FIELDS: Field[] = ['price', 'acquired_from'];
+const ALL_SCALAR_FIELDS: Field[] = ['price', 'acquired_from', 'acquired_at', 'catalog_number'];
+// Subset of scalar fields that have a per-specimen override column.
+// acquired_at and catalog_number (mi-z3d0) live only on the
+// user-default layer.
+const SCALAR_FIELDS_WITH_SPECIMEN_OVERRIDE: Field[] = ['price', 'acquired_from'];
+const hasSpecimenOverride = (f: Field): boolean => SCALAR_FIELDS_WITH_SPECIMEN_OVERRIDE.includes(f);
 
 function fullyDefaultedUser(v: Visibility): OwnerLike {
-  return { field_defaults: { price: v, acquired_from: v, images: v } };
+  return {
+    field_defaults: {
+      price: v,
+      acquired_from: v,
+      acquired_at: v,
+      catalog_number: v,
+      images: v,
+    },
+  };
+}
+
+function setOwnerDefault(owner: OwnerLike, field: Field, v: Visibility): void {
+  owner.field_defaults ??= {};
+  switch (field) {
+    case 'price':
+      owner.field_defaults.price = v;
+      break;
+    case 'acquired_from':
+      owner.field_defaults.acquired_from = v;
+      break;
+    case 'acquired_at':
+      owner.field_defaults.acquired_at = v;
+      break;
+    case 'catalog_number':
+      owner.field_defaults.catalog_number = v;
+      break;
+    case 'images':
+      owner.field_defaults.images = v;
+      break;
+  }
 }
 
 function noDefaultsUser(): OwnerLike {
@@ -42,7 +76,7 @@ function setScalarOverride(spec: SpecimenLike, field: Field, v: Visibility | nul
 
 // Mirrors TestResolveScalar_SpecimenFieldLayer.
 describe('resolveScalar: specimen-field layer', () => {
-  for (const field of ALL_SCALAR_FIELDS) {
+  for (const field of SCALAR_FIELDS_WITH_SPECIMEN_OVERRIDE) {
     for (const v of ALL_VISIBILITIES) {
       it(`${field}=${v}`, () => {
         const spec: SpecimenLike = {};
@@ -66,11 +100,7 @@ describe('resolveScalar: user-default layer', () => {
         // Sparse field_defaults: only the field under test has
         // a value. Confirms the chain reads the right key.
         const owner: OwnerLike = { field_defaults: {} };
-        if (field === 'price') {
-          owner.field_defaults!.price = v;
-        } else {
-          owner.field_defaults!.acquired_from = v;
-        }
+        setOwnerDefault(owner, field, v);
         const want: Resolution = { visibility: v, source: 'user-default' };
         expect(resolveScalar(field, spec, owner)).toEqual(want);
       });
@@ -302,6 +332,9 @@ describe('resolveScalar: full chain transitions', () => {
   ];
   for (const field of ALL_SCALAR_FIELDS) {
     for (const s of setups) {
+      // acquired_at and catalog_number have no per-specimen
+      // override column; skip the rows that drive that layer.
+      if (s.specOver !== undefined && !hasSpecimenOverride(field)) continue;
       it(`${field}/${s.name}`, () => {
         const spec: SpecimenLike = {};
         if (s.specOver !== undefined) {
@@ -309,12 +342,7 @@ describe('resolveScalar: full chain transitions', () => {
         }
         const owner: OwnerLike = {};
         if (s.ownerDef !== undefined) {
-          owner.field_defaults = {};
-          if (field === 'price') {
-            owner.field_defaults.price = s.ownerDef;
-          } else {
-            owner.field_defaults.acquired_from = s.ownerDef;
-          }
+          setOwnerDefault(owner, field, s.ownerDef);
         }
         expect(resolveScalar(field, spec, owner)).toEqual(s.want);
       });

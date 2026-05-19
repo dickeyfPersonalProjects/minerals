@@ -156,12 +156,12 @@ func (VisibilityPatch) Schema(_ huma.Registry) *huma.Schema {
 type SpecimenView struct {
 	ID            uuid.UUID           `json:"id" doc:"UUIDv7 primary key."`
 	Type          domain.SpecimenType `json:"type" enum:"mineral,rock,meteorite,fossil" doc:"Specimen kind discriminator (immutable after creation)."`
-	CatalogNumber *string             `json:"catalog_number" doc:"Optional human catalog number; unique across all specimens when set."`
+	CatalogNumber *string             `json:"catalog_number,omitempty" doc:"Optional human catalog number; unique across all specimens when set. Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property."`
 	Name          string              `json:"name" doc:"Display name."`
 	Description   string              `json:"description" doc:"Markdown description; defaults to empty string."`
 	Visibility    domain.Visibility   `json:"visibility" enum:"private,unlisted,public" doc:"Sharing visibility."`
 	AuthorID      uuid.UUID           `json:"author_id" doc:"UUID of the user who created the row (CONTRACT.md §13)."`
-	AcquiredAt    *time.Time          `json:"acquired_at" doc:"Acquisition date (RFC 3339, time component ignored)."`
+	AcquiredAt    *time.Time          `json:"acquired_at,omitempty" doc:"Acquisition date (RFC 3339, time component ignored). Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property."`
 	AcquiredFrom  *string             `json:"acquired_from,omitempty" doc:"Where the specimen was acquired (free text). Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset', a deliberate privacy property."`
 	PriceCents    *int64              `json:"price_cents,omitempty" doc:"Acquisition price in cents. Omitted from the response when the per-field visibility resolution (mi-fo8 / CONTRACT.md §13b) denies the viewer access — absence is indistinguishable from 'unset'."`
 	SourceNotes   *string             `json:"source_notes" doc:"Free-form provenance notes."`

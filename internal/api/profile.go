@@ -26,7 +26,7 @@ const MaxDisplayNameLen = 80
 // fieldDefaultsKeys enumerates the keys allowed in the field_defaults
 // map (mi-fo8). Any other key in PATCH /api/v1/profile is a 400.
 // Kept sorted so error messages list the allowed set deterministically.
-var fieldDefaultsKeys = []string{"acquired_from", "images", "price"}
+var fieldDefaultsKeys = []string{"acquired_at", "acquired_from", "catalog_number", "images", "price"}
 
 // profileSetupInput is the POST /api/v1/profile request body. v1
 // collects only display_name; later beads may extend this surface.
@@ -57,9 +57,11 @@ type profileBody struct {
 // known key. Mirrors domain.FieldDefaults; converted via
 // toFieldDefaultsView.
 type fieldDefaultsView struct {
-	Price        *domain.Visibility `json:"price,omitempty" enum:"private,unlisted,public" doc:"Default visibility for the price field; absent means fall through to the system default."`
-	AcquiredFrom *domain.Visibility `json:"acquired_from,omitempty" enum:"private,unlisted,public" doc:"Default visibility for the acquired_from field; absent means fall through to the system default."`
-	Images       *domain.Visibility `json:"images,omitempty" enum:"private,unlisted,public" doc:"Default visibility for the images field; absent means fall through to the system default."`
+	Price         *domain.Visibility `json:"price,omitempty" enum:"private,unlisted,public" doc:"Default visibility for the price field; absent means fall through to the system default."`
+	AcquiredFrom  *domain.Visibility `json:"acquired_from,omitempty" enum:"private,unlisted,public" doc:"Default visibility for the acquired_from field; absent means fall through to the system default."`
+	AcquiredAt    *domain.Visibility `json:"acquired_at,omitempty" enum:"private,unlisted,public" doc:"Default visibility for the acquired_at field; absent means fall through to the system default."`
+	CatalogNumber *domain.Visibility `json:"catalog_number,omitempty" enum:"private,unlisted,public" doc:"Default visibility for the catalog_number field; absent means fall through to the system default."`
+	Images        *domain.Visibility `json:"images,omitempty" enum:"private,unlisted,public" doc:"Default visibility for the images field; absent means fall through to the system default."`
 }
 
 // toFieldDefaultsView projects the persisted domain.FieldDefaults to
@@ -70,9 +72,11 @@ func toFieldDefaultsView(fd *domain.FieldDefaults) *fieldDefaultsView {
 		return nil
 	}
 	return &fieldDefaultsView{
-		Price:        fd.Price,
-		AcquiredFrom: fd.AcquiredFrom,
-		Images:       fd.Images,
+		Price:         fd.Price,
+		AcquiredFrom:  fd.AcquiredFrom,
+		AcquiredAt:    fd.AcquiredAt,
+		CatalogNumber: fd.CatalogNumber,
+		Images:        fd.Images,
 	}
 }
 
@@ -133,7 +137,8 @@ func (FieldDefaultsPatch) Schema(_ huma.Registry) *huma.Schema {
 			"keys present in the request replace the stored value; keys absent " +
 			"are preserved; an explicit JSON `null` per key clears that entry " +
 			"(returns to the system default). Allowed keys: `price`, " +
-			"`acquired_from`, `images`. Allowed values: `private`, `unlisted`, " +
+			"`acquired_from`, `acquired_at`, `catalog_number`, `images`. " +
+			"Allowed values: `private`, `unlisted`, " +
 			"`public` (CONTRACT.md §13). Sending `null` at this field's level " +
 			"(i.e. `\"field_defaults\": null` in the request body) is rejected " +
 			"with 400 — use omission to mean 'don't change'.",
@@ -407,6 +412,10 @@ func setFieldDefaultsKey(fd *domain.FieldDefaults, key string, v *domain.Visibil
 		fd.Price = v
 	case "acquired_from":
 		fd.AcquiredFrom = v
+	case "acquired_at":
+		fd.AcquiredAt = v
+	case "catalog_number":
+		fd.CatalogNumber = v
 	case "images":
 		fd.Images = v
 	}

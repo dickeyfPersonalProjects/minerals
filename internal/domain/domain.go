@@ -674,9 +674,11 @@ const (
 // A nil *FieldDefaults persists as SQL NULL — the all-fields-
 // fall-through case.
 type FieldDefaults struct {
-	Price        *Visibility `json:"price,omitempty"`
-	AcquiredFrom *Visibility `json:"acquired_from,omitempty"`
-	Images       *Visibility `json:"images,omitempty"`
+	Price         *Visibility `json:"price,omitempty"`
+	AcquiredFrom  *Visibility `json:"acquired_from,omitempty"`
+	AcquiredAt    *Visibility `json:"acquired_at,omitempty"`
+	CatalogNumber *Visibility `json:"catalog_number,omitempty"`
+	Images        *Visibility `json:"images,omitempty"`
 }
 
 // User mirrors the schema added in migration 0008_users (mi-tl2),

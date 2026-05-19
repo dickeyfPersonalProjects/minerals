@@ -30,6 +30,13 @@ const (
 	FieldPrice Field = iota
 	// FieldAcquiredFrom selects the chain for specimens.acquired_from.
 	FieldAcquiredFrom
+	// FieldAcquiredAt selects the chain for specimens.acquired_at. The
+	// specimen has no per-row override column for this field, so the
+	// scalar chain falls through to the owner default (or system default).
+	FieldAcquiredAt
+	// FieldCatalogNumber selects the chain for specimens.catalog_number.
+	// Same shape as FieldAcquiredAt — owner default + system default only.
+	FieldCatalogNumber
 	// FieldImages selects the chain for the photos collection. Pass
 	// this to [ResolveImage], not [ResolveScalar] — see ResolveScalar.
 	FieldImages
@@ -43,6 +50,10 @@ func (f Field) String() string {
 		return "price"
 	case FieldAcquiredFrom:
 		return "acquired_from"
+	case FieldAcquiredAt:
+		return "acquired_at"
+	case FieldCatalogNumber:
+		return "catalog_number"
 	case FieldImages:
 		return "images"
 	}
@@ -166,6 +177,10 @@ func ownerDefault(field Field, owner domain.User) *domain.Visibility {
 		return fd.Price
 	case FieldAcquiredFrom:
 		return fd.AcquiredFrom
+	case FieldAcquiredAt:
+		return fd.AcquiredAt
+	case FieldCatalogNumber:
+		return fd.CatalogNumber
 	case FieldImages:
 		return fd.Images
 	}
