@@ -21,10 +21,33 @@ var allVisibilities = []domain.Visibility{
 
 // allScalarFields is the set of Field values that ResolveScalar
 // canonically handles. FieldImages is exercised separately against
-// ResolveImage.
+// ResolveImage. FieldAcquiredAt and FieldCatalogNumber have no
+// specimen-level override column — the scalar chain just walks
+// owner-default → system-default for them; specimen-field cases
+// are excluded by the helpers that drive that layer.
 var allScalarFields = []visibility.Field{
 	visibility.FieldPrice,
 	visibility.FieldAcquiredFrom,
+	visibility.FieldAcquiredAt,
+	visibility.FieldCatalogNumber,
+}
+
+// scalarFieldsWithSpecimenOverride is the subset of scalar fields that
+// have a per-specimen override column (visibility_price /
+// visibility_acquired_from). FieldAcquiredAt and FieldCatalogNumber are
+// excluded — they only exist on the user-default layer.
+var scalarFieldsWithSpecimenOverride = []visibility.Field{
+	visibility.FieldPrice,
+	visibility.FieldAcquiredFrom,
+}
+
+func hasSpecimenOverride(f visibility.Field) bool {
+	for _, c := range scalarFieldsWithSpecimenOverride {
+		if c == f {
+			return true
+		}
+	}
+	return false
 }
 
 // fullyDefaultedUser returns a domain.User with every field_defaults
@@ -33,9 +56,11 @@ var allScalarFields = []visibility.Field{
 func fullyDefaultedUser(v domain.Visibility) domain.User {
 	return domain.User{
 		FieldDefaults: &domain.FieldDefaults{
-			Price:        vis(v),
-			AcquiredFrom: vis(v),
-			Images:       vis(v),
+			Price:         vis(v),
+			AcquiredFrom:  vis(v),
+			AcquiredAt:    vis(v),
+			CatalogNumber: vis(v),
+			Images:        vis(v),
 		},
 	}
 }
@@ -47,7 +72,8 @@ func noDefaultsUser() domain.User { return domain.User{} }
 // setScalarOverride writes v onto the matching specimen column for
 // field. The bead documents the chain in terms of these columns;
 // keeping the helper next to the test table makes the table read as
-// pure data.
+// pure data. FieldAcquiredAt and FieldCatalogNumber are no-ops — no
+// per-specimen override column exists for those fields.
 func setScalarOverride(spec *domain.Specimen, field visibility.Field, v *domain.Visibility) {
 	switch field {
 	case visibility.FieldPrice:
@@ -59,6 +85,23 @@ func setScalarOverride(spec *domain.Specimen, field visibility.Field, v *domain.
 	}
 }
 
+// setOwnerDefault writes v onto the field_defaults slot named by field.
+// Pairs with setScalarOverride for the user-default layer of the chain.
+func setOwnerDefault(fd *domain.FieldDefaults, field visibility.Field, v *domain.Visibility) {
+	switch field {
+	case visibility.FieldPrice:
+		fd.Price = v
+	case visibility.FieldAcquiredFrom:
+		fd.AcquiredFrom = v
+	case visibility.FieldAcquiredAt:
+		fd.AcquiredAt = v
+	case visibility.FieldCatalogNumber:
+		fd.CatalogNumber = v
+	case visibility.FieldImages:
+		fd.Images = v
+	}
+}
+
 func TestField_String(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -67,6 +110,8 @@ func TestField_String(t *testing.T) {
 	}{
 		{visibility.FieldPrice, "price"},
 		{visibility.FieldAcquiredFrom, "acquired_from"},
+		{visibility.FieldAcquiredAt, "acquired_at"},
+		{visibility.FieldCatalogNumber, "catalog_number"},
 		{visibility.FieldImages, "images"},
 		{visibility.Field(99), ""},
 	}
@@ -82,7 +127,7 @@ func TestField_String(t *testing.T) {
 // wins regardless of owner defaults.
 func TestResolveScalar_SpecimenFieldLayer(t *testing.T) {
 	t.Parallel()
-	for _, field := range allScalarFields {
+	for _, field := range scalarFieldsWithSpecimenOverride {
 		for _, v := range allVisibilities {
 			name := field.String() + "=" + string(v)
 			t.Run(name, func(t *testing.T) {
@@ -122,12 +167,7 @@ func TestResolveScalar_UserDefaultLayer(t *testing.T) {
 				// Sparse FieldDefaults: only the field under test
 				// has a value. Confirms the chain reads the right key.
 				owner := domain.User{FieldDefaults: &domain.FieldDefaults{}}
-				switch field {
-				case visibility.FieldPrice:
-					owner.FieldDefaults.Price = vis(v)
-				case visibility.FieldAcquiredFrom:
-					owner.FieldDefaults.AcquiredFrom = vis(v)
-				}
+				setOwnerDefault(owner.FieldDefaults, field, vis(v))
 				got := visibility.ResolveScalar(field, spec, owner)
 				want := visibility.Resolution{
 					Visibility: v,
@@ -511,6 +551,12 @@ func TestResolveScalar_FullChainTransitions(t *testing.T) {
 	}
 	for _, field := range allScalarFields {
 		for _, s := range setups {
+			// FieldAcquiredAt and FieldCatalogNumber have no
+			// specimen-level override column; skip the rows that
+			// drive that layer for those fields.
+			if s.specOver != nil && !hasSpecimenOverride(field) {
+				continue
+			}
 			name := field.String() + "/" + s.name
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
@@ -519,12 +565,7 @@ func TestResolveScalar_FullChainTransitions(t *testing.T) {
 				owner := domain.User{}
 				if s.ownerDef != nil {
 					fd := &domain.FieldDefaults{}
-					switch field {
-					case visibility.FieldPrice:
-						fd.Price = s.ownerDef
-					case visibility.FieldAcquiredFrom:
-						fd.AcquiredFrom = s.ownerDef
-					}
+					setOwnerDefault(fd, field, s.ownerDef)
 					owner.FieldDefaults = fd
 				}
 				got := visibility.ResolveScalar(field, spec, owner)

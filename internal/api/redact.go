@@ -45,9 +45,10 @@ func newRedactor(users domain.UserRepo, guard authzGuard) redactor {
 }
 
 // redactSpecimen returns the SpecimenView for sp with redactable
-// fields (price_cents, acquired_from) omitted when the request's
-// caller cannot see their resolved visibility. Owners and admins
-// see everything per the underlying Casbin policy.
+// scalar fields (price_cents, acquired_from, acquired_at,
+// catalog_number) omitted when the request's caller cannot see their
+// resolved visibility. Owners and admins see everything per the
+// underlying Casbin policy.
 //
 // A failure to load the owner is non-fatal — the field is redacted
 // (conservative default) and a nil error is returned so callers
@@ -64,6 +65,12 @@ func (r redactor) redactSpecimen(ctx context.Context, sp domain.Specimen) Specim
 	}
 	if !r.canSeeField(ctx, sp, visibility.ResolveScalar(visibility.FieldAcquiredFrom, sp, owner).Visibility) {
 		view.AcquiredFrom = nil
+	}
+	if !r.canSeeField(ctx, sp, visibility.ResolveScalar(visibility.FieldAcquiredAt, sp, owner).Visibility) {
+		view.AcquiredAt = nil
+	}
+	if !r.canSeeField(ctx, sp, visibility.ResolveScalar(visibility.FieldCatalogNumber, sp, owner).Visibility) {
+		view.CatalogNumber = nil
 	}
 	return view
 }

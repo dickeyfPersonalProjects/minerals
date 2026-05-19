@@ -18,8 +18,10 @@ export type Visibility = 'private' | 'unlisted' | 'public';
 
 // Field names match the keys used in users.field_defaults JSON
 // (see CONTRACT.md §13 v2 / mi-fo8). They are the canonical
-// identifiers the chain reads from FieldDefaultsView.
-export type Field = 'price' | 'acquired_from' | 'images';
+// identifiers the chain reads from FieldDefaultsView. 'acquired_at'
+// and 'catalog_number' (mi-z3d0) have no per-specimen override
+// column — only the user-default and system-default layers apply.
+export type Field = 'price' | 'acquired_from' | 'acquired_at' | 'catalog_number' | 'images';
 
 // Source labels the chain layer that supplied the effective
 // value. Mirrors visibility.Source in the Go helper; edit
@@ -73,11 +75,16 @@ export interface OwnerLike {
 }
 
 // resolveScalar resolves the visibility of a scalar redactable
-// field — 'price' or 'acquired_from' — by walking the chain:
+// field — 'price', 'acquired_from', 'acquired_at', or
+// 'catalog_number' — by walking the chain:
 //
-//   1. the specimen's per-field override
+//   1. the specimen's per-field override (price / acquired_from only)
 //   2. the owner's per-field default (field_defaults)
 //   3. SystemDefault
+//
+// 'acquired_at' and 'catalog_number' have no per-specimen
+// override column, so step 1 is skipped for them and the chain
+// starts at the user-default layer.
 //
 // Passing 'images' here is a programmer error — image
 // resolution requires the photo-level override and the
@@ -145,6 +152,11 @@ function specimenScalarOverride(
       return specimen.visibility_price;
     case 'acquired_from':
       return specimen.visibility_acquired_from;
+    case 'acquired_at':
+    case 'catalog_number':
+      // No per-specimen override column (mi-z3d0); chain starts
+      // at the user-default layer.
+      return null;
     case 'images':
       // Programmer error guard — matches the Go helper's
       // defensive fall-through.
@@ -162,6 +174,10 @@ function ownerDefault(field: Field, owner: OwnerLike): Visibility | null | undef
       return fd.price;
     case 'acquired_from':
       return fd.acquired_from;
+    case 'acquired_at':
+      return fd.acquired_at;
+    case 'catalog_number':
+      return fd.catalog_number;
     case 'images':
       return fd.images;
   }

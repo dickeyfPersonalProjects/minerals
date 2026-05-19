@@ -5,7 +5,7 @@
   import type { components } from '../lib/api/schema';
 
   type Visibility = 'private' | 'unlisted' | 'public';
-  type FieldKey = 'price' | 'acquired_from' | 'images';
+  type FieldKey = 'price' | 'acquired_at' | 'acquired_from' | 'catalog_number' | 'images';
   type FieldDefaults = components['schemas']['FieldDefaultsView'];
 
   // Sentinel for the "no user default" selection. The select's
@@ -14,10 +14,42 @@
   // literal makes the unset state unambiguous.
   const UNSET = '__unset__';
 
-  const FIELDS: { key: FieldKey; label: string }[] = [
-    { key: 'price', label: 'Price' },
-    { key: 'acquired_from', label: 'Acquired from' },
-    { key: 'images', label: 'Images' },
+  // Display order matches the acceptance criteria on mi-z3d0:
+  // Price, Acquired date, Acquired from, Catalog number, Images.
+  // Helper text describes the field the dropdown governs in
+  // privacy-policy terms; the legend + lede already explain the
+  // overall behavior so each row stays a single sentence.
+  const FIELDS: { key: FieldKey; label: string; description: string }[] = [
+    {
+      key: 'price',
+      label: 'Price',
+      description:
+        'Asking price or purchase price (price_cents). Controls who sees the monetary value on the specimen.',
+    },
+    {
+      key: 'acquired_at',
+      label: 'Acquired date',
+      description:
+        'When you acquired the specimen (acquired_at). Controls who sees the acquisition date.',
+    },
+    {
+      key: 'acquired_from',
+      label: 'Acquired from',
+      description:
+        'Where the specimen came from — dealer, show, collector, etc. (acquired_from). Controls who sees the source.',
+    },
+    {
+      key: 'catalog_number',
+      label: 'Catalog number',
+      description:
+        'Your private catalog identifier (catalog_number). Controls who sees the catalog number on the specimen.',
+    },
+    {
+      key: 'images',
+      label: 'Images',
+      description:
+        'Photos attached to the specimen. Controls who sees photos that do not carry their own per-photo visibility setting.',
+    },
   ];
 
   type SelectValue = Visibility | typeof UNSET;
@@ -30,12 +62,16 @@
   // means "no change" so nothing is sent for that key.
   let initial: Record<FieldKey, SelectValue> = $state({
     price: UNSET,
+    acquired_at: UNSET,
     acquired_from: UNSET,
+    catalog_number: UNSET,
     images: UNSET,
   });
   let current: Record<FieldKey, SelectValue> = $state({
     price: UNSET,
+    acquired_at: UNSET,
     acquired_from: UNSET,
+    catalog_number: UNSET,
     images: UNSET,
   });
 
@@ -101,7 +137,7 @@
   }
 </script>
 
-<section class="mx-auto max-w-xl py-12" data-testid="settings">
+<section class="mx-auto max-w-3xl py-12" data-testid="settings">
   <header class="mb-6">
     <h1 class="text-2xl font-semibold tracking-tight text-[var(--color-text)]">Settings</h1>
   </header>
@@ -110,8 +146,9 @@
     <fieldset class="space-y-4" disabled={loading || saving}>
       <legend class="text-lg font-medium text-[var(--color-text)]">Field defaults</legend>
       <p class="text-sm text-[var(--color-text-muted)]">
-        These defaults apply to new specimens you create unless you override per specimen. They
-        never make existing data more visible — only an explicit per-specimen setting does.
+        These defaults apply to all your specimens — both existing and new — whenever a specimen
+        doesn't have its own per-field setting. To override for a specific specimen, set the field's
+        visibility on that specimen's edit page.
       </p>
 
       {#if loadError}
@@ -124,29 +161,40 @@
         </p>
       {/if}
 
-      <div class="grid gap-4 sm:grid-cols-3">
-        {#each FIELDS as { key, label } (key)}
-          <div>
-            <label
-              for={`settings-default-${key}`}
-              class="mb-1 block text-sm font-medium text-[var(--color-text)]"
-            >
-              {label}
-            </label>
-            <select
-              id={`settings-default-${key}`}
-              data-testid={`settings-default-${key}`}
-              bind:value={current[key]}
-              class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
-            >
-              <option value={UNSET}>System default (owner-only)</option>
-              <option value="private">Private</option>
-              <option value="unlisted">Unlisted</option>
-              <option value="public">Public</option>
-            </select>
-          </div>
+      <ul
+        class="divide-y divide-[var(--color-border)] border-t border-b border-[var(--color-border)]"
+        data-testid="settings-field-defaults-list"
+      >
+        {#each FIELDS as { key, label, description } (key)}
+          <li
+            class="grid grid-cols-1 gap-2 py-3 sm:grid-cols-[14rem_1fr] sm:items-start sm:gap-4"
+            data-testid={`settings-field-defaults-row-${key}`}
+          >
+            <div>
+              <label
+                for={`settings-default-${key}`}
+                class="mb-1 block text-sm font-medium text-[var(--color-text)]"
+              >
+                {label}
+              </label>
+              <select
+                id={`settings-default-${key}`}
+                data-testid={`settings-default-${key}`}
+                bind:value={current[key]}
+                class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+              >
+                <option value={UNSET}>System default (owner-only)</option>
+                <option value="private">Private</option>
+                <option value="unlisted">Unlisted</option>
+                <option value="public">Public</option>
+              </select>
+            </div>
+            <p class="text-sm text-[var(--color-text-muted)] sm:pt-7">
+              {description}
+            </p>
+          </li>
         {/each}
-      </div>
+      </ul>
     </fieldset>
 
     <button

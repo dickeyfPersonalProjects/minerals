@@ -411,6 +411,18 @@
 
   function fmtDate(iso: string | null | undefined): string {
     if (!iso) return '';
+    // RFC 3339 full-date ("YYYY-MM-DD") must render as the literal
+    // calendar day — `new Date("2024-01-02")` parses as UTC midnight,
+    // which shifts back a day under negative UTC offsets. Parse as a
+    // local-time date instead so the user-facing label always matches
+    // the wire value. RFC 3339 date-time strings still flow through
+    // formatLocal unchanged (type_data still uses date-time for
+    // fall_or_find_date).
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    if (m) {
+      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(d);
+    }
     try {
       return formatLocal(iso, { dateStyle: 'medium' });
     } catch {

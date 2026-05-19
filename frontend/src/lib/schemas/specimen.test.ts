@@ -31,12 +31,10 @@ function mineralView(overrides: Partial<SpecimenView> = {}): SpecimenView {
     type: 'mineral',
     visibility: 'private',
     description: '',
-    catalog_number: null,
-    acquired_at: null,
-    // acquired_from / price_cents are now optional in the response
-    // shape (mi-fo8 / mi-9ww — per-field visibility redaction omits
-    // the key entirely when the viewer can't see it). The fixture
-    // can still set them via overrides.
+    // catalog_number / acquired_at / acquired_from / price_cents are
+    // optional in the response shape (mi-fo8 / mi-9ww / mi-z3d0 —
+    // per-field visibility redaction omits the key entirely when the
+    // viewer can't see it). The fixture can still set them via overrides.
     source_notes: null,
     locality_text: null,
     mass_g: null,
@@ -159,13 +157,15 @@ describe('formToCreateBody', () => {
     expect(body).not.toHaveProperty('mass_g');
   });
 
-  it('converts acquired_at YYYY-MM-DD to RFC3339 with midday UTC', () => {
+  it('sends acquired_at as an RFC 3339 full-date (mi-s2ma)', () => {
+    // mi-s2ma flipped acquired_at to `format: date`; the wire shape
+    // is now the bare YYYY-MM-DD calendar value, not a date-time.
     const v: SpecimenFormValues = {
       ...emptyFormValues('mineral'),
       name: 'X',
       acquired_at: '2024-06-15',
     };
-    expect(formToCreateBody(v).acquired_at).toBe('2024-06-15T12:00:00Z');
+    expect(formToCreateBody(v).acquired_at).toBe('2024-06-15');
   });
 
   it('omits acquired_at when the date input is empty', () => {
@@ -599,8 +599,8 @@ describe('specimenToFormValues', () => {
     expect(v.acquired_at).toBe('2024-06-15');
   });
 
-  it('returns empty acquired_at when null', () => {
-    expect(specimenToFormValues(mineralView({ acquired_at: null })).acquired_at).toBe('');
+  it('returns empty acquired_at when absent', () => {
+    expect(specimenToFormValues(mineralView({ acquired_at: undefined })).acquired_at).toBe('');
   });
 
   it('coerces nullable common fields to empty strings', () => {
@@ -732,7 +732,7 @@ describe('round-trip: specimenToFormValues ∘ formToCreateBody', () => {
       catalog_number: 'C-9',
       description: 'sample',
       visibility: 'public',
-      acquired_at: '2024-06-15T12:00:00Z',
+      acquired_at: '2024-06-15',
       acquired_from: 'Alice',
       price_cents: 4200,
       source_notes: 'notes',
