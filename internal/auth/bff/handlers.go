@@ -77,6 +77,17 @@ type HandlerConfig struct {
 	// callers pass the same value as Cookie.Secure.
 	StateCookieSecure bool
 
+	// RegistrationEnabled gates the GET /auth/register handler.
+	// When false the route returns 404 (the SPA still renders the
+	// Register link — clicking it surfaces the 404 the same way
+	// /auth/login with no OIDC configured would). Operators flip
+	// this off in deployments where self-registration is undesired
+	// (e.g. invite-only realms) without needing a code change.
+	// Default: true (Keycloak realms ship with registration_allowed
+	// = false anyway, so the realm-level switch is the meaningful
+	// gate; this field is the application's belt-and-braces).
+	RegistrationEnabled bool
+
 	// EnforceCSRFOnLogout gates the logout-handler CSRF check. The
 	// generic CSRF middleware lands in mi-gbzs (#5); until that
 	// ships and the SPA (mi-3vc4) wires the X-CSRF-Token header,
@@ -165,6 +176,7 @@ func NewHandlers(cfg HandlerConfig, deps HandlerDeps) (*Handlers, error) {
 // (which is scoped to /api/v1).
 func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/login", h.Login)
+	mux.HandleFunc("GET /auth/register", h.Register)
 	mux.HandleFunc("GET /auth/callback", h.Callback)
 	mux.HandleFunc("POST /auth/logout", h.Logout)
 }
@@ -199,6 +211,48 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	SetStateCookie(w, signed, h.cfg.StateCookieSecure)
 
 	http.Redirect(w, r, h.deps.OAuth.AuthCodeURL(state, h.cfg.RedirectURI), http.StatusFound)
+}
+
+// Register starts the OAuth code flow against Keycloak's
+// self-registration endpoint instead of the login endpoint. The
+// state-cookie, return_to validation and callback path are
+// identical to Login — the only difference is which Keycloak URL
+// the browser lands on. After the user submits the registration
+// form (and any realm-required email verification completes)
+// Keycloak issues an authorization code and the /auth/callback
+// handler creates the session, indistinguishable from a login.
+//
+// When the deployment sets RegistrationEnabled=false the route
+// returns 404 so an inadvertent click can't escape the operator's
+// no-self-signup policy. The frontend Register link is still
+// rendered — the 404 is the authoritative gate.
+func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
+	if !h.cfg.RegistrationEnabled {
+		http.NotFound(w, r)
+		return
+	}
+
+	returnTo := validateReturnTo(r.URL.Query().Get("return_to"))
+
+	state, err := NewStateToken()
+	if err != nil {
+		slog.ErrorContext(r.Context(), "auth.register: state token", "err", err)
+		writeAuthError(w, http.StatusInternalServerError, "internal_error", "register init failed")
+		return
+	}
+	signed, err := SignState(h.cfg.StateHMACKey, StateData{
+		State:    state,
+		ReturnTo: returnTo,
+		Expires:  h.now().Add(StateTTL),
+	})
+	if err != nil {
+		slog.ErrorContext(r.Context(), "auth.register: sign state", "err", err)
+		writeAuthError(w, http.StatusInternalServerError, "internal_error", "register init failed")
+		return
+	}
+	SetStateCookie(w, signed, h.cfg.StateCookieSecure)
+
+	http.Redirect(w, r, h.deps.OAuth.RegisterURL(state, h.cfg.RedirectURI), http.StatusFound)
 }
 
 // Callback completes the OAuth code flow. Validates the state

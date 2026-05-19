@@ -576,6 +576,15 @@ func (s *stubOAuthClient) AuthCodeURL(state, redirectURI string) string {
 	return "http://keycloak.test/realms/stub/protocol/openid-connect/auth?" + v.Encode()
 }
 
+func (s *stubOAuthClient) RegisterURL(state, redirectURI string) string {
+	v := url.Values{}
+	v.Set("state", state)
+	v.Set("redirect_uri", redirectURI)
+	v.Set("client_id", "stub")
+	v.Set("response_type", "code")
+	return "http://keycloak.test/realms/stub/protocol/openid-connect/registrations?" + v.Encode()
+}
+
 func (s *stubOAuthClient) Exchange(_ context.Context, code, _ string) (bff.Tokens, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -392,6 +392,7 @@ func buildBFFAuth(
 				MaxAge:   time.Duration(cfg.CookieMaxAgeSeconds) * time.Second,
 			},
 			StateCookieSecure:   cfg.CookieSecure,
+			RegistrationEnabled: cfg.RegistrationEnabled,
 			EnforceCSRFOnLogout: cfg.BFFEnforceCSRFOnLogout,
 			TrustForwardedFor:   cfg.TrustForwardedFor,
 		},
@@ -407,6 +408,7 @@ func buildBFFAuth(
 	slog.Info("bff auth: enabled",
 		"redirect_uri", cfg.PublicOIDCRedirectURI,
 		"enforce_csrf_on_logout", cfg.BFFEnforceCSRFOnLogout,
+		"registration_enabled", cfg.RegistrationEnabled,
 		"session_absolute_max_hours", cfg.SessionAbsoluteExpiresHours,
 		"session_idle_timeout_minutes", cfg.SessionIdleTimeoutMinutes)
 	return handlers, oauthClient, sessions, nil

@@ -15,7 +15,7 @@ setting" — updating this inventory is the first and mandatory step.
 > canonical reference. The BFF-related settings below
 > (`OIDC_CLIENT_SECRET`, `OAUTH_STATE_HMAC_KEY`, `COOKIE_*`,
 > `SESSION_*`, `BFF_ENFORCE_CSRF_LOGOUT`, `POST_LOGOUT_REDIRECT_URI`,
-> `TRUST_FORWARDED_FOR`) are the operator surface of that design.
+> `TRUST_FORWARDED_FOR`, `REGISTRATION_ENABLED`) are the operator surface of that design.
 > `PUBLIC_OIDC_*` settings are gone — the SPA never speaks OAuth, so
 > nothing reaches the browser.
 
@@ -48,6 +48,7 @@ setting" — updating this inventory is the first and mandatory step.
 | `SESSION_IDLE_TIMEOUT_MINUTES` | env | `1440` (24 hours) | no | Gap since `last_used_at` after which the session middleware revokes the session. Implements the design's idle-timeout knob (docs/design/auth-bff.md §sessions-table §four-expiration-concepts). Must be > 0 when BFF auth is enabled. | `internal/config/config.go` |
 | `POST_LOGOUT_REDIRECT_URI` | env | _(unset)_ | no | Absolute URL the BFF asks Keycloak to bounce the browser back to after the SSO logout completes. MUST be on Keycloak's `post_logout_redirect_uris` allowlist. Empty disables the 302-to-Keycloak step (handler returns 204 after revoking the local session). | `internal/config/config.go` |
 | `BFF_ENFORCE_CSRF_LOGOUT` | env | `false` | no | Gates the `/auth/logout` handler's CSRF-token check (mi-bm5b). Belt-and-suspenders with the generic CSRF middleware (mi-gbzs) — production should flip this true so logout fails closed even if the middleware is mis-mounted. | `internal/config/config.go` |
+| `REGISTRATION_ENABLED` | env | `true` | no | Application-level switch for Keycloak self-signup (mi-eb3b). True wires `GET /auth/register` and the SPA's Register link reaches Keycloak's registration form; false makes the route return 404 so an inadvertent click stays inside the operator's no-signup policy. The Keycloak realm's `registration_allowed` flag is the IdP-side gate — this knob lets the application say no without a realm change. | `internal/config/config.go` |
 | `TRUST_FORWARDED_FOR` | env | `false` | no | Enables `X-Forwarded-For`-based client-IP extraction in the BFF callback (used for the `auth.sessions.ip` forensics column). True only when the ingress strips/normalises the header so a hostile client cannot spoof the value. | `internal/config/config.go` |
 
 `Kind` legend: `env` = process environment variable. New kinds
