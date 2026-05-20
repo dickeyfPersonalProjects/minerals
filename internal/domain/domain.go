@@ -112,6 +112,13 @@ type SpecimenFilter struct {
 	HasCatalogNumber *bool
 	AcquiredAfter    *time.Time
 	AcquiredBefore   *time.Time
+	// OwnerID restricts the list to a single author (the "browse my
+	// collection" view, mi-xue7). When set, only rows with
+	// author_id = OwnerID are returned. Owner-scoped listing surfaces
+	// all visibilities of the owner's rows because the layer-1 scope
+	// filter (specimenListScope) already permits a caller's own rows
+	// regardless of visibility.
+	OwnerID *uuid.UUID
 }
 
 // Locality is the structured side of specimens.locality. All fields

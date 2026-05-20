@@ -25,6 +25,9 @@ export const routes: RouteDefinition = {
   '/profile/setup': ProfileSetup,
   '/settings': Settings,
   '/specimens': Specimens,
+  // "Browse my collection" (mi-xue7): same component, owner-scoped via
+  // the route path (Specimens.svelte derives scope=mine from /collection).
+  '/collection': Specimens,
   '/specimens/new': SpecimenNew,
   // Static routes must precede the `:id` capture (svelte-spa-router
   // matches in declaration order; otherwise `/specimens/qr` resolves

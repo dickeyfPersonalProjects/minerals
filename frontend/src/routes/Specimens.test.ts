@@ -24,7 +24,7 @@ vi.mock('svelte-spa-router', async () => {
 });
 
 import Specimens from './Specimens.svelte';
-import { __authenticate, __resetAuthStore } from '../lib/auth';
+import { __authenticate, __resetAuthStore, __setAuthUser } from '../lib/auth';
 
 type SpecimenSeed = {
   id: string;
@@ -343,6 +343,79 @@ describe('Specimens route', () => {
       expect(screen.queryByTestId('new-specimen')).not.toBeInTheDocument();
       // Cards must not surface the QR-sheet add CTA either.
       expect(screen.queryByTestId('qr-sheet-add')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('browse my collection (mi-xue7)', () => {
+    function gotoCollection() {
+      window.location.hash = '#/collection';
+      window.dispatchEvent(new Event('hashchange'));
+    }
+
+    it('passes scope=mine to the API on /collection', async () => {
+      gotoCollection();
+      __authenticate();
+      const calls: Array<{ path: string; query?: Record<string, string> }> = [];
+      mockGet.mockImplementation(async (path: string, opts: unknown) => {
+        const o = opts as { params?: { query?: Record<string, string> } };
+        calls.push({ path, query: o.params?.query });
+        return {
+          data: { items: [], next_cursor: null },
+          error: undefined,
+          response: new Response(),
+        };
+      });
+
+      render(Specimens);
+
+      await waitFor(() => {
+        expect(calls.find((c) => c.path === '/api/v1/specimens')).toBeDefined();
+      });
+      const call = calls.find((c) => c.path === '/api/v1/specimens')!;
+      expect(call.query).toEqual({ scope: 'mine' });
+      // Header reflects the owner-scoped view.
+      expect(screen.getByTestId('list-title')).toHaveTextContent('My collection');
+    });
+
+    it('keeps filter changes on /collection (not /specimens)', async () => {
+      gotoCollection();
+      __authenticate();
+      mockGet.mockImplementation(async () => ({
+        data: { items: [], next_cursor: null },
+        error: undefined,
+        response: new Response(),
+      }));
+
+      render(Specimens);
+
+      await waitFor(() => expect(screen.getByTestId('empty')).toBeInTheDocument());
+      await fireEvent.click(screen.getByTestId('filter-toggle'));
+      await fireEvent.click(screen.getByTestId('filter-type-mineral'));
+
+      expect(mockReplace).toHaveBeenCalledWith('/collection?type=mineral');
+    });
+
+    it('shows a login prompt and does not fetch when anonymous', async () => {
+      gotoCollection();
+      // Probe resolved to no user.
+      __setAuthUser(null);
+      mockGet.mockImplementation(async () => ({
+        data: { items: [], next_cursor: null },
+        error: undefined,
+        response: new Response(),
+      }));
+
+      render(Specimens);
+
+      await waitFor(() =>
+        expect(screen.getByTestId('collection-login-prompt')).toBeInTheDocument(),
+      );
+      expect(screen.getByTestId('collection-login-link')).toHaveAttribute(
+        'href',
+        expect.stringContaining('/auth/login'),
+      );
+      // The list endpoint must not be hit for an anonymous collection view.
+      expect(mockGet).not.toHaveBeenCalledWith('/api/v1/specimens', expect.anything());
     });
   });
 });
