@@ -178,7 +178,7 @@ lives in [`secrets.md`](./secrets.md).
 
 **Keycloak is required for login to work in any env.** The OIDC env
 vars above are not optional decorations — without a working Keycloak
-realm, the `OIDC_*` / `PUBLIC_OIDC_REDIRECT_URI` ConfigMap keys, AND
+realm, the `OIDC_*` / `OIDC_REDIRECT_URI` ConfigMap keys, AND
 the `minerals-oidc-secret` SealedSecret, users cannot sign in.
 
 V2 uses a backend-for-frontend (BFF) design — see
@@ -206,7 +206,7 @@ Follow [`keycloak.md`](./keycloak.md) for the full setup:
 ### Failure mode if OIDC vars or the secret are unset
 
 If `OIDC_CLIENT_SECRET`, `OAUTH_STATE_HMAC_KEY`, or
-`PUBLIC_OIDC_REDIRECT_URI` is missing, the backend still starts
+`OIDC_REDIRECT_URI` is missing, the backend still starts
 (BFF auth is feature-gated — the app degrades rather than crashes),
 but:
 
@@ -218,8 +218,16 @@ but:
 
 If you deploy a new env and see a 404 at `/auth/login`, the BFF env
 vars are the first thing to check: the boot log emits
-`bff auth: disabled (missing OIDC_CLIENT_SECRET / OAUTH_STATE_HMAC_KEY / PUBLIC_OIDC_REDIRECT_URI)`
+`bff auth: disabled (missing OIDC_CLIENT_SECRET / OAUTH_STATE_HMAC_KEY / OIDC_REDIRECT_URI)`
 with a per-field present/absent breakdown.
+
+The **half-configured** case is called out separately and loudly: if
+`OIDC_CLIENT_SECRET` and `OAUTH_STATE_HMAC_KEY` are present but
+`OIDC_REDIRECT_URI` is unset, the boot log emits an `ERROR`
+(`...OIDC_REDIRECT_URI is unset — login will NOT work...`). That state
+is almost always an operator mistake — e.g. a ConfigMap that lost the
+key during the `PUBLIC_OIDC_REDIRECT_URI` → `OIDC_REDIRECT_URI` rename
+— rather than an intentional disable.
 
 ---
 
@@ -287,7 +295,7 @@ Only these things vary between staging and prod in the example:
 | `images[0].newTag`             | `staging`                            | `prod`                            |
 | ConfigMap `ENV` patch value    | `staging`                            | `prod`                            |
 | `OIDC_ISSUER_URL`              | `https://auth.staging.example.com/realms/minerals` | `https://auth.example.com/realms/minerals` |
-| `PUBLIC_OIDC_REDIRECT_URI`     | `https://www.staging.example.com/auth/callback` | `https://www.example.com/auth/callback` |
+| `OIDC_REDIRECT_URI`            | `https://www.staging.example.com/auth/callback` | `https://www.example.com/auth/callback` |
 | SealedSecret ciphertext        | encrypted to `mineral-staging` scope | encrypted to `mineral-prod` scope |
 
 Everything else is identical on purpose. Symmetric overlays make
@@ -439,7 +447,7 @@ bot an exemption or switch to a PAT in the workflow's checkout step.
    on the new hostname.
 5. Edit the OIDC ConfigMap patch in the new overlay's `mineral.yaml`
    to point `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and
-   `PUBLIC_OIDC_REDIRECT_URI` at this env's Keycloak realm and SPA
+   `OIDC_REDIRECT_URI` at this env's Keycloak realm and SPA
    hostname. Skipping this step leaves login silently broken — see
    [Authentication setup](#authentication-setup).
 6. Add the new directory to the parent `kustomization.yaml`.

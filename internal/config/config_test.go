@@ -41,27 +41,72 @@ func TestLoad_DevDefaults(t *testing.T) {
 	}
 }
 
-func TestLoad_PublicOIDCRedirectURI(t *testing.T) {
+func TestLoad_OIDCRedirectURI(t *testing.T) {
 	t.Parallel()
 	cfg, err := loadFrom(envFunc(map[string]string{
-		"PUBLIC_OIDC_REDIRECT_URI": "https://www.example.com/auth/callback",
+		"OIDC_REDIRECT_URI": "https://www.example.com/auth/callback",
 	}))
 	if err != nil {
 		t.Fatalf("loadFrom: %v", err)
 	}
-	if got := cfg.PublicOIDCRedirectURI; got != "https://www.example.com/auth/callback" {
-		t.Errorf("PublicOIDCRedirectURI = %q", got)
+	if got := cfg.OIDCRedirectURI; got != "https://www.example.com/auth/callback" {
+		t.Errorf("OIDCRedirectURI = %q", got)
+	}
+	if cfg.OIDCRedirectURIFromLegacyEnv {
+		t.Error("OIDCRedirectURIFromLegacyEnv = true, want false when OIDC_REDIRECT_URI is set")
 	}
 }
 
-func TestLoad_PublicOIDCRedirectURIEmptyByDefault(t *testing.T) {
+func TestLoad_OIDCRedirectURIEmptyByDefault(t *testing.T) {
 	t.Parallel()
 	cfg, err := loadFrom(envFunc(nil))
 	if err != nil {
 		t.Fatalf("loadFrom: %v", err)
 	}
-	if cfg.PublicOIDCRedirectURI != "" {
-		t.Errorf("PublicOIDCRedirectURI default = %q, want empty", cfg.PublicOIDCRedirectURI)
+	if cfg.OIDCRedirectURI != "" {
+		t.Errorf("OIDCRedirectURI default = %q, want empty", cfg.OIDCRedirectURI)
+	}
+	if cfg.OIDCRedirectURIFromLegacyEnv {
+		t.Error("OIDCRedirectURIFromLegacyEnv = true, want false when unset")
+	}
+}
+
+// TestLoad_OIDCRedirectURILegacyFallback covers the migration-window
+// fallback: when only the deprecated PUBLIC_OIDC_REDIRECT_URI is set,
+// the value is still read and the legacy-env flag is raised so the
+// boot path can warn (mi-kebf).
+func TestLoad_OIDCRedirectURILegacyFallback(t *testing.T) {
+	t.Parallel()
+	cfg, err := loadFrom(envFunc(map[string]string{
+		"PUBLIC_OIDC_REDIRECT_URI": "https://legacy.example.com/auth/callback",
+	}))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if got := cfg.OIDCRedirectURI; got != "https://legacy.example.com/auth/callback" {
+		t.Errorf("OIDCRedirectURI = %q, want legacy fallback value", got)
+	}
+	if !cfg.OIDCRedirectURIFromLegacyEnv {
+		t.Error("OIDCRedirectURIFromLegacyEnv = false, want true when only the legacy var is set")
+	}
+}
+
+// TestLoad_OIDCRedirectURICanonicalWins ensures the new name takes
+// precedence when both are present and the legacy flag stays off.
+func TestLoad_OIDCRedirectURICanonicalWins(t *testing.T) {
+	t.Parallel()
+	cfg, err := loadFrom(envFunc(map[string]string{
+		"OIDC_REDIRECT_URI":        "https://new.example.com/auth/callback",
+		"PUBLIC_OIDC_REDIRECT_URI": "https://legacy.example.com/auth/callback",
+	}))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if got := cfg.OIDCRedirectURI; got != "https://new.example.com/auth/callback" {
+		t.Errorf("OIDCRedirectURI = %q, want canonical value", got)
+	}
+	if cfg.OIDCRedirectURIFromLegacyEnv {
+		t.Error("OIDCRedirectURIFromLegacyEnv = true, want false when OIDC_REDIRECT_URI is set")
 	}
 }
 

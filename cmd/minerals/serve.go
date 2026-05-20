@@ -330,7 +330,7 @@ func configureLogger(level string) {
 
 // buildBFFAuth assembles the V2 cookie-auth handler bundle when the
 // deployment supplies all of OIDC_CLIENT_SECRET, OAUTH_STATE_HMAC_KEY,
-// and PUBLIC_OIDC_REDIRECT_URI. Missing any one returns (nil, nil)
+// and OIDC_REDIRECT_URI. Missing any one returns (nil, nil)
 // — the BFF routes stay unregistered and the legacy PKCE path keeps
 // working. This lets the migration roll out one environment at a
 // time without forking the binary (per docs/design/auth-bff.md).
@@ -343,11 +343,23 @@ func configureLogger(level string) {
 func buildBFFAuth(
 	ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, users domain.UserRepo,
 ) (*bff.Handlers, bff.OAuthClient, bff.SessionResolver, error) {
-	if cfg.OIDCClientSecret == "" || cfg.OAuthStateHMACKey == "" || cfg.PublicOIDCRedirectURI == "" {
-		slog.Info("bff auth: disabled (missing OIDC_CLIENT_SECRET / OAUTH_STATE_HMAC_KEY / PUBLIC_OIDC_REDIRECT_URI)",
-			"client_secret_present", cfg.OIDCClientSecret != "",
-			"hmac_key_present", cfg.OAuthStateHMACKey != "",
-			"redirect_uri_present", cfg.PublicOIDCRedirectURI != "")
+	if cfg.OIDCRedirectURIFromLegacyEnv {
+		slog.Warn("config: PUBLIC_OIDC_REDIRECT_URI is deprecated — rename it to OIDC_REDIRECT_URI (backend-consumed, not SPA-facing); the legacy name will stop being read in a future release",
+			"redirect_uri", cfg.OIDCRedirectURI)
+	}
+	if cfg.OIDCClientSecret == "" || cfg.OAuthStateHMACKey == "" || cfg.OIDCRedirectURI == "" {
+		// The half-configured state (client_secret + hmac present but
+		// redirect missing) is almost always an operator mistake — a
+		// ConfigMap that lost OIDC_REDIRECT_URI — not an intentional
+		// disable. Make it LOUD (mi-kebf).
+		if cfg.OIDCClientSecret != "" && cfg.OAuthStateHMACKey != "" && cfg.OIDCRedirectURI == "" {
+			slog.Error("bff auth: OIDC_CLIENT_SECRET + OAUTH_STATE_HMAC_KEY are set but OIDC_REDIRECT_URI is unset — login will NOT work. Set OIDC_REDIRECT_URI=https://<app-host>/auth/callback")
+		} else {
+			slog.Info("bff auth: disabled (missing OIDC_CLIENT_SECRET / OAUTH_STATE_HMAC_KEY / OIDC_REDIRECT_URI)",
+				"client_secret_present", cfg.OIDCClientSecret != "",
+				"hmac_key_present", cfg.OAuthStateHMACKey != "",
+				"redirect_uri_present", cfg.OIDCRedirectURI != "")
+		}
 		return nil, nil, nil, nil
 	}
 	if cfg.SessionAbsoluteExpiresHours <= 0 {
@@ -381,7 +393,7 @@ func buildBFFAuth(
 
 	handlers, err := bff.NewHandlers(
 		bff.HandlerConfig{
-			RedirectURI:           cfg.PublicOIDCRedirectURI,
+			RedirectURI:           cfg.OIDCRedirectURI,
 			PostLogoutRedirectURI: cfg.PostLogoutRedirectURI,
 			StateHMACKey:          []byte(cfg.OAuthStateHMACKey),
 			SessionAbsoluteMax:    time.Duration(cfg.SessionAbsoluteExpiresHours) * time.Hour,
@@ -406,7 +418,7 @@ func buildBFFAuth(
 		return nil, nil, nil, fmt.Errorf("handlers: %w", err)
 	}
 	slog.Info("bff auth: enabled",
-		"redirect_uri", cfg.PublicOIDCRedirectURI,
+		"redirect_uri", cfg.OIDCRedirectURI,
 		"enforce_csrf_on_logout", cfg.BFFEnforceCSRFOnLogout,
 		"registration_enabled", cfg.RegistrationEnabled,
 		"session_absolute_max_hours", cfg.SessionAbsoluteExpiresHours,

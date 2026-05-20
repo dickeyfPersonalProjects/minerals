@@ -38,12 +38,20 @@ type Config struct {
 	// DB-only mineral-species lookups.
 	MindatAPIKey string
 
-	// PublicOIDCRedirectURI is the absolute URL the BFF passes to
-	// Keycloak on /auth/login and reuses on /auth/callback's code
-	// exchange. Backend-consumed under V2 BFF; the `PUBLIC_` prefix is
-	// historical (see CONFIG.md) and retained for env-var-name
-	// stability across the migration.
-	PublicOIDCRedirectURI string
+	// OIDCRedirectURI is the absolute URL the BFF passes to Keycloak on
+	// /auth/login and reuses on /auth/callback's code exchange.
+	// Backend-consumed under V2 BFF — the SPA never sees it. Read from
+	// OIDC_REDIRECT_URI; for a transition window it falls back to the
+	// legacy PUBLIC_OIDC_REDIRECT_URI name with a deprecation warning
+	// (see CONFIG.md and mi-kebf — the misleading PUBLIC_ prefix caused
+	// a prod incident when an operator deleted it as SPA-only config).
+	OIDCRedirectURI string
+
+	// OIDCRedirectURIFromLegacyEnv is true when OIDCRedirectURI was
+	// sourced from the deprecated PUBLIC_OIDC_REDIRECT_URI env var
+	// rather than OIDC_REDIRECT_URI. The boot path logs a deprecation
+	// warning in that case (mi-kebf).
+	OIDCRedirectURIFromLegacyEnv bool
 
 	// OIDCIssuerURL and OIDCClientID configure backend-side JWT
 	// verification (mi-aw3a). The backend is a pure resource server:
@@ -208,7 +216,17 @@ func loadFrom(get func(string) string) (*Config, error) {
 	cfg.LogLevel = orDefault(get("LOG_LEVEL"), defaultLogLevel)
 	cfg.S3Region = orDefault(get("S3_REGION"), defaultS3Region)
 	cfg.MindatAPIKey = strings.TrimSpace(get("MINDAT_API_KEY"))
-	cfg.PublicOIDCRedirectURI = strings.TrimSpace(get("PUBLIC_OIDC_REDIRECT_URI"))
+	// OIDC_REDIRECT_URI is the canonical backend-only name (mi-kebf).
+	// For a migration window we still accept the legacy
+	// PUBLIC_OIDC_REDIRECT_URI when the new name is unset, flagging it
+	// so the boot log can emit a deprecation warning. A follow-up bead
+	// removes this fallback once both envs' ConfigMaps are migrated.
+	if v := strings.TrimSpace(get("OIDC_REDIRECT_URI")); v != "" {
+		cfg.OIDCRedirectURI = v
+	} else if v := strings.TrimSpace(get("PUBLIC_OIDC_REDIRECT_URI")); v != "" {
+		cfg.OIDCRedirectURI = v
+		cfg.OIDCRedirectURIFromLegacyEnv = true
+	}
 	cfg.OIDCIssuerURL = orDefault(get("OIDC_ISSUER_URL"), defaultOIDCIssuerURL)
 	cfg.OIDCClientID = orDefault(get("OIDC_CLIENT_ID"), defaultOIDCClientID)
 	cfg.OIDCJWKSURL = strings.TrimSpace(get("OIDC_JWKS_URL"))
