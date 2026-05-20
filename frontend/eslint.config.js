@@ -16,6 +16,11 @@ export default [
       globals: {
         ...globals.browser,
         ...globals.node,
+        // Compile-time deploy markers injected by Vite's `define`
+        // (mi-c0sv). Declared as readonly globals so no-undef recognises
+        // them; their TS types live in src/buildinfo.d.ts.
+        __GIT_SHA__: 'readonly',
+        __BUILD_DATE__: 'readonly',
       },
     },
   },

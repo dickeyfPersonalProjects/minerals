@@ -4,6 +4,14 @@ import { svelteTesting } from '@testing-library/svelte/vite';
 
 export default defineConfig({
   plugins: [svelte(), svelteTesting()],
+  // Mirror vite.config.ts's deploy-marker globals (mi-c0sv) so components
+  // that read __GIT_SHA__ / __BUILD_DATE__ (the footer) compile under
+  // vitest. vitest uses this config, not vite.config.ts, so the `define`
+  // must be repeated here. Tests get the 'dev' / build-time `now` defaults.
+  define: {
+    __GIT_SHA__: JSON.stringify(process.env.GIT_SHA ?? 'dev'),
+    __BUILD_DATE__: JSON.stringify(process.env.BUILD_DATE ?? new Date().toISOString()),
+  },
   test: {
     environment: 'jsdom',
     globals: true,
