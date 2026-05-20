@@ -32,6 +32,7 @@ type SpecimenSeed = {
   type: 'mineral' | 'rock' | 'meteorite';
   visibility?: 'private' | 'unlisted' | 'public';
   locality_text?: string | null;
+  author_id?: string;
 };
 
 function specimen(seed: SpecimenSeed) {
@@ -43,7 +44,7 @@ function specimen(seed: SpecimenSeed) {
     locality_text: seed.locality_text ?? null,
     acquired_at: null,
     acquired_from: null,
-    author_id: '00000000-0000-0000-0000-000000000001',
+    author_id: seed.author_id ?? '00000000-0000-0000-0000-000000000001',
     catalog_number: null,
     created_at: '2026-05-01T12:00:00Z',
     updated_at: '2026-05-01T12:00:00Z',
@@ -343,6 +344,45 @@ describe('Specimens route', () => {
       expect(screen.queryByTestId('new-specimen')).not.toBeInTheDocument();
       // Cards must not surface the QR-sheet add CTA either.
       expect(screen.queryByTestId('qr-sheet-add')).not.toBeInTheDocument();
+      // …nor the inline visibility editor.
+      expect(screen.queryByTestId('visibility-select')).not.toBeInTheDocument();
     });
+  });
+
+  it('renders the inline visibility editor only on owned rows (mi-35hk)', async () => {
+    mockGet.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/specimens') {
+        return {
+          data: {
+            items: [
+              specimen({
+                id: '11111111-1111-1111-1111-111111111111',
+                name: 'My quartz',
+                type: 'mineral',
+                // owned by the authed user (default author_id)
+              }),
+              specimen({
+                id: '22222222-2222-2222-2222-222222222222',
+                name: "Someone else's basalt",
+                type: 'rock',
+                visibility: 'public',
+                author_id: '99999999-9999-9999-9999-999999999999',
+              }),
+            ],
+            next_cursor: null,
+          },
+          error: undefined,
+          response: new Response(),
+        };
+      }
+      return { data: { items: [], next_cursor: null }, error: undefined };
+    });
+
+    render(Specimens);
+
+    await waitFor(() => expect(screen.getByTestId('specimen-grid')).toBeInTheDocument());
+    // Exactly one editor — on the owned specimen, not the other user's.
+    const editors = screen.getAllByTestId('visibility-select');
+    expect(editors).toHaveLength(1);
   });
 });

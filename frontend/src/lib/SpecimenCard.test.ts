@@ -35,6 +35,7 @@ function specimen(
     type: 'mineral' | 'rock' | 'meteorite';
     visibility: 'private' | 'unlisted' | 'public';
     locality_text: string | null;
+    author_id: string;
   }> = {},
 ) {
   return {
@@ -47,7 +48,9 @@ function specimen(
     // optional in the response shape (mi-fo8 / mi-9ww / mi-z3d0 —
     // per-field visibility redaction omits the key when the viewer
     // can't see it). Tests that don't care about the value omit the key.
-    author_id: '00000000-0000-0000-0000-000000000001',
+    // author_id defaults to the id seeded by __authenticate() so the
+    // authed user owns the specimen unless a test overrides it.
+    author_id: overrides.author_id ?? '00000000-0000-0000-0000-000000000001',
     created_at: '2026-05-01T12:00:00Z',
     updated_at: '2026-05-01T12:00:00Z',
     description: '',
@@ -317,6 +320,90 @@ describe('SpecimenCard', () => {
       // anchor — nested interactive elements + bubble navigation
       // would otherwise trigger a route change every click.
       expect(link.contains(addBtn)).toBe(false);
+    });
+  });
+
+  describe('inline visibility editor (mi-35hk)', () => {
+    it('renders the editor on a specimen the current user owns', () => {
+      mockGet.mockResolvedValue(listOk([]));
+      render(SpecimenCard, { specimen: specimen({ visibility: 'unlisted' }) });
+      const select = screen.getByTestId('visibility-select') as HTMLSelectElement;
+      expect(select).toBeInTheDocument();
+      expect(select.value).toBe('unlisted');
+    });
+
+    it('hides the editor on a specimen owned by another user', () => {
+      mockGet.mockResolvedValue(listOk([]));
+      render(SpecimenCard, {
+        specimen: specimen({ author_id: '22222222-2222-2222-2222-222222222222' }),
+      });
+      expect(screen.queryByTestId('visibility-select')).not.toBeInTheDocument();
+    });
+
+    it('hides the editor for anonymous viewers', () => {
+      __resetAuthStore();
+      mockGet.mockResolvedValue(listOk([]));
+      render(SpecimenCard, { specimen: specimen() });
+      expect(screen.queryByTestId('visibility-select')).not.toBeInTheDocument();
+    });
+
+    it('changing the value PATCHes with the new visibility', async () => {
+      mockGet.mockResolvedValue(listOk([]));
+      mockPatch.mockResolvedValueOnce({
+        data: { visibility: 'public' },
+        error: undefined,
+        response: new Response(),
+      });
+      render(SpecimenCard, { specimen: specimen({ visibility: 'private' }) });
+      const select = screen.getByTestId('visibility-select') as HTMLSelectElement;
+      await fireEvent.change(select, { target: { value: 'public' } });
+      await waitFor(() =>
+        expect(mockPatch).toHaveBeenCalledWith('/api/v1/specimens/{id}', {
+          params: { path: { id: SPECIMEN_ID } },
+          body: { visibility: 'public' },
+        }),
+      );
+      // Optimistic: the chip reflects the new value immediately.
+      expect(screen.getByTestId('visibility-chip')).toHaveTextContent('public');
+    });
+
+    it('reverts the optimistic value when the PATCH fails', async () => {
+      mockGet.mockResolvedValue(listOk([]));
+      mockPatch.mockResolvedValueOnce({
+        data: undefined,
+        error: { error: { code: 'internal', message: 'boom' } },
+        response: new Response(null, { status: 500 }),
+      });
+      render(SpecimenCard, { specimen: specimen({ visibility: 'private' }) });
+      const select = screen.getByTestId('visibility-select') as HTMLSelectElement;
+      await fireEvent.change(select, { target: { value: 'public' } });
+      await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
+      // Rolled back to private → no chip (private is the hidden state).
+      await waitFor(() => {
+        expect(select.value).toBe('private');
+        expect(screen.queryByTestId('visibility-chip')).not.toBeInTheDocument();
+      });
+    });
+
+    it('notifies the parent on change and on revert', async () => {
+      mockGet.mockResolvedValue(listOk([]));
+      mockPatch.mockResolvedValueOnce({
+        data: undefined,
+        error: { error: { code: 'internal', message: 'boom' } },
+        response: new Response(null, { status: 500 }),
+      });
+      const onVisibilityChange = vi.fn();
+      render(SpecimenCard, {
+        specimen: specimen({ visibility: 'private' }),
+        onVisibilityChange,
+      });
+      await fireEvent.change(screen.getByTestId('visibility-select'), {
+        target: { value: 'unlisted' },
+      });
+      await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1));
+      // First the optimistic notification, then the revert.
+      expect(onVisibilityChange).toHaveBeenNthCalledWith(1, SPECIMEN_ID, 'unlisted');
+      expect(onVisibilityChange).toHaveBeenNthCalledWith(2, SPECIMEN_ID, 'private');
     });
   });
 

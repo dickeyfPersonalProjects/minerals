@@ -149,6 +149,15 @@
   }
 
   const hasFilters = $derived(activeFilterCount(filters) > 0);
+
+  // Keep the canonical list item in sync when a card's inline
+  // visibility editor changes a specimen (mi-35hk). We update the
+  // badge in place rather than dropping the row — even when a
+  // `visibility` filter is active — so the change isn't jarring; the
+  // filter re-applies server-side on the next fetch/reload.
+  function onVisibilityChange(id: string, visibility: Specimen['visibility']) {
+    items = items.map((s) => (s.id === id ? { ...s, visibility } : s));
+  }
 </script>
 
 <section>
@@ -229,7 +238,7 @@
     <ul class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="specimen-grid">
       {#each items as s (s.id)}
         <li class="contents">
-          <SpecimenCard specimen={s} />
+          <SpecimenCard specimen={s} {onVisibilityChange} />
         </li>
       {/each}
     </ul>

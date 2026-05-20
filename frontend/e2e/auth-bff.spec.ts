@@ -363,6 +363,77 @@ async function mintAccessToken(): Promise<string> {
   }
 }
 
+// Inline visibility editor on the specimens list (mi-35hk). As the
+// owner, flip a specimen's visibility from the list via the per-row
+// selector, reload, and assert the change persisted server-side. The
+// specimen is seeded private via the password-grant token (the BFF
+// login round-trip is covered above; re-clicking through create here
+// would blow the per-test budget); the visibility change itself goes
+// through the real SPA control + PATCH.
+test('owner changes a specimen visibility from the list and it persists across reload', async ({
+  page,
+  baseURL,
+}) => {
+  const token = await mintAccessToken();
+  const api = await playwrightRequest.newContext({
+    baseURL: baseURL ?? 'http://localhost:8080',
+    extraHTTPHeaders: { Authorization: `Bearer ${token}` },
+  });
+  let specimenId: string;
+  try {
+    await api.post('/api/v1/profile', { data: { display_name: 'Visibility List Owner' } });
+    const create = await api.post('/api/v1/specimens', {
+      data: {
+        type: 'mineral',
+        name: `List Visibility BFF ${Date.now()}`,
+        visibility: 'private',
+      },
+    });
+    if (!create.ok()) {
+      throw new Error(`seed specimen: ${create.status()} — ${await create.text()}`);
+    }
+    specimenId = ((await create.json()) as { id: string }).id;
+  } finally {
+    await api.dispose();
+  }
+
+  // Log in as the same user via the BFF flow so the browser holds the
+  // session cookie the PATCH will travel on.
+  await page.goto('/');
+  await page.getByTestId('login-button').click();
+  await page.waitForURL(/\/realms\/minerals\/protocol\/openid-connect\/auth/, {
+    timeout: 30_000,
+  });
+  await page.locator('#username').fill(TEST_USERNAME);
+  await page.locator('#password').fill(TEST_PASSWORD);
+  await page.locator('#kc-login').click();
+  await expect(page.getByTestId('profile-menu-button')).toBeVisible({ timeout: 30_000 });
+
+  // Find the owned card on the list and flip it to public via the
+  // inline selector. Scope the selector to this specimen's card so a
+  // crowded list (other seeded specimens) doesn't grab the wrong row.
+  await page.goto(`/#/specimens/${specimenId}`);
+  await expect(page.getByTestId('specimen-detail')).toBeVisible({ timeout: 15_000 });
+  await page.goto('/#/specimens');
+  const card = page
+    .getByTestId('specimen-card')
+    .filter({ has: page.locator(`a[href="/specimens/${specimenId}"]`) });
+  await expect(card).toBeVisible({ timeout: 15_000 });
+  await card.getByTestId('visibility-select').selectOption('public');
+
+  // Reload and re-read the row: the chip must show 'public', proving
+  // the PATCH persisted (not just an optimistic UI flip).
+  await expect(card.getByTestId('visibility-chip')).toHaveText(/public/i, { timeout: 15_000 });
+  await page.reload({ waitUntil: 'networkidle' });
+  const reloadedCard = page
+    .getByTestId('specimen-card')
+    .filter({ has: page.locator(`a[href="/specimens/${specimenId}"]`) });
+  await expect(reloadedCard.getByTestId('visibility-select')).toHaveValue('public', {
+    timeout: 15_000,
+  });
+  await expect(reloadedCard.getByTestId('visibility-chip')).toHaveText(/public/i);
+});
+
 // Fresh-user → /profile/setup redirect under the BFF flow (mi-8f44,
 // post-BFF re-test of mi-4p4 / port of the closed mi-cg3 orphan spec).
 //

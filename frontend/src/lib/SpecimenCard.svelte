@@ -11,15 +11,75 @@
     specimenOnSheet,
   } from './qrSheet';
   import TemplateSelector from './TemplateSelector.svelte';
-  import { isAuthenticated } from './auth';
+  import { authStore, isAuthenticated } from './auth';
   import type { QRTemplateID } from './qrTemplates';
+  import type { Visibility } from './api/visibility';
+  import { toastError, toastSuccess } from './toasts';
 
   type Specimen = components['schemas']['SpecimenView'];
 
   interface Props {
     specimen: Specimen;
+    /**
+     * Notifies the parent that this specimen's visibility changed so
+     * the canonical list item can be updated (keeps the badge and any
+     * `visibility` filter consistent across reloads). Optional — the
+     * card also tracks the change locally, so it works standalone.
+     */
+    onVisibilityChange?: (id: string, visibility: Visibility) => void;
   }
-  const { specimen }: Props = $props();
+  const { specimen, onVisibilityChange }: Props = $props();
+
+  // Inline visibility editor (mi-35hk). Render the control ONLY for
+  // specimens the current user owns — the list may surface other
+  // users' public/unlisted specimens, which must show a static badge,
+  // not an editor that would 403. The backend (Casbin, CONTRACT §13)
+  // is the real gate; this client check only avoids offering a
+  // control that would be rejected.
+  const isOwner = $derived($authStore.user !== null && $authStore.user.id === specimen.author_id);
+
+  // Optimistic visibility. `pendingVis` holds the in-flight value so
+  // the badge + selector reflect the change before the server round
+  // trip; revert to the prop on failure. We keep it on success too,
+  // so the card stays correct even when no parent callback updates
+  // the prop.
+  let pendingVis: Visibility | null = $state(null);
+  const displayVis = $derived<Visibility>(pendingVis ?? specimen.visibility);
+  let visBusy = $state(false);
+
+  function visError(
+    error: { error?: { code?: string; message?: string } } | undefined,
+    status: number,
+  ): string {
+    return error?.error?.message || error?.error?.code || `HTTP ${status}`;
+  }
+
+  async function onVisibilitySelect(next: Visibility): Promise<void> {
+    if (visBusy || next === displayVis) return;
+    const prev = displayVis;
+    visBusy = true;
+    pendingVis = next; // optimistic
+    onVisibilityChange?.(specimen.id, next);
+    try {
+      const { error, response } = await client.PATCH('/api/v1/specimens/{id}', {
+        params: { path: { id: specimen.id } },
+        body: { visibility: next },
+      });
+      if (error) {
+        pendingVis = prev === specimen.visibility ? null : prev; // revert
+        onVisibilityChange?.(specimen.id, prev);
+        toastError(visError(error, response.status));
+        return;
+      }
+      toastSuccess('Visibility updated');
+    } catch (err: unknown) {
+      pendingVis = prev === specimen.visibility ? null : prev;
+      onVisibilityChange?.(specimen.id, prev);
+      toastError(err instanceof Error ? err.message : String(err));
+    } finally {
+      visBusy = false;
+    }
+  }
 
   // Lazy-load the card thumbnail. Preference (mi-m8q): the
   // photo whose file_id matches specimen.main_image_id; fall back
@@ -198,10 +258,10 @@
           <path d="M3 19h18" stroke-linecap="round" />
         </svg>
       {/if}
-      {#if specimen.visibility !== 'private'}
+      {#if displayVis !== 'private'}
         <span
           class="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white"
-          data-testid="visibility-chip">{specimen.visibility}</span
+          data-testid="visibility-chip">{displayVis}</span
         >
       {/if}
     </div>
@@ -231,35 +291,62 @@
   </a>
 
   {#if $isAuthenticated}
-    <div class="flex items-center justify-end gap-1 px-3 pb-3 pt-1">
-      {#if onSheet}
-        <span
-          data-testid="qr-sheet-badge"
-          class="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
-        >
-          On QR sheet
-        </span>
-        <button
-          type="button"
-          onclick={onRemoveClick}
-          disabled={busy}
-          aria-label="Remove from QR sheet"
-          data-testid="qr-sheet-remove"
-          class="rounded-full px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          ✕
-        </button>
+    <div class="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
+      {#if isOwner}
+        <label class="flex items-center" data-testid="visibility-editor">
+          <span class="sr-only">Visibility</span>
+          <select
+            value={displayVis}
+            onchange={(e) => onVisibilitySelect(e.currentTarget.value as Visibility)}
+            disabled={visBusy}
+            data-testid="visibility-select"
+            title="Who can see this specimen"
+            aria-label="Specimen visibility"
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus:outline focus:outline-2 focus:outline-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <option value="public" title="Listed in browse/search; anyone can view.">Public</option>
+            <option value="unlisted" title="Not listed, but anyone with the direct link can view."
+              >Unlisted</option
+            >
+            <option
+              value="private"
+              title="Only you (and people you share with, when sharing ships).">Private</option
+            >
+          </select>
+        </label>
       {:else}
-        <button
-          type="button"
-          onclick={onAddClick}
-          disabled={busy}
-          data-testid="qr-sheet-add"
-          class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          + Add to QR code sheet
-        </button>
+        <span></span>
       {/if}
+      <div class="flex items-center gap-1">
+        {#if onSheet}
+          <span
+            data-testid="qr-sheet-badge"
+            class="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
+          >
+            On QR sheet
+          </span>
+          <button
+            type="button"
+            onclick={onRemoveClick}
+            disabled={busy}
+            aria-label="Remove from QR sheet"
+            data-testid="qr-sheet-remove"
+            class="rounded-full px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            ✕
+          </button>
+        {:else}
+          <button
+            type="button"
+            onclick={onAddClick}
+            disabled={busy}
+            data-testid="qr-sheet-add"
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            + Add to QR code sheet
+          </button>
+        {/if}
+      </div>
     </div>
   {/if}
 </div>
