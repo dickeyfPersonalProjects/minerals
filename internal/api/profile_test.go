@@ -459,6 +459,54 @@ func TestProfilePatch_UnknownKeyMessageListsNewKeys(t *testing.T) {
 	}
 }
 
+// TestProfileComplete_FirstLoginPersistsBySub drives the full
+// verifier-backed middleware chain (humaAuth → resolveUser) for a
+// brand-new, unseeded user: the resolver inserts a pending row keyed
+// by the JWT sub with a freshly minted UUIDv7 — deliberately NOT
+// equal to the Keycloak sub that UserFromClaims parses into u.ID.
+// complete() must therefore resolve the canonical row by Sub and
+// MarkActive it; keying off u.ID would only work by accident when the
+// resolver happens to have overwritten it (mi-ml13). Acceptance:
+// after setup the row carries the name and is active on the FIRST save.
+func TestProfileComplete_FirstLoginPersistsBySub(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo() // unseeded — simulates first login
+	h := New(Deps{Users: repo, Verifier: newFakeVerifier(), Collectors: newStubCollectorRepo()})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/profile",
+		strings.NewReader(`{"display_name":"  Nick Fury  "}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer valid")
+	h.ServeHTTP(rec, req)
+
+	got := decodeProfile(t, rec)
+	if got.DisplayName != "Nick Fury" {
+		t.Errorf("response display_name = %q, want %q (trimmed)", got.DisplayName, "Nick Fury")
+	}
+	if got.Pending {
+		t.Errorf("response pending = true, want false after setup")
+	}
+
+	// The canonical row (resolved by sub) must carry the name + active
+	// status — this is the persistence the prod bug report says was lost.
+	stored, err := repo.GetBySub(context.Background(), realAuthSub)
+	if err != nil {
+		t.Fatalf("GetBySub(realAuthSub): %v", err)
+	}
+	if stored.Status != domain.UserStatusActive {
+		t.Errorf("stored status = %q, want active", stored.Status)
+	}
+	if stored.DisplayName == nil || *stored.DisplayName != "Nick Fury" {
+		t.Errorf("stored display_name = %v, want Nick Fury", stored.DisplayName)
+	}
+	// The response id must be the canonical row id, not the JWT-derived
+	// sub UUID, so a GET round-trips to the same row.
+	if got.ID != stored.ID.String() {
+		t.Errorf("response id = %q, want canonical row id %q", got.ID, stored.ID)
+	}
+}
+
 func TestProfilePatch_RejectsPendingUser(t *testing.T) {
 	t.Parallel()
 	repo := newFakeUserRepo()
