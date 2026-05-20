@@ -226,7 +226,7 @@ func (s *profileService) complete(
 	ctx context.Context, in *profileSetupInput,
 ) (*profileOutput, error) {
 	u := auth.FromContext(ctx)
-	if u.ID == (auth.User{}.ID) {
+	if u.Sub == "" {
 		// Defensive — the auth middleware should already have
 		// surfaced this as 401 before reaching the handler.
 		return nil, newAPIError(http.StatusUnauthorized,
@@ -246,8 +246,23 @@ func (s *profileService) complete(
 			map[string]any{"field": "display_name", "max": MaxDisplayNameLen})
 	}
 
+	// Resolve the canonical row by Sub — the same key get()/patch()
+	// use (mi-ml13). Keying MarkActive off u.ID instead would couple
+	// this write to the resolveUser middleware having overwritten the
+	// JWT-derived ID (UserFromClaims seeds it from the Keycloak sub,
+	// not the application users.id); resolving by Sub here is
+	// self-contained and matches the other two profile writers.
+	full, err := s.repo.GetBySub(ctx, u.Sub)
+	if err != nil {
+		if errors.Is(err, domain.ErrUserNotFound) {
+			return nil, newAPIError(http.StatusNotFound,
+				"user_not_found", "user record disappeared", nil)
+		}
+		return nil, err
+	}
+
 	now := time.Now().UTC()
-	if err := s.repo.MarkActive(ctx, nil, u.ID, name, now); err != nil {
+	if err := s.repo.MarkActive(ctx, nil, full.ID, name, now); err != nil {
 		if errors.Is(err, domain.ErrUserNotFound) {
 			return nil, newAPIError(http.StatusNotFound,
 				"user_not_found", "user record disappeared", nil)
@@ -259,8 +274,8 @@ func (s *profileService) complete(
 	// (the column is null on insert) — the response's `field_defaults`
 	// is null, matching what a GET would return.
 	return &profileOutput{Body: profileBody{
-		ID:          u.ID.String(),
-		Email:       u.Email,
+		ID:          full.ID.String(),
+		Email:       full.Email,
 		DisplayName: name,
 		Pending:     false,
 	}}, nil
