@@ -1,4 +1,10 @@
-terraform.tfvars
+# Per-env tfvars may carry live secrets (keycloak_client_secret, smtp_password).
+# Ignore all *.tfvars so staging.tfvars / prod.tfvars can never be committed,
+# but keep the example template and the secret-free local-dev tfvars tracked.
+*.tfvars
+!*.tfvars.example
+!dev.tfvars
+
 .terraform/
 *.tfstate
 *.tfstate.*
