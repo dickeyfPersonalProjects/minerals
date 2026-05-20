@@ -87,22 +87,23 @@ This is the source of truth for the project roadmap.
 
 ---
 
-## V2 — Multi-user
+## V2 — Multi-user ✅ COMPLETE (shipped + live in prod)
 
-*Focused on real authentication and making the app multi-user ready. Unlocks when v1 is stable and tested in real use.*
+*Real authentication + multi-user-ready authorization. The V2 milestone — BFF auth, per-row/per-field visibility, V1→V2 data cut — is **done and live in production** under `mi-1d5i`. A few non-blocking backlog items (catalog numbering, EXIF opt-in, storage housekeeping) remain unchecked below.*
 
 ### Auth
 - [x] Real OIDC authentication via Keycloak operator (cluster already has it) `(mi-7xo)` (#154)
 - [x] Replace stub middleware — handlers, context keys, route groupings stay identical `(mi-7xo)` (#154)
 - [x] One-time migration: backfill stub `author_id` to real overseer UUID `(mi-tl2 + mi-7xo)` (#147, #154)
-- [x] Per-row authorization (visibility-based reads, ownership-based writes) `(mi-bqe)` (#157)
-- [x] CSRF mitigation — by design: PKCE + bearer tokens in `Authorization` header (no cookies, no CSRF surface). See CONTRACT §13.
+- [x] Per-row authorization (visibility-based reads, ownership-based writes) via Casbin `(mi-bqe)` (#157)
+- [x] **BFF auth migration** — Go backend is the OAuth client; browser holds only an opaque HttpOnly `minerals_session` cookie; refresh-token rotation handled server-side. PKCE/bearer stub retired. See CONTRACT §13 + `docs/design/auth-bff.md` `(mi-1d5i)`
+- [x] CSRF defense — stored-synchronizer token middleware on every cookie-authenticated write (`internal/auth/bff/csrf.go`) `(mi-1d5i)`
 
 ### Public sharing
-- [ ] Visibility UX — expose `private | unlisted | public` control in specimen UI (column already exists)
-- [ ] Public specimen pages (no auth required)
-- [ ] Direct-S3 / presigned-GET fast path for public file downloads
-- [ ] **Per-field visibility** — independent visibility on `price`, `acquired_from`, and `images` with user profile defaults + per-specimen / per-image overrides. See CONTRACT §13b. `(mi-fo8)`
+- [x] Visibility UX — `private | unlisted | public` control in specimen UI `(mi-35hk)`
+- [x] Public / anonymous specimen reads (no auth required, visibility-gated)
+- [x] **Per-field visibility** — independent visibility on `price`, `acquired_from`, and `images` with user profile defaults + per-specimen / per-image overrides. See CONTRACT §13b. `(mi-fo8)` (10 sub-beads merged)
+- [ ] Direct-S3 / presigned-GET fast path for public file downloads *(deferred; images still Go-proxied — see V3 edge/CDN candidate)*
 
 ### Catalog numbering
 - [ ] Auto-generation with customizable ID scheme (e.g. `FD-2026-0042`, user-defined template)
@@ -117,9 +118,36 @@ This is the source of truth for the project roadmap.
 
 ---
 
-## V3 — Next wave of capabilities
+## V3 — Public launch 🚀
 
-*Research and planning needed on several items before scoping beads.*
+*Theme: **cut the app public.** It currently runs privately over a private IP for personal use. V3 makes it safe + ready for outside users — the visibility/discovery/sharing UX plus the hardening that must land before the public cut.*
+
+### Features — visibility / discovery / sharing UX
+- [x] Inline visibility editor on the specimens list — owner-only quick public/unlisted/private toggle `(mi-35hk)`
+- [ ] 'New specimens' default visibility setting in Settings; create-form pre-fills from it `(mi-q2d8)` *(in progress)*
+- [ ] 'Browse all specimens' + 'Browse my collection' — two scoped list views `(mi-xue7)`
+- [ ] Friends / sharing — targeted per-user grants on private specimens. **DESIGN-FIRST; not yet specced** `(mi-qtq3)`
+
+### Hardening prerequisites (must land before the public cut)
+- [ ] DB backup to Backblaze B2 (external, off-cluster); MinIO images mirrored to a local bucket for cost `(mi-lhsu)`
+- [ ] User data Export / Import — collection + images; portability + user-controlled backup + GDPR data-access `(mi-dkuu)`
+- [ ] API rate limiting — tiered limits to prevent abuse once publicly reachable `(mi-tnru)`
+- [ ] Penetration test / security audit — self-conducted, good quality; OWASP ZAP + manual IDOR/visibility/CSRF probing; fix-beads per finding `(mi-z58x)`
+
+### Implied infra (likely needed for public — candidates, not yet beaded)
+*Bead these out as V3 planning matures.*
+- [ ] Public DNS + TLS for the real public hostname (not the private IP)
+- [ ] Edge protection (Cloudflare or similar) — DDoS, CDN for images, edge rate limiting (subsumes the deferred presigned-GET fast path)
+- [ ] Production monitoring / alerting — Prometheus metrics already exist `(mi-2b1k)`; need dashboards + alerts
+- [ ] Terms of service / privacy policy (legal, for public users + GDPR)
+- [ ] Abuse handling / moderation story (for publicly visible user-generated content)
+- [ ] Multi-replica scaling decisions — session cache + shared rate-limit store (currently single-replica)
+
+---
+
+## V4 — Next wave of capabilities
+
+*Post-launch feature expansion. Research and planning needed on several items before scoping beads.*
 
 ### Specimen data
 - [ ] Gamma spectrum capture, storage, and display
@@ -160,7 +188,7 @@ Separate from the collection. Tracks field trips the user has logged. Each trip 
 
 ---
 
-## V4 — Import & migration
+## V5 — Import & migration
 
 *Unlocks migration from existing tools and spreadsheets.*
 
