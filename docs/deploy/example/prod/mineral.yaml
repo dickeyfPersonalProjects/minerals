@@ -2,7 +2,8 @@
 #
 # Mirrors staging/mineral.yaml. Two intentional differences:
 #   - targetNamespace + name suffix (mineral-prod)
-#   - images[0].newTag is `prod` instead of `staging`
+#   - the image override is digest-pinned (`digest:`), not tag-pinned
+#     (`newTag:`) the way staging is — see the images block below
 #
 # The ConfigMap patch setting ENV is INCLUDED here even though the base's
 # default is already `prod`. This is the consistency fix called out in the
@@ -25,9 +26,22 @@ spec:
   sourceRef:
     kind: GitRepository
     name: minerals-repo
+  # Prod pins the image by immutable DIGEST, not by the moving `:prod`
+  # tag. A moved tag is an unchanged pod-spec string, so Kubernetes does
+  # not roll the pod even though `:prod` now points at new bytes (this is
+  # the tag-move-doesnt-roll bug, mi-061a). A new `digest:` IS a spec
+  # change, so Flux's reconcile rolls the deployment. `digest: sha256:...`
+  # renders as `image@sha256:...`; do NOT put a digest in `newTag:` (that
+  # produces a broken `:sha256:...` tag reference).
+  #
+  # The `Promote to prod` workflow rewrites this `digest:` value on every
+  # release — you do not edit it by hand after the one-time bootstrap.
+  # Bootstrap: set it to the current `:prod` digest once
+  #   (`crane digest ghcr.io/dickeyfpersonalprojects/minerals:prod`),
+  # then the workflow maintains it. The value below is a placeholder.
   images:
     - name: ghcr.io/dickeyfpersonalprojects/minerals
-      newTag: prod
+      digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   patches:
     - target:
         kind: ConfigMap

@@ -95,15 +95,20 @@ GitRepository "minerals-repo"  ─── caches working tree
         └── Kustomization "mineral-prod"     ── every 10m ──▶  mineral-prod ns
                 ref.tag: prod               (manifests pinned to prod git tag)
                 path: ./kustomize/base
-                images: ghcr.io/.../minerals:prod
+                images: ghcr.io/.../minerals@sha256:…  (pinned by DIGEST)
                 patches: ConfigMap ENV=prod
 ```
 
 A merge to `main` lands on staging within ~1m (poll) + ~10m (reconcile).
 Prod rollouts are driven by the `Promote to prod` workflow
-([Promoting to prod](#promoting-to-prod)), which moves the `prod`
-git tag and the `:prod` GHCR image tag together. Flux re-pulls on the
-next reconcile (the base sets `imagePullPolicy: Always`).
+([Promoting to prod](#promoting-to-prod)), which moves the `prod` git
+tag, retags the `:prod` GHCR image, AND writes the new image **digest**
+into the gitops repo's prod `Kustomization`. The digest write is what
+makes the pod roll: a moved `:prod` tag is an unchanged pod-spec string,
+so Flux applies an identical Deployment and Kubernetes does nothing
+(the tag-move-doesnt-roll bug, mi-061a). A new `@sha256:…` digest IS a
+spec change, so Flux's next reconcile rolls the pod onto the promoted
+image (the base also sets `imagePullPolicy: Always`).
 
 > **Why prod pins `ref.tag: prod` and staging pins `ref.branch: main`:**
 > the manifests in `kustomize/base/` and the image at `:prod` move on
@@ -114,9 +119,12 @@ next reconcile (the base sets `imagePullPolicy: Always`).
 > that doesn't exist on the older image). Pinning prod to
 > `ref.tag: prod` keeps both artifacts at the same commit. The
 > `Promote to prod` workflow moves the tag and the image in lockstep,
-> so reading the manifests at `tag: prod` always describes the image
-> at `:prod`. Staging keeps `branch: main` for fast iteration — drift
-> there is acceptable and short-lived.
+> so reading the manifests at `tag: prod` always describes the promoted
+> image. The image itself is referenced by **digest** in the prod
+> `Kustomization` (not by the `:prod` tag) so the pod actually rolls on
+> promote — see [Promoting to prod](#promoting-to-prod). Staging keeps
+> `branch: main` for fast iteration — drift there is acceptable and
+> short-lived.
 
 ---
 
@@ -148,7 +156,7 @@ contract.
 | Env var | Required | Example | Notes |
 |---|---|---|---|
 | `ENV` | **yes** (SHOULD patch) | `prod` / `staging` | Flips strictness checks. Base defaults to `prod`; patch explicitly to keep overlays symmetric. |
-| Image tag (`images[0].newTag`) | **yes** | `prod` / `staging` | Set on the Flux `Kustomization`, not the ConfigMap. |
+| Image override (`images[0]`) | **yes** | staging: `newTag: staging` · prod: `digest: sha256:…` | Set on the Flux `Kustomization`, not the ConfigMap. Prod is **digest**-pinned (maintained by `Promote to prod`) so the pod rolls on promote; staging tracks the moving `:staging` tag. |
 | Ingress hostname | **yes** | `mineral.example.com` | Lives on the `Ingress` + `Certificate`, not the ConfigMap. |
 
 ### Required secrets
@@ -292,7 +300,7 @@ Only these things vary between staging and prod in the example:
 | `namespace`                    | `mineral-staging`                    | `mineral-prod`                    |
 | `Ingress`/`Certificate` host   | `mineral-staging.dickey.cloud`       | `mineral.dickey.cloud`            |
 | `Kustomization.metadata.name`  | `mineral-staging`                    | `mineral-prod`                    |
-| `images[0].newTag`             | `staging`                            | `prod`                            |
+| Image override (`images[0]`)   | `newTag: staging`                    | `digest: sha256:…` (workflow-maintained) |
 | ConfigMap `ENV` patch value    | `staging`                            | `prod`                            |
 | `OIDC_ISSUER_URL`              | `https://auth.staging.example.com/realms/minerals` | `https://auth.example.com/realms/minerals` |
 | `OIDC_REDIRECT_URI`            | `https://www.staging.example.com/auth/callback` | `https://www.example.com/auth/callback` |
@@ -329,8 +337,29 @@ Prod is moved by the `Promote to prod` GitHub Actions workflow
 ([`.github/workflows/promote-prod.yml`](../../.github/workflows/promote-prod.yml)).
 It is the ONLY supported path to update prod. A single run moves the
 git tag `prod`, stamps a versioned `vX.Y.Z` git tag, retags the GHCR
-image as `:prod` and `:vX.Y.Z`, and pushes all of it atomically —
-manifests and image always advance together.
+image as `:prod` and `:vX.Y.Z`, pushes all of that atomically, and then
+**digest-pins the image in the gitops repo** so the running pod actually
+rolls onto the new image — manifests and image always advance together.
+
+### Two pins, one promote
+
+After a promote, prod is held by **two** pins, both maintained
+automatically:
+
+1. **Manifests** — Flux's prod `Kustomization` reads `kustomize/base/`
+   at `spec.ref.tag: prod`. The promote moves the `prod` git tag.
+2. **Image** — the prod `Kustomization`'s `spec.images[0].digest` is set
+   to the promoted image's immutable `sha256:…` digest. The promote
+   writes this into the gitops repo (`FLEET_INFRA_REPO`).
+
+Why a **digest** and not `newTag: prod`? A moved `:prod` tag leaves the
+rendered pod spec byte-for-byte identical (`image: …:prod`), so Flux
+applies an unchanged Deployment and Kubernetes never rolls the pod —
+even though `:prod` now points at new bytes. This silently ran stale
+code in the past (mi-061a). A new `@sha256:…` digest is a real spec
+change, so the next reconcile rolls the pod. (Note: `digest:` renders as
+`image@sha256:…`; putting a digest in `newTag:` instead produces a
+broken `:sha256:…` tag — use `digest:`.)
 
 ### Why a single workflow
 
@@ -353,6 +382,9 @@ The drift class of bug is closed by:
    `vX.Y.Z` (git + image). If you want to roll back, pin
    `ref.tag: vX.Y.Z-prev` + `image: ...:vX.Y.Z-prev` and re-promote
    forward later.
+4. **The image is digest-pinned in gitops, so the pod rolls.** Moving a
+   tag is invisible to Kubernetes; moving a digest is a spec change. The
+   promote writes the new digest into the prod `Kustomization` for you.
 
 ### Running the workflow
 
@@ -368,6 +400,10 @@ Trigger from the Actions tab: **Promote to prod** → **Run workflow**.
 Pre-flight checks the workflow runs before it touches anything:
 
 - Version string matches the semver regex.
+- **`FLEET_INFRA_TOKEN` is present** (real runs only). Validated up
+  front so the promote never moves the git/image tags without being
+  able to complete the digest pin — see [Cross-repo write
+  credential](#cross-repo-write-credential).
 - Source ref resolves to a commit; commit's `:sha-<short>` image
   exists in GHCR (the merge-to-main CI pushed it).
 - If the `version` git tag already exists, it points at the source
@@ -382,19 +418,55 @@ Then, in order:
    manifest-only retag, no rebuild, same digest as the source image.
 4. Verify the post-retag digests on `:prod` and `:vX.Y.Z` match the
    source digest. Fail loudly on mismatch.
+5. Check out `FLEET_INFRA_REPO`, set `spec.images[0].digest` (and remove
+   `newTag`) in `FLEET_INFRA_PROD_KUSTOMIZATION` via `yq`, and commit +
+   push `chore(prod): pin minerals to <digest> (promoted <version>)`.
+   Idempotent: if the digest already matches, nothing is committed.
 
 ### After a successful promote
 
-The workflow summary includes a gitops reminder. Confirm both pins
-on the gitops repo's prod `Kustomization`:
+The promote already wrote the image digest pin to the gitops repo
+(step 5). No manual gitops edit is needed for a normal promote. Confirm,
+if you want to double-check, that the prod `Kustomization` shows:
 
 - `spec.ref.tag: prod` (or pin to the specific `vX.Y.Z` for an
   immutable reference; the `vX.Y.Z` git tag does not move).
-- The Kustomize image patch is `newTag: prod` (or `vX.Y.Z`).
+- `spec.images[0].digest: sha256:…` matching the promoted image (the
+  workflow summary prints the digest it wrote).
 
-If your Flux setup auto-discovers tag updates (e.g. via
-[image automation controllers](https://fluxcd.io/flux/components/image/)),
-no gitops repo edit is needed. Otherwise, commit the bump.
+Flux rolls the pod on its next reconcile because the digest changed. If
+the digest is unchanged (re-promote of the same image), no roll happens
+— that is correct.
+
+### Cross-repo write credential
+
+Step 5 pushes to a **different** repository than the one running the
+workflow, so the default `GITHUB_TOKEN` (scoped to the minerals repo)
+cannot be used. The workflow reads a secret named **`FLEET_INFRA_TOKEN`**
+and uses it to check out and push to `FLEET_INFRA_REPO`.
+
+Operator setup (one-time):
+
+1. Create a credential with `contents: write` on the gitops repo only:
+   a **fine-grained PAT** scoped to that single repo, or a **GitHub
+   App** installation token. A fine-grained PAT scoped to only the
+   gitops repo's contents is the least-privilege choice.
+2. Add it as the `FLEET_INFRA_TOKEN` secret in the minerals repo
+   (Settings → Secrets and variables → Actions).
+3. Confirm the two workflow `env` values match your gitops layout:
+   `FLEET_INFRA_REPO` (default `dickeyfpersonalprojects/fleet-infra`)
+   and `FLEET_INFRA_PROD_KUSTOMIZATION` (default
+   `clusters/prod/mineral/mineral.yaml`). The pin step fails loudly if
+   the file path is wrong.
+4. One-time bootstrap of the first digest: edit the prod `Kustomization`
+   in the gitops repo to replace `newTag: prod` with
+   `digest: sha256:<current-prod-digest>`
+   (`crane digest ghcr.io/dickeyfpersonalprojects/minerals:prod`).
+   Thereafter the workflow maintains the digest on every promote.
+
+If `FLEET_INFRA_TOKEN` is missing or expired, the promote **fails the
+pre-flight and moves nothing** — it does not silently skip the digest
+write and leave prod on a stale image.
 
 ### Rehearsing with dry-run
 
@@ -426,9 +498,15 @@ promote path.
 ### Required permissions
 
 The workflow uses the default `GITHUB_TOKEN` with `contents: write` +
-`packages: write`. Force-moving the `prod` tag requires that no tag
-protection rule blocks it — if you add one later, give the actions
-bot an exemption or switch to a PAT in the workflow's checkout step.
+`packages: write` for the minerals repo (git tags + GHCR retag).
+Force-moving the `prod` tag requires that no tag protection rule blocks
+it — if you add one later, give the actions bot an exemption or switch
+to a PAT in the workflow's checkout step.
+
+The cross-repo digest pin (step 5) cannot use `GITHUB_TOKEN` — it writes
+to a different repository. It uses the separate `FLEET_INFRA_TOKEN`
+secret instead; see [Cross-repo write
+credential](#cross-repo-write-credential).
 
 ---
 
@@ -436,8 +514,11 @@ bot an exemption or switch to a PAT in the workflow's checkout step.
 
 1. Copy `example/staging/` to a new directory, e.g.
    `clusters/<cluster>/mineral/dev/` in your gitops repository.
-2. Edit the namespace, hostnames, Kustomization name, and image tag to
-   match the new env.
+2. Edit the namespace, hostnames, Kustomization name, and the image
+   override to match the new env. Staging-style envs track a moving tag
+   (`newTag: <env>`); a prod-style gated env should be digest-pinned
+   (`digest: sha256:…`, maintained by a promote workflow — see
+   [Promoting to prod](#promoting-to-prod)).
 3. Generate fresh SealedSecrets for the new namespace — see
    [`encrypt.md`](./encrypt.md). The ciphertext is namespace-scoped, so
    you cannot reuse staging's.
