@@ -12,6 +12,14 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ .
+# Deploy markers baked into the SPA at build time (mi-c0sv). CI passes the
+# short commit SHA and an ISO 8601 timestamp as build args; Vite's `define`
+# reads them from the environment and inlines them into the footer. They
+# default to 'dev' / build-time `now` when unset (local `docker build`).
+ARG GIT_SHA=dev
+ARG BUILD_DATE
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_DATE=${BUILD_DATE}
 RUN npm run build
 
 # Stage 2: build the Go binary, embedding dist/
