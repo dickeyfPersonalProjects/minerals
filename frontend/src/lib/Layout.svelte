@@ -68,10 +68,21 @@
         <a
           href="/specimens"
           use:link
+          data-testid="nav-browse-all"
           class="text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
         >
-          Specimens
+          Browse all
         </a>
+        {#if showProfileMenu}
+          <a
+            href="/collection"
+            use:link
+            data-testid="nav-my-collection"
+            class="text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+          >
+            My collection
+          </a>
+        {/if}
         {#if showQrSheetLink}
           <a
             href="/specimens/qr"

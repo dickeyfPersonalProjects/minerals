@@ -8,9 +8,16 @@
     activeFilterCount,
     type SpecimenFiltersValue,
   } from '../lib/SpecimenFilters.svelte';
-  import { isAuthenticated } from '../lib/auth';
+  import { authStore, isAuthenticated } from '../lib/auth';
 
   type Specimen = components['schemas']['SpecimenView'];
+
+  // Owner-scope (mi-xue7). The two list views share this component and
+  // are distinguished purely by the route path: `/collection` is the
+  // owner-scoped "browse my collection" view (scope=mine on the API),
+  // every other path is the all-visible "browse all specimens" view.
+  const scope = $derived(router.location === '/collection' ? 'mine' : undefined);
+  const isCollection = $derived(scope === 'mine');
 
   // URL ↔ filter state. The URL hash querystring is the single
   // source of truth — `replace()` updates the URL, the derived
@@ -56,7 +63,10 @@
     if (value.acquired_before) params.set('acquired_before', value.acquired_before);
     if (value.collector_id) params.set('collector_id', value.collector_id);
     const qs = params.toString();
-    return qs ? `/specimens?${qs}` : '/specimens';
+    // Keep filter changes on the current view (mi-xue7): /collection
+    // stays owner-scoped, every other path stays on /specimens.
+    const base = isCollection ? '/collection' : '/specimens';
+    return qs ? `${base}?${qs}` : base;
   }
 
   function applyFilters(next: SpecimenFiltersValue) {
@@ -82,6 +92,7 @@
     acquired_after?: string;
     acquired_before?: string;
     collector_id?: string;
+    scope?: 'mine';
   };
 
   function buildQuery(active: SpecimenFiltersValue, cursor?: string): ListQuery {
@@ -94,6 +105,7 @@
     if (active.acquired_after) q.acquired_after = active.acquired_after;
     if (active.acquired_before) q.acquired_before = active.acquired_before;
     if (active.collector_id) q.collector_id = active.collector_id;
+    if (scope) q.scope = scope;
     return q;
   }
 
@@ -128,13 +140,42 @@
     }
   }
 
-  // Refetch whenever filters change. Cursor pagination resets on
-  // every filter change — the previous cursor is invalid under
-  // new filters (CONTRACT.md §10.3, and the API explicitly rejects
-  // cursors when q transitions in/out of relevance ordering).
+  // The "browse my collection" view requires auth. An anonymous
+  // viewer is shown a login prompt rather than an empty grid (the API
+  // returns 200 + empty for scope=mine anonymous per CONTRACT §13, but
+  // the prompt is the clearer affordance). `loaded` gates the prompt so
+  // a logged-in deep-link to /collection shows the skeleton while the
+  // profile probe resolves instead of flashing the prompt first.
+  const auth = $derived($authStore);
+  const showLoginPrompt = $derived(isCollection && auth.loaded && auth.user === null);
+
+  // Mirror LoginButton's BFF login href (mi-3vc4): carry the current
+  // hash route as return_to so the backend bounces the user back to
+  // /collection after sign-in.
+  const loginHref = $derived.by(() => {
+    if (typeof window === 'undefined') return '/auth/login';
+    const current = window.location.hash || '#/collection';
+    return `/auth/login?return_to=${encodeURIComponent(current)}`;
+  });
+
+  // Refetch whenever filters or the view (scope) change. Cursor
+  // pagination resets on every change — the previous cursor is invalid
+  // under new filters (CONTRACT.md §10.3, and the API explicitly
+  // rejects cursors when q transitions in/out of relevance ordering).
   $effect(() => {
     const active = filters;
+    // Track scope + auth so switching views or completing the auth
+    // probe re-runs the fetch.
+    const ownerScoped = isCollection;
+    const a = auth;
     items = [];
+    if (ownerScoped && (!a.loaded || a.user === null)) {
+      // Anonymous (or probe pending): don't fetch. The template shows
+      // the login prompt once the probe confirms no user; until then
+      // the loading skeleton stands in.
+      loadState = a.loaded ? { kind: 'idle' } : { kind: 'loading' };
+      return;
+    }
     void fetchPage(active);
   });
 
@@ -153,7 +194,12 @@
 
 <section>
   <header class="mb-4 flex flex-wrap items-end justify-between gap-3">
-    <h1 class="text-2xl font-semibold tracking-tight text-[var(--color-text)]">Specimens</h1>
+    <h1
+      class="text-2xl font-semibold tracking-tight text-[var(--color-text)]"
+      data-testid="list-title"
+    >
+      {isCollection ? 'My collection' : 'Browse all specimens'}
+    </h1>
     {#if $isAuthenticated}
       <a
         href="/specimens/new"
@@ -166,86 +212,107 @@
     {/if}
   </header>
 
-  <SpecimenFilters value={filters} onChange={applyFilters} />
-
-  {#if filters.q}
-    <p class="mb-3 text-xs text-[var(--color-text-muted)]" data-testid="relevance-hint">
-      Sorted by relevance
-    </p>
-  {/if}
-
-  {#if loadState.kind === 'loading'}
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="loading">
-      {#each Array.from({ length: 6 }, (_, i) => i) as i (i)}
-        <div
-          class="aspect-[4/3] animate-pulse rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)]"
-        ></div>
-      {/each}
-    </div>
-  {:else if loadState.kind === 'error'}
+  {#if showLoginPrompt}
     <div
-      class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center"
-      data-testid="error"
-      role="alert"
+      class="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-10 text-center"
+      data-testid="collection-login-prompt"
     >
-      <p class="text-sm font-medium text-[var(--color-text)]">Couldn't load specimens.</p>
-      <p class="mt-1 text-xs text-[var(--color-text-muted)]">{loadState.message}</p>
-      <button
-        type="button"
-        onclick={retry}
-        class="mt-4 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm text-[var(--color-accent-fg)] hover:opacity-90"
+      <p class="text-sm text-[var(--color-text)]">Log in to see your collection.</p>
+      <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+        Your collection shows every specimen you own, including private ones.
+      </p>
+      <a
+        href={loginHref}
+        data-testid="collection-login-link"
+        class="mt-4 inline-block rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm text-[var(--color-accent-fg)] hover:opacity-90"
       >
-        Try again
-      </button>
+        Log in
+      </a>
     </div>
-  {:else if items.length === 0}
-    {#if hasFilters}
-      <div
-        class="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-10 text-center"
-        data-testid="empty-filtered"
-      >
-        <p class="text-sm text-[var(--color-text)]">No specimens match these filters.</p>
-        <button
-          type="button"
-          onclick={() => applyFilters({})}
-          data-testid="empty-clear-filters"
-          class="mt-3 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm text-[var(--color-accent-fg)] hover:opacity-90"
-        >
-          Clear filters
-        </button>
-      </div>
-    {:else}
-      <div
-        class="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-10 text-center"
-        data-testid="empty"
-      >
-        <p class="text-sm text-[var(--color-text)]">No specimens yet.</p>
-        <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-          Add your first specimen to get started.
-        </p>
-      </div>
-    {/if}
   {:else}
-    <ul class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="specimen-grid">
-      {#each items as s (s.id)}
-        <li class="contents">
-          <SpecimenCard specimen={s} />
-        </li>
-      {/each}
-    </ul>
+    <SpecimenFilters value={filters} onChange={applyFilters} />
 
-    {#if loadState.kind === 'loaded' && loadState.nextCursor}
-      <div class="mt-6 flex justify-center">
+    {#if filters.q}
+      <p class="mb-3 text-xs text-[var(--color-text-muted)]" data-testid="relevance-hint">
+        Sorted by relevance
+      </p>
+    {/if}
+
+    {#if loadState.kind === 'loading'}
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="loading">
+        {#each Array.from({ length: 6 }, (_, i) => i) as i (i)}
+          <div
+            class="aspect-[4/3] animate-pulse rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)]"
+          ></div>
+        {/each}
+      </div>
+    {:else if loadState.kind === 'error'}
+      <div
+        class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center"
+        data-testid="error"
+        role="alert"
+      >
+        <p class="text-sm font-medium text-[var(--color-text)]">Couldn't load specimens.</p>
+        <p class="mt-1 text-xs text-[var(--color-text-muted)]">{loadState.message}</p>
         <button
           type="button"
-          onclick={loadMore}
-          class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+          onclick={retry}
+          class="mt-4 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm text-[var(--color-accent-fg)] hover:opacity-90"
         >
-          Load more
+          Try again
         </button>
       </div>
-    {:else if loadState.kind === 'loading-more'}
-      <p class="mt-6 text-center text-sm text-[var(--color-text-muted)]">Loading more…</p>
+    {:else if items.length === 0}
+      {#if hasFilters}
+        <div
+          class="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-10 text-center"
+          data-testid="empty-filtered"
+        >
+          <p class="text-sm text-[var(--color-text)]">No specimens match these filters.</p>
+          <button
+            type="button"
+            onclick={() => applyFilters({})}
+            data-testid="empty-clear-filters"
+            class="mt-3 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm text-[var(--color-accent-fg)] hover:opacity-90"
+          >
+            Clear filters
+          </button>
+        </div>
+      {:else}
+        <div
+          class="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-10 text-center"
+          data-testid="empty"
+        >
+          <p class="text-sm text-[var(--color-text)]">
+            {isCollection ? "You haven't added any specimens yet." : 'No specimens yet.'}
+          </p>
+          <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+            Add your first specimen to get started.
+          </p>
+        </div>
+      {/if}
+    {:else}
+      <ul class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="specimen-grid">
+        {#each items as s (s.id)}
+          <li class="contents">
+            <SpecimenCard specimen={s} />
+          </li>
+        {/each}
+      </ul>
+
+      {#if loadState.kind === 'loaded' && loadState.nextCursor}
+        <div class="mt-6 flex justify-center">
+          <button
+            type="button"
+            onclick={loadMore}
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+          >
+            Load more
+          </button>
+        </div>
+      {:else if loadState.kind === 'loading-more'}
+        <p class="mt-6 text-center text-sm text-[var(--color-text-muted)]">Loading more…</p>
+      {/if}
     {/if}
   {/if}
 </section>
