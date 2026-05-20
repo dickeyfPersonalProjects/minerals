@@ -49,6 +49,12 @@ type profileBody struct {
 	DisplayName   string             `json:"display_name" doc:"Display name as persisted."`
 	Pending       bool               `json:"pending" doc:"Profile-setup-required flag; always false on a successful response."`
 	FieldDefaults *fieldDefaultsView `json:"field_defaults" doc:"Per-field default visibility map (mi-fo8). Sparse — absent keys mean 'no user default; fall through to system default'. Null when the user has no defaults set at all."`
+	// DefaultSpecimenVisibility is the per-user default whole-specimen
+	// visibility the create form pre-fills with (mi-q2d8). Null when
+	// the user has set no preference — the create form then falls back
+	// to the system default (private). Distinct from FieldDefaults,
+	// which governs per-field redaction within a specimen.
+	DefaultSpecimenVisibility *domain.Visibility `json:"default_specimen_visibility" enum:"private,unlisted,public" doc:"Default whole-specimen visibility for newly-created specimens (mi-q2d8). Null means no preference; the create form falls back to the system default (private). Does not affect existing specimens."`
 }
 
 // fieldDefaultsView is the wire shape of users.field_defaults. The
@@ -145,6 +151,57 @@ func (FieldDefaultsPatch) Schema(_ huma.Registry) *huma.Schema {
 	}
 }
 
+// visibilityPatch is the wire shape of the default_specimen_visibility
+// value in a PATCH /api/v1/profile body (mi-q2d8). Like
+// FieldDefaultsPatch it carries the raw JSON bytes so the handler can
+// distinguish three cases a typed *Visibility pointer can't:
+//   - key absent          → leave the stored value unchanged
+//   - explicit JSON null  → clear (fall back to the system default)
+//   - a Visibility string → set the new default
+type visibilityPatch []byte
+
+// UnmarshalJSON captures the raw bytes verbatim; the handler does the
+// null / value disambiguation and validation. encoding/json invokes
+// this even for the JSON value `null`, which is how an explicit
+// null-to-clear is detected.
+func (p *visibilityPatch) UnmarshalJSON(b []byte) error {
+	*p = append((*p)[:0], b...)
+	return nil
+}
+
+// MarshalJSON emits the stored bytes verbatim (JSON null when empty).
+// Only the handler reads this type; the wire response uses the typed
+// *domain.Visibility in profileBody instead. Present for symmetry.
+func (p visibilityPatch) MarshalJSON() ([]byte, error) {
+	if len(p) == 0 {
+		return []byte("null"), nil
+	}
+	out := make([]byte, len(p))
+	copy(out, p)
+	return out, nil
+}
+
+// Schema renders an open string schema so the handler — not huma's
+// validator — owns value validation and can return a stable 400 with
+// the `invalid_default_specimen_visibility` code (an enum here would
+// let huma pre-empt with a generic 422). Nullable so an explicit
+// `null` (clear the preference) is accepted; omission means "leave
+// unchanged". Codegen consumers should read the typed
+// `default_specimen_visibility` on the GET response for the canonical
+// Visibility union.
+func (visibilityPatch) Schema(_ huma.Registry) *huma.Schema {
+	return &huma.Schema{
+		Type:     "string",
+		Nullable: true,
+		Description: "Default whole-specimen visibility for newly-created " +
+			"specimens (mi-q2d8). PATCH semantics: a Visibility string " +
+			"(`private`, `unlisted`, `public`) sets the default; an explicit " +
+			"JSON `null` clears it (the create form then falls back to the " +
+			"system default, `private`); omitting the key leaves the stored " +
+			"value unchanged. Does not affect existing specimens.",
+	}
+}
+
 // profilePatchInput is the PATCH /api/v1/profile request body.
 // Supports partial update of display_name (mi-j3kn) and field_defaults
 // (mi-fo8). Both keys are optional; absent means "leave unchanged".
@@ -159,6 +216,10 @@ type profilePatchBody struct {
 	// — use omission to mean "don't change".
 	DisplayName   *string            `json:"display_name,omitempty" doc:"Replacement display_name; trimmed, required non-empty, max 80 chars. Omit to leave unchanged."`
 	FieldDefaults FieldDefaultsPatch `json:"field_defaults,omitempty" doc:"Per-field default visibility map; see FieldDefaultsPatch schema."`
+	// DefaultSpecimenVisibility patches the create-form default
+	// whole-specimen visibility (mi-q2d8). Omit to leave unchanged;
+	// explicit null clears it; a Visibility string sets it.
+	DefaultSpecimenVisibility visibilityPatch `json:"default_specimen_visibility,omitempty" doc:"Default whole-specimen visibility for new specimens; see visibilityPatch schema."`
 }
 
 // profileService wires the profile handlers against a UserRepo.
@@ -208,14 +269,19 @@ func registerProfileOperations(api huma.API, mws authMiddlewares, repo domain.Us
 		Path:        "/api/v1/profile",
 		Summary:     "Patch the caller's profile",
 		Description: "Partial update of the caller's profile. Accepts " +
-			"`display_name` (mi-j3kn) and `field_defaults` (per-field default " +
-			"visibility, mi-fo8). Keys present in the patch replace the stored " +
-			"value; keys absent are preserved. For field_defaults, an explicit " +
-			"JSON `null` per inner key clears that entry; sending " +
-			"`field_defaults: null` at the top level is rejected. A " +
-			"display_name that is empty after trimming, longer than 80 chars, " +
-			"or `null` is rejected with `invalid_display_name`. Unknown keys " +
-			"and invalid values are rejected with 400.",
+			"`display_name` (mi-j3kn), `field_defaults` (per-field default " +
+			"visibility, mi-fo8), and `default_specimen_visibility` " +
+			"(create-form whole-specimen default, mi-q2d8). Keys present in " +
+			"the patch replace the stored value; keys absent are preserved. " +
+			"For field_defaults, an explicit JSON `null` per inner key clears " +
+			"that entry; sending `field_defaults: null` at the top level is " +
+			"rejected. For default_specimen_visibility, an explicit `null` " +
+			"clears the preference (create form falls back to the system " +
+			"default); an invalid value is rejected with " +
+			"`invalid_default_specimen_visibility`. A display_name that is " +
+			"empty after trimming, longer than 80 chars, or `null` is rejected " +
+			"with `invalid_display_name`. Unknown keys and invalid values are " +
+			"rejected with 400.",
 		Tags:        []string{"profile"},
 		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound},
 		Middlewares: mws.Protected(),
@@ -364,6 +430,41 @@ func (s *profileService) patch(ctx context.Context, in *profilePatchInput) (*pro
 		full.UpdatedAt = now
 	}
 
+	visBytes := bytes.TrimSpace(in.Body.DefaultSpecimenVisibility)
+	if len(visBytes) != 0 {
+		// Tri-state: explicit `null` clears the preference; any other
+		// value must parse as a valid Visibility string. Omission
+		// (len == 0) never reaches here — it means "leave unchanged".
+		var newVis *domain.Visibility
+		if string(visBytes) != "null" {
+			var v domain.Visibility
+			if err := json.Unmarshal(visBytes, &v); err != nil {
+				return nil, newAPIError(http.StatusBadRequest,
+					"invalid_default_specimen_visibility",
+					"default_specimen_visibility must be a Visibility string or null",
+					map[string]any{"field": "default_specimen_visibility"})
+			}
+			if !isValidVisibility(v) {
+				return nil, newAPIError(http.StatusBadRequest,
+					"invalid_default_specimen_visibility",
+					fmt.Sprintf("default_specimen_visibility: %q is not a valid Visibility; allowed values are %s",
+						v, strings.Join(validVisibilityValues(), ", ")),
+					map[string]any{"field": "default_specimen_visibility",
+						"allowed": validVisibilityValues()})
+			}
+			newVis = &v
+		}
+		if err := s.repo.UpdateDefaultSpecimenVisibility(ctx, nil, full.ID, newVis, now); err != nil {
+			if errors.Is(err, domain.ErrUserNotFound) {
+				return nil, newAPIError(http.StatusNotFound,
+					"user_not_found", "user record disappeared", nil)
+			}
+			return nil, err
+		}
+		full.DefaultSpecimenVisibility = newVis
+		full.UpdatedAt = now
+	}
+
 	return &profileOutput{Body: toProfileBody(full)}, nil
 }
 
@@ -375,11 +476,12 @@ func toProfileBody(u domain.User) profileBody {
 		displayName = *u.DisplayName
 	}
 	return profileBody{
-		ID:            u.ID.String(),
-		Email:         u.Email,
-		DisplayName:   displayName,
-		Pending:       u.Status == domain.UserStatusPending,
-		FieldDefaults: toFieldDefaultsView(u.FieldDefaults),
+		ID:                        u.ID.String(),
+		Email:                     u.Email,
+		DisplayName:               displayName,
+		Pending:                   u.Status == domain.UserStatusPending,
+		FieldDefaults:             toFieldDefaultsView(u.FieldDefaults),
+		DefaultSpecimenVisibility: u.DefaultSpecimenVisibility,
 	}
 }
 

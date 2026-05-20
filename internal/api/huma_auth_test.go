@@ -146,6 +146,22 @@ func (r *fakeUserRepo) UpdateFieldDefaults(
 	return domain.ErrUserNotFound
 }
 
+func (r *fakeUserRepo) UpdateDefaultSpecimenVisibility(
+	_ context.Context, _ domain.Tx, id uuid.UUID, visibility *domain.Visibility, updatedAt time.Time,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for sub, u := range r.bySub {
+		if u.ID == id {
+			u.DefaultSpecimenVisibility = visibility
+			u.UpdatedAt = updatedAt
+			r.bySub[sub] = u
+			return nil
+		}
+	}
+	return domain.ErrUserNotFound
+}
+
 // seedActiveStubUser plants the migration-0008 overseer row that the
 // stub auth path resolves to. Test fixtures share this baseline so
 // the gate doesn't fire spuriously on routes the test isn't gating.

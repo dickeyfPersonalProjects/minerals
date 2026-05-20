@@ -221,6 +221,10 @@ func (specStubUserRepo) UpdateFieldDefaults(context.Context, domain.Tx, uuid.UUI
 	return domain.ErrUserNotFound
 }
 
+func (specStubUserRepo) UpdateDefaultSpecimenVisibility(context.Context, domain.Tx, uuid.UUID, *domain.Visibility, time.Time) error {
+	return domain.ErrUserNotFound
+}
+
 // specStubSpecimenCollectorRepo is a never-called stand-in so the
 // type-derived OpenAPI spec advertises the chain routes during
 // codegen (mi-zv3 / C-3).

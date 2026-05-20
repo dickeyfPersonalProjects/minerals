@@ -14,13 +14,17 @@ vi.mock('../lib/api', () => ({
 
 import Settings from './Settings.svelte';
 
-function profileBody(field_defaults: Record<string, string> | null) {
+function profileBody(
+  field_defaults: Record<string, string> | null,
+  default_specimen_visibility: string | null = null,
+) {
   return {
     id: 'user-1',
     email: 'a@b.test',
     display_name: 'Ada',
     pending: false,
     field_defaults: field_defaults ?? {},
+    default_specimen_visibility,
   };
 }
 
@@ -242,5 +246,86 @@ describe('Settings route — field defaults', () => {
     // directly is defended by the dirty-guard too.
     await fireEvent.submit(screen.getByTestId('settings-field-defaults-form'));
     expect(mockPATCH).not.toHaveBeenCalled();
+  });
+});
+
+describe('Settings route — new specimens default visibility (mi-q2d8)', () => {
+  it('shows "System default (private)" when the API returns no preference', async () => {
+    mockGET.mockResolvedValue({ data: profileBody(null, null), error: undefined });
+    render(Settings);
+
+    const sel = (await screen.findByTestId(
+      'settings-default-specimen-visibility',
+    )) as HTMLSelectElement;
+    expect(sel.value).toBe('__unset__');
+    expect(sel.selectedOptions[0]?.textContent?.trim()).toBe('System default (private)');
+  });
+
+  it('reflects the stored default_specimen_visibility from the API', async () => {
+    mockGET.mockResolvedValue({ data: profileBody(null, 'public'), error: undefined });
+    render(Settings);
+
+    const sel = (await screen.findByTestId(
+      'settings-default-specimen-visibility',
+    )) as HTMLSelectElement;
+    expect(sel.value).toBe('public');
+  });
+
+  it('PATCHes default_specimen_visibility (only that key) when it changes', async () => {
+    mockGET.mockResolvedValue({ data: profileBody(null, null), error: undefined });
+    render(Settings);
+
+    const sel = (await screen.findByTestId(
+      'settings-default-specimen-visibility',
+    )) as HTMLSelectElement;
+    await fireEvent.change(sel, { target: { value: 'public' } });
+
+    mockPATCH.mockResolvedValue({ data: profileBody(null, 'public'), error: undefined });
+    await fireEvent.click(screen.getByTestId('settings-field-defaults-save'));
+
+    await waitFor(() => expect(mockPATCH).toHaveBeenCalled());
+    const [, opts] = mockPATCH.mock.calls[0] as [string, { body: Record<string, unknown> }];
+    expect(opts.body).toEqual({ default_specimen_visibility: 'public' });
+  });
+
+  it('sends explicit null when cleared back to System default', async () => {
+    mockGET.mockResolvedValue({ data: profileBody(null, 'public'), error: undefined });
+    render(Settings);
+
+    const sel = (await screen.findByTestId(
+      'settings-default-specimen-visibility',
+    )) as HTMLSelectElement;
+    expect(sel.value).toBe('public');
+    await fireEvent.change(sel, { target: { value: '__unset__' } });
+
+    mockPATCH.mockResolvedValue({ data: profileBody(null, null), error: undefined });
+    await fireEvent.click(screen.getByTestId('settings-field-defaults-save'));
+
+    await waitFor(() => expect(mockPATCH).toHaveBeenCalled());
+    const [, opts] = mockPATCH.mock.calls[0] as [string, { body: Record<string, unknown> }];
+    expect(opts.body).toEqual({ default_specimen_visibility: null });
+  });
+
+  it('sends both field_defaults and default_specimen_visibility when both change', async () => {
+    mockGET.mockResolvedValue({ data: profileBody(null, null), error: undefined });
+    render(Settings);
+
+    const price = (await screen.findByTestId('settings-default-price')) as HTMLSelectElement;
+    await fireEvent.change(price, { target: { value: 'unlisted' } });
+    const sel = screen.getByTestId('settings-default-specimen-visibility') as HTMLSelectElement;
+    await fireEvent.change(sel, { target: { value: 'public' } });
+
+    mockPATCH.mockResolvedValue({
+      data: profileBody({ price: 'unlisted' }, 'public'),
+      error: undefined,
+    });
+    await fireEvent.click(screen.getByTestId('settings-field-defaults-save'));
+
+    await waitFor(() => expect(mockPATCH).toHaveBeenCalled());
+    const [, opts] = mockPATCH.mock.calls[0] as [string, { body: Record<string, unknown> }];
+    expect(opts.body).toEqual({
+      field_defaults: { price: 'unlisted' },
+      default_specimen_visibility: 'public',
+    });
   });
 });

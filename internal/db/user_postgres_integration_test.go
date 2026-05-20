@@ -197,3 +197,101 @@ func TestIntegration_User_UpdateFieldDefaultsUnknownID(t *testing.T) {
 		t.Fatalf("unknown id: want ErrUserNotFound, got %v", err)
 	}
 }
+
+// --- default_specimen_visibility (mi-q2d8) ---
+//
+// Parallel coverage to FieldDefaults: NULL by default, round-trips via
+// Create, and UpdateDefaultSpecimenVisibility sets/clears the column
+// and surfaces ErrUserNotFound for unknown ids.
+
+func TestIntegration_User_DefaultSpecimenVisibilityNullByDefault(t *testing.T) {
+	pool := scopedDB(t)
+	repo := db.NewUserPostgres(pool)
+	ctx := context.Background()
+
+	u := mkUser(t, "dsv-null-"+uuid.NewString())
+	if err := repo.Create(ctx, nil, u); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := repo.GetBySub(ctx, u.KeycloakSub)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.DefaultSpecimenVisibility != nil {
+		t.Errorf("default_specimen_visibility: want nil, got %v", *got.DefaultSpecimenVisibility)
+	}
+}
+
+func TestIntegration_User_DefaultSpecimenVisibilityRoundtripViaCreate(t *testing.T) {
+	pool := scopedDB(t)
+	repo := db.NewUserPostgres(pool)
+	ctx := context.Background()
+
+	vis := domain.VisibilityPublic
+	u := mkUser(t, "dsv-create-"+uuid.NewString())
+	u.DefaultSpecimenVisibility = &vis
+	if err := repo.Create(ctx, nil, u); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := repo.GetBySub(ctx, u.KeycloakSub)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.DefaultSpecimenVisibility == nil || *got.DefaultSpecimenVisibility != vis {
+		t.Errorf("default_specimen_visibility: got %v, want %v", got.DefaultSpecimenVisibility, vis)
+	}
+}
+
+func TestIntegration_User_UpdateDefaultSpecimenVisibilitySetAndClear(t *testing.T) {
+	pool := scopedDB(t)
+	repo := db.NewUserPostgres(pool)
+	ctx := context.Background()
+
+	u := mkUser(t, "dsv-update-"+uuid.NewString())
+	if err := repo.Create(ctx, nil, u); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Set to a value.
+	vis := domain.VisibilityUnlisted
+	bumped := u.UpdatedAt.Add(time.Second)
+	if err := repo.UpdateDefaultSpecimenVisibility(ctx, nil, u.ID, &vis, bumped); err != nil {
+		t.Fatalf("update set: %v", err)
+	}
+	got, err := repo.GetBySub(ctx, u.KeycloakSub)
+	if err != nil {
+		t.Fatalf("get after set: %v", err)
+	}
+	if got.DefaultSpecimenVisibility == nil || *got.DefaultSpecimenVisibility != vis {
+		t.Errorf("after set: %v", got.DefaultSpecimenVisibility)
+	}
+	if !got.UpdatedAt.Equal(bumped) {
+		t.Errorf("updated_at: got %v, want %v", got.UpdatedAt, bumped)
+	}
+
+	// Clear to NULL.
+	bumped2 := bumped.Add(time.Second)
+	if err := repo.UpdateDefaultSpecimenVisibility(ctx, nil, u.ID, nil, bumped2); err != nil {
+		t.Fatalf("update clear: %v", err)
+	}
+	got, err = repo.GetBySub(ctx, u.KeycloakSub)
+	if err != nil {
+		t.Fatalf("get after clear: %v", err)
+	}
+	if got.DefaultSpecimenVisibility != nil {
+		t.Errorf("after clear: want nil, got %v", *got.DefaultSpecimenVisibility)
+	}
+	if !got.UpdatedAt.Equal(bumped2) {
+		t.Errorf("updated_at: got %v, want %v", got.UpdatedAt, bumped2)
+	}
+}
+
+func TestIntegration_User_UpdateDefaultSpecimenVisibilityUnknownID(t *testing.T) {
+	pool := scopedDB(t)
+	repo := db.NewUserPostgres(pool)
+
+	err := repo.UpdateDefaultSpecimenVisibility(context.Background(), nil, uuid.New(), nil, time.Now().UTC())
+	if !errors.Is(err, domain.ErrUserNotFound) {
+		t.Fatalf("unknown id: want ErrUserNotFound, got %v", err)
+	}
+}

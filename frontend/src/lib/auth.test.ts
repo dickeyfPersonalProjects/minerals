@@ -111,6 +111,7 @@ describe('auth store (V2 BFF cookie flow, mi-3vc4)', () => {
       email: 'x@x',
       pending: false,
       field_defaults: null as unknown as never,
+      default_specimen_visibility: null,
     });
     expect(get(isAuthenticated)).toBe(true);
     __resetAuthStore();

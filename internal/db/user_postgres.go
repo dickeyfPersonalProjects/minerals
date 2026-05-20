@@ -27,7 +27,7 @@ func NewUserPostgres(pool *pgxpool.Pool) *UserPostgres {
 // userColumns is the canonical read column list shared by every
 // user query. Kept in sync with scanUser.
 const userColumns = `id, keycloak_sub, email, display_name, status,
-		field_defaults, created_at, updated_at`
+		field_defaults, default_specimen_visibility, created_at, updated_at`
 
 // GetBySub returns the row whose keycloak_sub matches, or
 // domain.ErrUserNotFound.
@@ -71,11 +71,11 @@ func (r *UserPostgres) Create(ctx context.Context, tx domain.Tx, u domain.User) 
 	}
 	const q = `
 		INSERT INTO users (id, keycloak_sub, email, display_name, status,
-			field_defaults, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+			field_defaults, default_specimen_visibility, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 	_, err = exec.Exec(ctx, q,
 		u.ID, u.KeycloakSub, u.Email, u.DisplayName, string(u.Status),
-		fieldDefaults, u.CreatedAt, u.UpdatedAt,
+		fieldDefaults, visibilityToText(u.DefaultSpecimenVisibility), u.CreatedAt, u.UpdatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -127,6 +127,28 @@ func (r *UserPostgres) UpdateDisplayName(
 	return nil
 }
 
+// UpdateDefaultSpecimenVisibility writes the per-user default
+// whole-specimen visibility (mi-q2d8 / migration 0016). Passing nil
+// clears the column to SQL NULL — the create form then falls back to
+// the system default. Returns ErrUserNotFound when no row matched.
+func (r *UserPostgres) UpdateDefaultSpecimenVisibility(
+	ctx context.Context, tx domain.Tx, id uuid.UUID, visibility *domain.Visibility, updatedAt time.Time,
+) error {
+	exec := r.execer(tx)
+	const q = `
+		UPDATE users
+		   SET default_specimen_visibility = $2, updated_at = $3
+		 WHERE id = $1`
+	tag, err := exec.Exec(ctx, q, id, visibilityToText(visibility), updatedAt)
+	if err != nil {
+		return fmt.Errorf("user repo: update default specimen visibility: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrUserNotFound
+	}
+	return nil
+}
+
 // UpdateFieldDefaults writes the per-user visibility defaults map
 // (mi-fo8 / migration 0012). Passing nil clears the column to SQL
 // NULL — the all-fields-fall-through state. Returns
@@ -167,10 +189,11 @@ func scanUser(s rowScanner) (domain.User, error) {
 	var displayName *string
 	var status string
 	var fieldDefaults []byte
+	var defaultSpecimenVisibility *string
 	var createdAt, updatedAt time.Time
 	if err := s.Scan(
 		&u.ID, &u.KeycloakSub, &u.Email, &displayName, &status,
-		&fieldDefaults, &createdAt, &updatedAt,
+		&fieldDefaults, &defaultSpecimenVisibility, &createdAt, &updatedAt,
 	); err != nil {
 		return domain.User{}, err
 	}
@@ -183,7 +206,23 @@ func scanUser(s rowScanner) (domain.User, error) {
 		}
 		u.FieldDefaults = &fd
 	}
+	if defaultSpecimenVisibility != nil {
+		v := domain.Visibility(*defaultSpecimenVisibility)
+		u.DefaultSpecimenVisibility = &v
+	}
 	u.CreatedAt = createdAt
 	u.UpdatedAt = updatedAt
 	return u, nil
+}
+
+// visibilityToText maps a nullable domain.Visibility to the *string
+// pgx writes as a nullable text column: nil → SQL NULL, otherwise the
+// enum string. Used by the create insert and the default-specimen-
+// visibility update.
+func visibilityToText(v *domain.Visibility) *string {
+	if v == nil {
+		return nil
+	}
+	s := string(*v)
+	return &s
 }

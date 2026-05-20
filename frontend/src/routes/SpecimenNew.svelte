@@ -1,11 +1,31 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { link, push } from 'svelte-spa-router';
   import { client } from '../lib/api';
   import SpecimenForm from '../lib/SpecimenForm.svelte';
   import type { SpecimenFormSubmitResult } from '../lib/SpecimenForm.svelte';
   import { isAuthenticated } from '../lib/auth';
+  import { SystemDefault, type Visibility } from '../lib/api/visibility';
   import { formToCreateBody, type SpecimenFormValues } from '../lib/schemas/specimen';
   import { toastSuccess } from '../lib/toasts';
+
+  // The create form pre-fills the specimen's visibility with the
+  // user's account default (mi-q2d8). We fetch the profile before
+  // mounting SpecimenForm because the form captures its initial values
+  // once at construction; a profile failure is non-blocking — we fall
+  // back to the system default and still let the user create.
+  let defaultVisibility: Visibility = $state(SystemDefault);
+  let ready = $state(false);
+
+  onMount(async () => {
+    const { data } = await client.GET('/api/v1/profile');
+    if (data?.default_specimen_visibility) {
+      defaultVisibility = data.default_specimen_visibility;
+    }
+    // The user can still change it before submitting — it's only the
+    // form's initial selection, not a lock.
+    ready = true;
+  });
 
   function envelopeMessage(
     error: { error?: { code?: string; message?: string } } | undefined,
@@ -67,12 +87,15 @@
 
   {#if $isAuthenticated}
     <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <SpecimenForm
-        mode="create"
-        submitLabel="Create"
-        onSubmit={createSpecimen}
-        onCancel={cancel}
-      />
+      {#if ready}
+        <SpecimenForm
+          mode="create"
+          submitLabel="Create"
+          initial={{ visibility: defaultVisibility }}
+          onSubmit={createSpecimen}
+          onCancel={cancel}
+        />
+      {/if}
     </div>
   {:else}
     <div
