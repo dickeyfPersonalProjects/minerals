@@ -342,7 +342,7 @@ export interface paths {
         };
         /**
          * List specimens
-         * @description Cursor-paginated list of specimens. Default ordering is `created_at DESC, id DESC`. When `?q=` is present, ordering switches to `ts_rank DESC, created_at DESC, id DESC` and a cursor previously issued under default ordering is rejected (clients discard cursors when filters or `q` change). `?collector_id=` filters to specimens whose chain contains the given collector (mi-zv3). Anonymous callers see public specimens only; the DB scope filter does the rest (CONTRACT.md §13 v2).
+         * @description Cursor-paginated list of specimens. Default ordering is `created_at DESC, id DESC`. When `?q=` is present, ordering switches to `ts_rank DESC, created_at DESC, id DESC` and a cursor previously issued under default ordering is rejected (clients discard cursors when filters or `q` change). `?collector_id=` filters to specimens whose chain contains the given collector (mi-zv3). `?scope=mine` restricts the list to the authenticated caller's own specimens across all visibilities (mi-xue7); anonymous callers receive an empty list. Anonymous callers see public specimens only; the DB scope filter does the rest (CONTRACT.md §13 v2).
          */
         get: operations["list-specimens"];
         put?: never;
@@ -3096,6 +3096,8 @@ export interface operations {
                 collector_id?: string;
                 /** @description Full-text search; when present, ordering switches to ts_rank DESC and any cursor previously issued under default ordering becomes invalid. */
                 q?: string;
+                /** @description When 'mine', restrict the list to the authenticated caller's own specimens across all visibilities (the 'browse my collection' view, mi-xue7). Anonymous callers receive an empty list (per CONTRACT.md §13: list endpoints never return 401). */
+                scope?: "mine";
             };
             header?: never;
             path?: never;

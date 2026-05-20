@@ -408,6 +408,13 @@ func applySharedFilters(
 		))
 		args = append(args, *filter.CollectorID)
 	}
+	if filter.OwnerID != nil {
+		// "Browse my collection" (mi-xue7): restrict to a single author.
+		// Combined with the layer-1 specimenListScope, an owner viewing
+		// their own collection sees every visibility of their own rows.
+		where = append(where, fmt.Sprintf("specimens.author_id = $%d", len(args)+1))
+		args = append(args, *filter.OwnerID)
+	}
 	return where, args
 }
 

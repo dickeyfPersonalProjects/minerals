@@ -85,7 +85,7 @@ describe('Layout — navbar', () => {
     await screen.findByTestId('nav-qr-sheet');
   });
 
-  it('always renders the static Specimens and Collectors links', () => {
+  it('always renders the static Browse all and Collectors links', () => {
     mockGet.mockResolvedValue({
       data: undefined,
       error: { error: { code: 'not_found', message: 'no sheet' } },
@@ -93,6 +93,26 @@ describe('Layout — navbar', () => {
     });
     render(Layout);
     expect(screen.getByTestId('nav-collectors')).toBeInTheDocument();
+    expect(screen.getByTestId('nav-browse-all')).toBeInTheDocument();
+  });
+
+  it('shows "My collection" only when authenticated (mi-xue7)', async () => {
+    mockGet.mockResolvedValue({
+      data: undefined,
+      error: { error: { code: 'not_found', message: 'no sheet' } },
+      response: new Response(null, { status: 404 }),
+    });
+    // Anonymous: no "My collection" link.
+    const { unmount } = render(Layout);
+    expect(screen.queryByTestId('nav-my-collection')).not.toBeInTheDocument();
+    unmount();
+
+    // Authenticated: the link appears and points at /collection.
+    __authenticate();
+    render(Layout);
+    const link = await screen.findByTestId('nav-my-collection');
+    expect(link).toHaveAttribute('href', '/collection');
+    expect(link).toHaveTextContent('My collection');
   });
 });
 
