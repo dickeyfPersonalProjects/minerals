@@ -75,17 +75,30 @@
     images: UNSET,
   });
 
-  function toSelectValue(v: Visibility | undefined): SelectValue {
+  // 'New specimens' default whole-specimen visibility (mi-q2d8).
+  // Separate from the per-field defaults above: this is the value the
+  // create form pre-fills the specimen's visibility with. UNSET means
+  // "no preference; the create form falls back to the system default".
+  let initialSpecimenVis: SelectValue = $state(UNSET);
+  let currentSpecimenVis: SelectValue = $state(UNSET);
+
+  function toSelectValue(v: Visibility | undefined | null): SelectValue {
     return v ?? UNSET;
   }
 
-  function loadInto(defaults: FieldDefaults | null | undefined): void {
+  function loadInto(
+    defaults: FieldDefaults | null | undefined,
+    specimenVis: Visibility | null | undefined,
+  ): void {
     const fd = defaults ?? {};
     for (const { key } of FIELDS) {
       const v = toSelectValue(fd[key]);
       initial[key] = v;
       current[key] = v;
     }
+    const sv = toSelectValue(specimenVis);
+    initialSpecimenVis = sv;
+    currentSpecimenVis = sv;
   }
 
   onMount(async () => {
@@ -98,12 +111,15 @@
       loadError = error?.error?.message ?? error?.error?.code ?? 'Failed to load profile';
       return;
     }
-    loadInto(data.field_defaults);
+    loadInto(data.field_defaults, data.default_specimen_visibility);
   });
 
   // dirty drives the Save button — disable when nothing changed
   // so an accidental click can't fire an empty PATCH.
-  const dirty = $derived(FIELDS.some(({ key }) => current[key] !== initial[key]));
+  const dirty = $derived(
+    FIELDS.some(({ key }) => current[key] !== initial[key]) ||
+      currentSpecimenVis !== initialSpecimenVis,
+  );
 
   // buildPatch returns the field_defaults payload for the PATCH.
   // Only changed keys are included. A change from a value back to
@@ -123,17 +139,31 @@
     event.preventDefault();
     if (saving || !dirty) return;
     saving = true;
-    const { data, error } = await client.PATCH('/api/v1/profile', {
-      body: { field_defaults: buildPatch() },
-    });
+    // Only send keys that changed. field_defaults is omitted entirely
+    // when no per-field row moved; default_specimen_visibility is sent
+    // (value, or null to clear) only when the 'New specimens' dropdown
+    // changed.
+    const fdPatch = buildPatch();
+    const body: {
+      field_defaults?: Record<FieldKey, Visibility | null>;
+      default_specimen_visibility?: Visibility | null;
+    } = {};
+    if (Object.keys(fdPatch).length > 0) {
+      body.field_defaults = fdPatch;
+    }
+    if (currentSpecimenVis !== initialSpecimenVis) {
+      body.default_specimen_visibility =
+        currentSpecimenVis === UNSET ? null : (currentSpecimenVis as Visibility);
+    }
+    const { data, error } = await client.PATCH('/api/v1/profile', { body });
     saving = false;
     if (error || !data) {
       // Toast middleware already surfaced the error; keep current
       // selections so the user can retry without losing input.
       return;
     }
-    loadInto(data.field_defaults);
-    toastSuccess('Field defaults saved');
+    loadInto(data.field_defaults, data.default_specimen_visibility);
+    toastSuccess('Settings saved');
   }
 </script>
 
@@ -195,6 +225,35 @@
           </li>
         {/each}
       </ul>
+    </fieldset>
+
+    <fieldset class="space-y-4" disabled={loading || saving} data-testid="settings-new-specimens">
+      <legend class="text-lg font-medium text-[var(--color-text)]">New specimens</legend>
+      <div class="grid grid-cols-1 gap-2 sm:grid-cols-[14rem_1fr] sm:items-start sm:gap-4">
+        <div>
+          <label
+            for="settings-default-specimen-visibility"
+            class="mb-1 block text-sm font-medium text-[var(--color-text)]"
+          >
+            Default visibility for new specimens
+          </label>
+          <select
+            id="settings-default-specimen-visibility"
+            data-testid="settings-default-specimen-visibility"
+            bind:value={currentSpecimenVis}
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none"
+          >
+            <option value={UNSET}>System default (private)</option>
+            <option value="private">Private — only you can see it</option>
+            <option value="unlisted">Unlisted — anyone with the link</option>
+            <option value="public">Public — listed for everyone</option>
+          </select>
+        </div>
+        <p class="text-sm text-[var(--color-text-muted)] sm:pt-7">
+          New specimens use this visibility unless you change it on the create form. Existing
+          specimens are unaffected.
+        </p>
+      </div>
     </fieldset>
 
     <button

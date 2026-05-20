@@ -119,6 +119,7 @@ export function __authenticate(over: Partial<AuthUser> = {}): void {
     email: 'test@example.com',
     pending: false,
     field_defaults: null as unknown as AuthUser['field_defaults'],
+    default_specimen_visibility: null,
     ...over,
   });
 }

@@ -528,3 +528,106 @@ func TestProfilePatch_RejectsPendingUser(t *testing.T) {
 		t.Errorf("code = %q, want profile_setup_required", got.Error.Code)
 	}
 }
+
+// --- default_specimen_visibility (mi-q2d8) ---
+
+func TestProfileGet_ReturnsDefaultSpecimenVisibility(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	u := seedActiveProfile(t, repo, "Alice", nil)
+	u.DefaultSpecimenVisibility = ptrVis(domain.VisibilityPublic)
+	repo.seed(u)
+	h := New(Deps{Users: repo})
+
+	got := decodeProfile(t, doProfileRequest(t, h, http.MethodGet, ""))
+	if got.DefaultSpecimenVisibility == nil ||
+		*got.DefaultSpecimenVisibility != domain.VisibilityPublic {
+		t.Errorf("default_specimen_visibility = %+v, want public", got.DefaultSpecimenVisibility)
+	}
+}
+
+func TestProfileGet_DefaultSpecimenVisibilityNullWhenUnset(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	seedActiveProfile(t, repo, "Alice", nil)
+	h := New(Deps{Users: repo})
+
+	got := decodeProfile(t, doProfileRequest(t, h, http.MethodGet, ""))
+	if got.DefaultSpecimenVisibility != nil {
+		t.Errorf("default_specimen_visibility = %+v, want nil when unset", got.DefaultSpecimenVisibility)
+	}
+}
+
+func TestProfilePatch_DefaultSpecimenVisibility_RoundTripThroughGet(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	seedActiveProfile(t, repo, "Alice", nil)
+	h := New(Deps{Users: repo})
+
+	patched := decodeProfile(t, doProfileRequest(t, h, http.MethodPatch,
+		`{"default_specimen_visibility":"unlisted"}`))
+	if patched.DefaultSpecimenVisibility == nil ||
+		*patched.DefaultSpecimenVisibility != domain.VisibilityUnlisted {
+		t.Fatalf("PATCH response default_specimen_visibility = %+v", patched.DefaultSpecimenVisibility)
+	}
+
+	got := decodeProfile(t, doProfileRequest(t, h, http.MethodGet, ""))
+	if got.DefaultSpecimenVisibility == nil ||
+		*got.DefaultSpecimenVisibility != domain.VisibilityUnlisted {
+		t.Errorf("GET after PATCH default_specimen_visibility = %+v", got.DefaultSpecimenVisibility)
+	}
+}
+
+func TestProfilePatch_DefaultSpecimenVisibility_NullClears(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	u := seedActiveProfile(t, repo, "Alice", nil)
+	u.DefaultSpecimenVisibility = ptrVis(domain.VisibilityPublic)
+	repo.seed(u)
+	h := New(Deps{Users: repo})
+
+	patched := decodeProfile(t, doProfileRequest(t, h, http.MethodPatch,
+		`{"default_specimen_visibility":null}`))
+	if patched.DefaultSpecimenVisibility != nil {
+		t.Fatalf("PATCH response default_specimen_visibility = %+v, want nil after clear", patched.DefaultSpecimenVisibility)
+	}
+
+	got := decodeProfile(t, doProfileRequest(t, h, http.MethodGet, ""))
+	if got.DefaultSpecimenVisibility != nil {
+		t.Errorf("GET after clear default_specimen_visibility = %+v, want nil", got.DefaultSpecimenVisibility)
+	}
+}
+
+func TestProfilePatch_DefaultSpecimenVisibility_AbsentPreserves(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	u := seedActiveProfile(t, repo, "Alice", nil)
+	u.DefaultSpecimenVisibility = ptrVis(domain.VisibilityUnlisted)
+	repo.seed(u)
+	h := New(Deps{Users: repo})
+
+	// Patch an unrelated field — default_specimen_visibility omitted.
+	patched := decodeProfile(t, doProfileRequest(t, h, http.MethodPatch,
+		`{"display_name":"Bob"}`))
+	if patched.DefaultSpecimenVisibility == nil ||
+		*patched.DefaultSpecimenVisibility != domain.VisibilityUnlisted {
+		t.Errorf("default_specimen_visibility = %+v, want preserved unlisted", patched.DefaultSpecimenVisibility)
+	}
+}
+
+func TestProfilePatch_DefaultSpecimenVisibility_InvalidValueRejected(t *testing.T) {
+	t.Parallel()
+	repo := newFakeUserRepo()
+	seedActiveProfile(t, repo, "Alice", nil)
+	h := New(Deps{Users: repo})
+
+	rec := doProfileRequest(t, h, http.MethodPatch,
+		`{"default_specimen_visibility":"world-readable"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	got := decodeError(t, rec.Body)
+	if got.Error.Code != "invalid_default_specimen_visibility" {
+		t.Errorf("code = %q, want invalid_default_specimen_visibility", got.Error.Code)
+	}
+}

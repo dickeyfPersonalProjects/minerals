@@ -236,7 +236,7 @@ export interface paths {
         head?: never;
         /**
          * Patch the caller's profile
-         * @description Partial update of the caller's profile. Accepts `display_name` (mi-j3kn) and `field_defaults` (per-field default visibility, mi-fo8). Keys present in the patch replace the stored value; keys absent are preserved. For field_defaults, an explicit JSON `null` per inner key clears that entry; sending `field_defaults: null` at the top level is rejected. A display_name that is empty after trimming, longer than 80 chars, or `null` is rejected with `invalid_display_name`. Unknown keys and invalid values are rejected with 400.
+         * @description Partial update of the caller's profile. Accepts `display_name` (mi-j3kn), `field_defaults` (per-field default visibility, mi-fo8), and `default_specimen_visibility` (create-form whole-specimen default, mi-q2d8). Keys present in the patch replace the stored value; keys absent are preserved. For field_defaults, an explicit JSON `null` per inner key clears that entry; sending `field_defaults: null` at the top level is rejected. For default_specimen_visibility, an explicit `null` clears the preference (create form falls back to the system default); an invalid value is rejected with `invalid_default_specimen_visibility`. A display_name that is empty after trimming, longer than 80 chars, or `null` is rejected with `invalid_display_name`. Unknown keys and invalid values are rejected with 400.
          */
         patch: operations["patch-profile"];
         trace?: never;
@@ -1099,6 +1099,11 @@ export interface components {
              * @example //schemas/ProfileBody.json
              */
             readonly $schema?: string;
+            /**
+             * @description Default whole-specimen visibility for newly-created specimens (mi-q2d8). Null means no preference; the create form falls back to the system default (private). Does not affect existing specimens.
+             * @enum {string|null}
+             */
+            default_specimen_visibility: "private" | "unlisted" | "public" | null;
             /** @description Display name as persisted. */
             display_name: string;
             /** @description Email from the JWT claim, persisted at first-login. */
@@ -1117,6 +1122,8 @@ export interface components {
              * @example //schemas/ProfilePatchBody.json
              */
             readonly $schema?: string;
+            /** @description Default whole-specimen visibility for new specimens; see visibilityPatch schema. */
+            default_specimen_visibility?: string | null;
             /** @description Replacement display_name; trimmed, required non-empty, max 80 chars. Omit to leave unchanged. */
             display_name?: string;
             /** @description Per-field default visibility map; see FieldDefaultsPatch schema. */

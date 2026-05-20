@@ -698,8 +698,15 @@ type User struct {
 	// SQL NULL — no user-level defaults set, fall through to system
 	// default for every field.
 	FieldDefaults *FieldDefaults
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// DefaultSpecimenVisibility is the per-user default whole-specimen
+	// visibility the create form pre-fills with (mi-q2d8). nil means
+	// SQL NULL — no user preference, so the create form falls back to
+	// the system default (private). Distinct from FieldDefaults, which
+	// governs per-field redaction within a specimen, not the whole
+	// specimen's visibility.
+	DefaultSpecimenVisibility *Visibility
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
 }
 
 // UserRepo is the consumer-side interface for the users table
@@ -731,6 +738,12 @@ type UserRepo interface {
 	// map (mi-fo8 / migration 0012). Passing nil clears the column
 	// (SQL NULL). Returns ErrUserNotFound when no row matched.
 	UpdateFieldDefaults(ctx context.Context, tx Tx, id uuid.UUID, defaults *FieldDefaults, updatedAt time.Time) error
+	// UpdateDefaultSpecimenVisibility writes the per-user default
+	// whole-specimen visibility (mi-q2d8 / migration 0016). Passing
+	// nil clears the column (SQL NULL) — the create form then falls
+	// back to the system default. Returns ErrUserNotFound when no row
+	// matched.
+	UpdateDefaultSpecimenVisibility(ctx context.Context, tx Tx, id uuid.UUID, visibility *Visibility, updatedAt time.Time) error
 }
 
 // SpecimenCollectorRepo is the consumer-side interface for the

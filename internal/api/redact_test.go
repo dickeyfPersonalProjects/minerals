@@ -101,6 +101,12 @@ func (r *redactFakeUserRepo) UpdateFieldDefaults(_ context.Context, _ domain.Tx,
 	r.byID[id] = u
 	return nil
 }
+func (r *redactFakeUserRepo) UpdateDefaultSpecimenVisibility(_ context.Context, _ domain.Tx, id uuid.UUID, visibility *domain.Visibility, _ time.Time) error {
+	u := r.byID[id]
+	u.DefaultSpecimenVisibility = visibility
+	r.byID[id] = u
+	return nil
+}
 
 // visPtr is a one-shot Visibility pointer helper for the table; the
 // matrix needs the explicit pointer-vs-nil distinction to drive the
@@ -619,6 +625,9 @@ func (r *countingUserRepo) UpdateDisplayName(ctx context.Context, tx domain.Tx, 
 }
 func (r *countingUserRepo) UpdateFieldDefaults(ctx context.Context, tx domain.Tx, id uuid.UUID, defaults *domain.FieldDefaults, t time.Time) error {
 	return r.inner.UpdateFieldDefaults(ctx, tx, id, defaults, t)
+}
+func (r *countingUserRepo) UpdateDefaultSpecimenVisibility(ctx context.Context, tx domain.Tx, id uuid.UUID, visibility *domain.Visibility, t time.Time) error {
+	return r.inner.UpdateDefaultSpecimenVisibility(ctx, tx, id, visibility, t)
 }
 
 // reflectivePeek is a tiny utility used by the matrix's failure path
