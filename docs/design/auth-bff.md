@@ -654,14 +654,22 @@ We make Pattern B easy by enforcing the interface boundary in V2.
 
 ### Removed (no longer needed in browser-served runtime-config)
 
-- `PUBLIC_OIDC_ISSUER_URL`
-- `PUBLIC_OIDC_CLIENT_ID`
-- `PUBLIC_OIDC_REDIRECT_URI`
+- `PUBLIC_OIDC_ISSUER_URL` — SPA-only, dead under BFF
+- `PUBLIC_OIDC_CLIENT_ID` — SPA-only, dead under BFF
+
+> ⚠️ `PUBLIC_OIDC_REDIRECT_URI` is **not** in this list. Despite the
+> `PUBLIC_` prefix it is backend-consumed (the redirect URI handed to
+> Keycloak from `/auth/login`) and is **required**. It was renamed to
+> `OIDC_REDIRECT_URI` (mi-kebf) precisely because the prefix made an
+> operator delete it as SPA-only config, disabling BFF login in prod.
 
 Backend retains its own:
 - `OIDC_ISSUER_URL`
 - `OIDC_CLIENT_ID`
 - `OIDC_CLIENT_SECRET` (new — was not needed for public PKCE client)
+- `OIDC_REDIRECT_URI` (renamed from `PUBLIC_OIDC_REDIRECT_URI`, mi-kebf;
+  legacy name still read during the migration window with a deprecation
+  warning)
 - `OIDC_DISCOVERY_URL` (optional dev-only override; in-network discovery URL
   when the public issuer is unreachable from the backend container — see
   CONFIG.md and mi-8tnv; sister to the verifier's `OIDC_JWKS_URL`)

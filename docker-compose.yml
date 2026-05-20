@@ -115,7 +115,7 @@ services:
       # match OIDC_ISSUER_URL because Keycloak emits URLs based on
       # KC_HOSTNAME (set on the keycloak service). Unset in prod.
       OIDC_DISCOVERY_URL: http://keycloak:8080/realms/minerals
-      PUBLIC_OIDC_REDIRECT_URI: http://localhost:8080/auth/callback
+      OIDC_REDIRECT_URI: http://localhost:8080/auth/callback
       #
       # V2 BFF auth (mi-1d5i). Both values are required to enable the
       # /auth/login → /auth/callback → cookie-session flow; when either

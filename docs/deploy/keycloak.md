@@ -560,7 +560,7 @@ SealedSecret:
 |---|---|---|
 | `OIDC_ISSUER_URL` | `realm_issuer` (e.g. `https://auth.example.com/realms/minerals`) | OAuth-client issuer for `/auth/login` → `/auth/callback`. Discovery (`{issuer}/.well-known/openid-configuration`) yields authorization, token, JWKS, and end-session endpoints. |
 | `OIDC_CLIENT_ID` | `frontend_client_id` (`minerals-frontend`) | Confidential client id for the server-side code exchange. |
-| `PUBLIC_OIDC_REDIRECT_URI` | `https://www.<env_domain>/auth/callback` | Backend-served callback URL handed to Keycloak on `/auth/login`. MUST match a `valid_redirect_uris` entry on the `minerals-frontend` Keycloak client. The `PUBLIC_` prefix is historical — the value is consumed by the backend only under BFF. |
+| `OIDC_REDIRECT_URI` | `https://www.<env_domain>/auth/callback` | Backend-served callback URL handed to Keycloak on `/auth/login`. MUST match a `valid_redirect_uris` entry on the `minerals-frontend` Keycloak client. Renamed from `PUBLIC_OIDC_REDIRECT_URI` (mi-kebf) — backend-consumed, never SPA-facing. When migrating from PKCE, delete `PUBLIC_OIDC_ISSUER_URL` and `PUBLIC_OIDC_CLIENT_ID` (SPA-only, now dead) but **KEEP** the redirect URI — it is now `OIDC_REDIRECT_URI` and is backend-required. The legacy name is still read during the migration window (with a deprecation warning). |
 | `OIDC_CLIENT_SECRET` (Secret) | `frontend_client_secret` | Confidential client secret for the code exchange. |
 | `OAUTH_STATE_HMAC_KEY` (Secret) | Operator-generated (`openssl rand -base64 32`) | Signs the BFF state cookie. |
 

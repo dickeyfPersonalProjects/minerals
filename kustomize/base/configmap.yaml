@@ -3,7 +3,7 @@
 # Secret env vars (DATABASE_URL, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY) come
 # from operator-managed Secrets — see deployment.yaml.
 #
-# OIDC keys (OIDC_ISSUER_URL, OIDC_CLIENT_ID, PUBLIC_OIDC_REDIRECT_URI)
+# OIDC keys (OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_REDIRECT_URI)
 # are hostname-dependent and so live in the per-env overlay rather than
 # the base — see docs/deploy/example/{staging,prod}/mineral.yaml for the
 # patch shape, and CONFIG.md for the inventory rows.
