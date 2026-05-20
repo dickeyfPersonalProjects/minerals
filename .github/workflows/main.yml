@@ -312,6 +312,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      # Deploy markers baked into the image (mi-c0sv): short SHA + ISO 8601
+      # build timestamp. GIT_SHA/BUILD_DATE flow into the SPA footer via
+      # Vite's `define`; VERSION populates the Go binary's boot `version`
+      # log (ldflags -X main.version), matching the :sha-<short> image tag.
+      - name: Compute build metadata
+        id: meta
+        run: |
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v7
@@ -319,6 +329,10 @@ jobs:
           context: .
           file: Dockerfile
           platforms: ${{ matrix.platform }}
+          build-args: |
+            GIT_SHA=${{ steps.meta.outputs.short_sha }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}
+            VERSION=sha-${{ steps.meta.outputs.short_sha }}
           outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest

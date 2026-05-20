@@ -5,6 +5,7 @@
   import LoginButton from './LoginButton.svelte';
   import RegisterButton from './RegisterButton.svelte';
   import ProfileMenu from './ProfileMenu.svelte';
+  import Footer from './Footer.svelte';
   import { qrSheetState, refreshQrSheet } from './qrSheet';
   import { authStore } from './auth';
 
@@ -106,9 +107,5 @@
     {/if}
   </main>
 
-  <footer
-    class="border-t border-[var(--color-border)] bg-[var(--color-surface)]/60 px-4 py-3 text-center text-xs text-[var(--color-text-muted)] sm:px-6"
-  >
-    Minerals · personal collection
-  </footer>
+  <Footer />
 </div>
