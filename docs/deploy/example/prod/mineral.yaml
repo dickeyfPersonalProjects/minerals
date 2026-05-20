@@ -70,7 +70,7 @@ spec:
         data:
           OIDC_ISSUER_URL: https://auth.example.com/realms/minerals
           OIDC_CLIENT_ID: minerals-frontend
-          PUBLIC_OIDC_REDIRECT_URI: https://www.example.com/auth/callback
+          OIDC_REDIRECT_URI: https://www.example.com/auth/callback
     # CNPG backup → in-cluster MinIO (mi-jgzi). Prod-only; staging has
     # no Cluster patch and therefore no backups. The companion resources
     # (bucket-init Job, ScheduledBackup, dedicated SealedSecret) are

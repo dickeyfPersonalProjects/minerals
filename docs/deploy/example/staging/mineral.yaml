@@ -68,4 +68,4 @@ spec:
         data:
           OIDC_ISSUER_URL: https://auth.staging.example.com/realms/minerals
           OIDC_CLIENT_ID: minerals-frontend
-          PUBLIC_OIDC_REDIRECT_URI: https://www.staging.example.com/auth/callback
+          OIDC_REDIRECT_URI: https://www.staging.example.com/auth/callback
