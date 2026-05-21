@@ -125,6 +125,14 @@ type Deps struct {
 	// path (bearer auth in an Authorization header is not subject to
 	// CSRF; cookies are).
 	CSRFMW func(http.Handler) http.Handler
+	// RateLimitMW enforces the per-tier token-bucket limits (mi-tnru):
+	// strict per-IP on auth endpoints, per-account (or per-IP when
+	// anonymous) on reads/writes/file-serving. Composes BETWEEN
+	// SessionMW and CSRFMW so the authenticated user is already
+	// attached when the limiter derives the account key. nil disables
+	// rate limiting entirely — the path unit tests take (production
+	// wiring in cmd/minerals sets it from the RATE_LIMIT_* config).
+	RateLimitMW func(http.Handler) http.Handler
 }
 
 // New returns an http.Handler with the v1 routes wired up. Callers
@@ -245,13 +253,20 @@ func New(deps Deps) http.Handler {
 	if deps.CSRFMW != nil {
 		top = deps.CSRFMW(top)
 	}
+	// RateLimitMW sits between SessionMW (outer) and CSRFMW (inner):
+	// it needs the user SessionMW attaches for account keying, and it
+	// runs before CSRF so a flood of unauthenticated/forged-token
+	// writes is throttled before reaching the CSRF check (mi-tnru).
+	if deps.RateLimitMW != nil {
+		top = deps.RateLimitMW(top)
+	}
 	if deps.SessionMW != nil {
 		top = deps.SessionMW(top)
 	}
 
 	// Apply public middleware to the entire mux. Full chain order:
 	// Recovery → RequestID → SecHeaders → CSP → Logging →
-	// [SessionMW → CSRFMW →] [huma per-operation chain →] handler.
+	// [SessionMW → RateLimitMW → CSRFMW →] [huma per-operation chain →] handler.
 	publicMW := []func(http.Handler) http.Handler{
 		Recovery, RequestID, SecurityHeaders, CSP, Logging,
 	}
