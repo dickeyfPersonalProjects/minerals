@@ -1,0 +1,73 @@
+# B2 variant of the CNPG backup Cluster patch.
+#
+# This is the EXTERNAL-storage worked example of the "two-field swap"
+# the in-cluster-MinIO patch in ../mineral.yaml describes. To switch
+# prod's DB backup from in-cluster MinIO to Backblaze B2, replace the
+# in-cluster Cluster patch block in ../mineral.yaml (the
+# `target: { kind: Cluster, name: minerals-pg }` patch) with the block
+# below, then re-seal the creds into minerals-pg-backup-creds using the
+# B2 application key (see minerals-pg-b2-creds.yaml).
+#
+# What changes vs. the in-cluster-MinIO patch:
+#   - destinationPath: s3://<your-b2-bucket>/   (your B2 bucket name)
+#   - endpointURL:     https://s3.<region>.backblazeb2.com
+#   - s3Credentials:   now reference the B2 application key, sealed into
+#                      the SAME Secret name (minerals-pg-backup-creds),
+#                      so only the plaintext values differ.
+# Everything else (wal/data compression, retentionPolicy) is identical.
+#
+# Backblaze B2 specifics to get right:
+#   - Endpoint format: https://s3.<region>.backblazeb2.com
+#       The <region> comes from the bucket (shown in the B2 console /
+#       `b2 get-bucket`), e.g. us-west-004, eu-central-003. It is NOT
+#       optional the way AWS's is — B2 is not the SDK's default.
+#   - The aws-sdk Barman uses derives virtual-hosted-style URLs from this
+#       endpoint: <bucket>.s3.<region>.backblazeb2.com. B2 supports that;
+#       no path-style override is needed.
+#   - Credentials are a B2 APPLICATION KEY, not the master key:
+#       applicationKeyId  -> ACCESS_KEY_ID
+#       applicationKey    -> SECRET_ACCESS_KEY
+#     Scope the application key to ONLY this one bucket (read+write).
+#   - Enable B2 bucket VERSIONING (Keep all versions) so backup
+#       artifacts can't be silently overwritten/deleted; optionally add a
+#       lifecycle rule to bound storage. Operator manual steps —
+#       see ../../../restore.md "Backblaze B2 setup".
+#   - region: B2's S3 API does not require an explicit region field
+#       (the region is encoded in the endpoint host). If a future
+#       Barman/SDK version complains, add `region: <your-region>` under
+#       barmanObjectStore — left out here because the endpoint suffices.
+#
+# CNPG/Barman talks plain S3 to B2; multipart upload and the standard
+# GET/PUT/DELETE + ListObjectVersions surface all work. The recovery
+# externalClusters block in restore.md takes the same endpointURL +
+# destinationPath swap.
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: minerals-pg
+spec:
+  backup:
+    barmanObjectStore:
+      # Your B2 bucket name. Barman lays out its own
+      # <cluster-name>/base/ and <cluster-name>/wals/ subtrees under
+      # the bucket root, same as the in-cluster example.
+      destinationPath: s3://your-b2-bucket-name/
+      # B2 S3-compatible endpoint. Swap <region> for your bucket's
+      # region (e.g. us-west-004).
+      endpointURL: https://s3.your-region.backblazeb2.com
+      s3Credentials:
+        accessKeyId:
+          # Sealed value = B2 applicationKeyId. Same Secret name as the
+          # in-cluster example; re-seal with the B2 key.
+          name: minerals-pg-backup-creds
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          # Sealed value = B2 applicationKey.
+          name: minerals-pg-backup-creds
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+    retentionPolicy: "30d"
