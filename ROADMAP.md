@@ -89,7 +89,7 @@ This is the source of truth for the project roadmap.
 
 ## V2 — Multi-user ✅ COMPLETE (shipped + live in prod)
 
-*Real authentication + multi-user-ready authorization. The V2 milestone — BFF auth, per-row/per-field visibility, V1→V2 data cut — is **done and live in production** under `mi-1d5i`. A few non-blocking backlog items (catalog numbering, EXIF opt-in, storage housekeeping) remain unchecked below.*
+*Real authentication + multi-user-ready authorization. The V2 milestone — BFF auth, per-row/per-field visibility, V1→V2 data cut — is **done and live in production** under `mi-1d5i`.*
 
 ### Auth
 - [x] Real OIDC authentication via Keycloak operator (cluster already has it) `(mi-7xo)` (#154)
@@ -103,18 +103,6 @@ This is the source of truth for the project roadmap.
 - [x] Visibility UX — `private | unlisted | public` control in specimen UI `(mi-35hk)`
 - [x] Public / anonymous specimen reads (no auth required, visibility-gated)
 - [x] **Per-field visibility** — independent visibility on `price`, `acquired_from`, and `images` with user profile defaults + per-specimen / per-image overrides. See CONTRACT §13b. `(mi-fo8)` (10 sub-beads merged)
-- [ ] Direct-S3 / presigned-GET fast path for public file downloads *(deferred; images still Go-proxied — see V3 edge/CDN candidate)*
-
-### Catalog numbering
-- [ ] Auto-generation with customizable ID scheme (e.g. `FD-2026-0042`, user-defined template)
-
-### Photo metadata
-- [ ] Per-specimen / per-photo "preserve full EXIF" opt-in (GPS, XMP, MakerNotes for provenance)
-
-### Storage infrastructure
-- [ ] MinIO bucket versioning
-- [ ] Orphan cleanup job (files in MinIO with no `files`-row reference)
-- [ ] Collector merging UI (combine near-duplicate collector entries)
 
 ---
 
@@ -130,6 +118,7 @@ This is the source of truth for the project roadmap.
 
 ### Hardening prerequisites (must land before the public cut)
 - [ ] DB backup to Backblaze B2 (external, off-cluster); MinIO images mirrored to a local bucket for cost `(mi-lhsu)`
+- [ ] MinIO bucket versioning on the primary image bucket — data-safety; distinct from the backup-bucket versioning in `(mi-lhsu)`
 - [ ] User data Export / Import — collection + images; portability + user-controlled backup + GDPR data-access `(mi-dkuu)`
 - [ ] API rate limiting — tiered limits to prevent abuse once publicly reachable `(mi-tnru)`
 - [ ] Penetration test / security audit — self-conducted, good quality; OWASP ZAP + manual IDOR/visibility/CSRF probing; fix-beads per finding `(mi-z58x)`
@@ -149,9 +138,21 @@ This is the source of truth for the project roadmap.
 
 *Post-launch feature expansion. Research and planning needed on several items before scoping beads.*
 
+### Catalog numbering
+- [ ] Auto-generation with customizable ID scheme (e.g. `FD-2026-0042`, user-defined template)
+
 ### Specimen data
 - [ ] Gamma spectrum capture, storage, and display
 - [ ] Advanced journal UX (research and design phase before filing)
+
+### Photo metadata
+- [ ] Per-specimen / per-photo "preserve full EXIF" opt-in (GPS, XMP, MakerNotes for provenance)
+
+### Collectors
+- [ ] Collector merging UI (combine near-duplicate collector entries)
+
+### Storage housekeeping
+- [ ] Orphan cleanup job (files in MinIO with no `files`-row reference)
 
 ### Storage locations
 User-defined physical storage locations, hierarchical (e.g. House → Basement → Furnace Room → Drawer 1). Each specimen can be tagged with a location.
