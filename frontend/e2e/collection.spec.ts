@@ -145,6 +145,14 @@ test('scoped list views — owner sees public+private on /collection; anonymous 
   // remains discoverable.
   await page.context().clearCookies();
   await page.goto('/#/specimens');
+  // clearCookies() empties the cookie jar but NOT the SPA's in-memory
+  // authStore — and goto() to a fragment-only change (we were on
+  // /#/collection) does NOT reload the document, so the SPA never
+  // re-probes /api/v1/profile and would still think it's logged in.
+  // Force a full reload to reboot the SPA anonymous (the same
+  // page.reload() pattern auth-bff.spec.ts uses to discard in-memory
+  // state).
+  await page.reload({ waitUntil: 'networkidle' });
   // Confirm we booted anonymous (the login button is back).
   await expect(page.getByTestId('login-button')).toBeVisible({ timeout: 15_000 });
 
