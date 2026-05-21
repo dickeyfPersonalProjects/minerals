@@ -34,6 +34,7 @@ type fakeSpecimenRepo struct {
 	updateErr  error
 	deleteErr  error
 	listErr    error
+	listCalls  int
 }
 
 func newFakeSpecimenRepo() *fakeSpecimenRepo {
@@ -142,6 +143,7 @@ func (f *fakeSpecimenRepo) Delete(_ context.Context, _ domain.Tx, id uuid.UUID) 
 func (f *fakeSpecimenRepo) List(_ context.Context, filter domain.SpecimenFilter, _ domain.Page) ([]domain.Specimen, domain.Cursor, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.listCalls++
 	if f.listErr != nil {
 		return nil, "", f.listErr
 	}
@@ -163,6 +165,9 @@ func (f *fakeSpecimenRepo) List(_ context.Context, filter domain.SpecimenFilter,
 			if !*filter.HasCatalogNumber && s.CatalogNumber != nil {
 				continue
 			}
+		}
+		if filter.OwnerID != nil && s.AuthorID != *filter.OwnerID {
+			continue
 		}
 		out = append(out, s)
 	}
@@ -776,6 +781,85 @@ func TestSpecimensListCollectorIDStub(t *testing.T) {
 	}
 }
 
+// TestSpecimensListScopeMineFiltersToOwner verifies the "browse my
+// collection" view (mi-xue7): ?scope=mine restricts the list to the
+// caller's own rows (the stub identity here), excluding rows authored
+// by someone else regardless of visibility. Without scope, every
+// visible row is returned.
+func TestSpecimensListScopeMineFiltersToOwner(t *testing.T) {
+	repo := newFakeSpecimenRepo()
+	h := newServerWithSpecimens(t, repo)
+
+	// Two rows owned by the stub caller (created through the handler).
+	mustCreateMineral(t, h, "Mine A", map[string]any{})
+	mustCreateMineral(t, h, "Mine B", map[string]any{})
+
+	// One public row owned by a different author, injected directly so
+	// it carries a foreign author_id.
+	other := uuid.New()
+	repo.mu.Lock()
+	otherID := domain.NewID()
+	repo.rows[otherID] = domain.Specimen{
+		ID:         otherID,
+		Type:       domain.SpecimenMineral,
+		Name:       "Someone else's",
+		Visibility: domain.VisibilityPublic,
+		AuthorID:   other,
+		TypeData:   []byte(`{}`),
+	}
+	repo.mu.Unlock()
+
+	// scope=mine → only the caller's two rows.
+	mineNames := listSpecimenNames(t, h, "/api/v1/specimens?scope=mine")
+	if len(mineNames) != 2 {
+		t.Fatalf("scope=mine returned %d items, want 2: %v", len(mineNames), mineNames)
+	}
+	for _, n := range mineNames {
+		if n == "Someone else's" {
+			t.Errorf("scope=mine leaked a foreign-authored row")
+		}
+	}
+
+	// No scope → all three rows (the stub caller is not anonymous, so
+	// the foreign public row is visible too).
+	allNames := listSpecimenNames(t, h, "/api/v1/specimens")
+	if len(allNames) != 3 {
+		t.Errorf("unscoped list returned %d items, want 3: %v", len(allNames), allNames)
+	}
+}
+
+// TestSpecimensListScopeMineAnonymousEmpty verifies that an anonymous
+// caller asking for scope=mine gets an empty 200 page and the repo is
+// never consulted — per CONTRACT.md §13 list endpoints never 401, and
+// an anonymous caller owns nothing (mi-xue7).
+func TestSpecimensListScopeMineAnonymousEmpty(t *testing.T) {
+	repo := newFakeSpecimenRepo()
+	// Seed a row so a non-short-circuited path would have something to
+	// return; an anonymous scope=mine must still come back empty.
+	id := domain.NewID()
+	repo.rows[id] = domain.Specimen{
+		ID:         id,
+		Type:       domain.SpecimenMineral,
+		Name:       "Public thing",
+		Visibility: domain.VisibilityPublic,
+		AuthorID:   uuid.New(),
+		TypeData:   []byte(`{}`),
+	}
+
+	s := &SpecimenService{repo: repo}
+	// context.Background() carries no auth.User → anonymous (uuid.Nil).
+	out, err := s.list(context.Background(), &listSpecimensInput{Scope: "mine"})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(out.Body.Items) != 0 {
+		t.Errorf("anonymous scope=mine returned %d items, want 0", len(out.Body.Items))
+	}
+	if repo.listCalls != 0 {
+		t.Errorf("anonymous scope=mine consulted the repo %d times, want 0", repo.listCalls)
+	}
+}
+
 func TestSpecimensListInvalidDateFormat400(t *testing.T) {
 	repo := newFakeSpecimenRepo()
 	h := newServerWithSpecimens(t, repo)
@@ -820,6 +904,27 @@ func mustCreateMineral(t *testing.T, h http.Handler, name string, typeData map[s
 		t.Fatalf("seed decode: %v", err)
 	}
 	return sv
+}
+
+// listSpecimenNames GETs a specimens list URL, asserts 200, and
+// returns the names of the returned items.
+func listSpecimenNames(t *testing.T, h http.Handler, url string) []string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list %q: status %d body=%s", url, rec.Code, rec.Body.String())
+	}
+	var lst specimenListBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &lst); err != nil {
+		t.Fatalf("list decode: %v", err)
+	}
+	names := make([]string, 0, len(lst.Items))
+	for _, it := range lst.Items {
+		names = append(names, it.Name)
+	}
+	return names
 }
 
 func mustCreateMineralWithCatalog(t *testing.T, h http.Handler, name, catalog string) SpecimenView {

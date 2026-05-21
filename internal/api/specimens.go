@@ -222,6 +222,7 @@ type listSpecimensInput struct {
 	AcquiredBefore   string `query:"acquired_before" doc:"Inclusive upper bound on acquired_at (YYYY-MM-DD)."`
 	CollectorID      string `query:"collector_id" doc:"Filter by collector: returns specimens that have the given collector anywhere in their chain (mi-zv3 / C-3)."`
 	Q                string `query:"q" doc:"Full-text search; when present, ordering switches to ts_rank DESC and any cursor previously issued under default ordering becomes invalid."`
+	Scope            string `query:"scope" enum:"mine" doc:"When 'mine', restrict the list to the authenticated caller's own specimens across all visibilities (the 'browse my collection' view, mi-xue7). Anonymous callers receive an empty list (per CONTRACT.md §13: list endpoints never return 401)."`
 }
 
 type listSpecimensOutput struct {
@@ -328,6 +329,7 @@ func registerSpecimenOperations(api huma.API, authMW authMiddlewares, guard auth
 		Summary:     "List specimens",
 		Description: "Cursor-paginated list of specimens. Default ordering is `created_at DESC, id DESC`. When `?q=` is present, ordering switches to `ts_rank DESC, created_at DESC, id DESC` and a cursor previously issued under default ordering is rejected (clients discard cursors when filters or `q` change). " +
 			"`?collector_id=` filters to specimens whose chain contains the given collector (mi-zv3). " +
+			"`?scope=mine` restricts the list to the authenticated caller's own specimens across all visibilities (mi-xue7); anonymous callers receive an empty list. " +
 			"Anonymous callers see public specimens only; the DB scope filter does the rest (CONTRACT.md §13 v2).",
 		Tags:        []string{"specimens"},
 		Errors:      []int{http.StatusBadRequest},
@@ -438,6 +440,19 @@ func (s *SpecimenService) list(ctx context.Context, in *listSpecimensInput) (*li
 		filter.AcquiredAfter.After(*filter.AcquiredBefore) {
 		return nil, newAPIError(http.StatusUnprocessableEntity, "invalid_date_range",
 			"acquired_after must be on or before acquired_before", nil)
+	}
+
+	if in.Scope == "mine" {
+		// "Browse my collection" (mi-xue7): scope to the caller's own
+		// rows. An anonymous caller owns nothing; per CONTRACT.md §13
+		// list endpoints always return 200 (never 401), so short-circuit
+		// to an empty page rather than rejecting the request.
+		viewer := auth.FromContext(ctx)
+		if viewer.ID == uuid.Nil {
+			return &listSpecimensOutput{Body: specimenListBody{Items: []SpecimenView{}}}, nil
+		}
+		owner := viewer.ID
+		filter.OwnerID = &owner
 	}
 
 	page := domain.Page{Limit: in.Limit, Cursor: in.Cursor}

@@ -20,6 +20,15 @@ import (
 // scopedDB / authedCtx live in collector_postgres_integration_test.go.
 // This file reuses them.
 
+// names extracts specimen names for readable test failure messages.
+func names(rows []domain.Specimen) []string {
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.Name)
+	}
+	return out
+}
+
 func mkSpecimen(t domain.SpecimenType, name string) domain.Specimen {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	return domain.Specimen{
@@ -449,6 +458,67 @@ func TestIntegration_Specimen_ListFilters(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].Name != "MetA" {
 		t.Errorf("acquired_before: got %v", rows)
+	}
+}
+
+// TestIntegration_Specimen_ListOwnerScope verifies the "browse my
+// collection" SQL filter (mi-xue7 / SpecimenFilter.OwnerID): with
+// OwnerID set, only the owner's rows come back — across every
+// visibility — and rows authored by someone else are excluded even
+// when public. The owner's own private/unlisted rows survive because
+// the layer-1 specimenListScope already admits a caller's own rows.
+func TestIntegration_Specimen_ListOwnerScope(t *testing.T) {
+	pool := scopedDB(t)
+	repo := db.NewSpecimenPostgres(pool)
+	ctx := authedCtx() // StubUser is the caller/owner.
+
+	// Owner's rows: one private, one unlisted, one public.
+	mine := []domain.Specimen{
+		mkSpecimen(domain.SpecimenMineral, "MinePrivate"),
+		mkSpecimen(domain.SpecimenRock, "MineUnlisted"),
+		mkSpecimen(domain.SpecimenFossil, "MinePublic"),
+	}
+	mine[1].Visibility = domain.VisibilityUnlisted
+	mine[2].Visibility = domain.VisibilityPublic
+	for _, s := range mine {
+		if err := repo.Create(ctx, nil, s); err != nil {
+			t.Fatalf("seed %s: %v", s.Name, err)
+		}
+	}
+
+	// A public row authored by someone else (must NOT appear in the
+	// owner-scoped list).
+	other := auth.User{ID: domain.NewID(), Email: "other@example.invalid"}
+	seedUser(t, pool, other.ID)
+	otherCtx := auth.WithUser(context.Background(), other)
+	foreign := mkSpecimen(domain.SpecimenMineral, "ForeignPublic")
+	foreign.Visibility = domain.VisibilityPublic
+	if err := repo.Create(otherCtx, nil, foreign); err != nil {
+		t.Fatalf("seed foreign: %v", err)
+	}
+
+	owner := auth.StubUser.ID
+	rows, _, err := repo.List(ctx, domain.SpecimenFilter{OwnerID: &owner}, domain.Page{})
+	if err != nil {
+		t.Fatalf("list scope=mine: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("scope=mine: got %d rows, want 3 (all owner visibilities): %v", len(rows), names(rows))
+	}
+	for _, r := range rows {
+		if r.AuthorID != owner {
+			t.Errorf("scope=mine leaked foreign-authored row %q", r.Name)
+		}
+	}
+
+	// Without the owner scope, the caller still sees their 3 rows plus
+	// the foreign public one (4 total).
+	rows, _, err = repo.List(ctx, domain.SpecimenFilter{}, domain.Page{})
+	if err != nil {
+		t.Fatalf("list unscoped: %v", err)
+	}
+	if len(rows) != 4 {
+		t.Errorf("unscoped: got %d rows, want 4: %v", len(rows), names(rows))
 	}
 }
 
