@@ -28,7 +28,7 @@ table; if a cheaper option fits, use it.
 | A single table was wiped by an accidental `DELETE` / `UPDATE` minutes or hours ago | **Point-in-time, side-by-side restore** | Spin up a recovery cluster as of `T-1m`, dump the table, COPY it back into prod. |
 | A bad migration left the schema or data unusable | **Point-in-time restore** to just before the migration | Same as above, then either promote the recovery cluster or dump+restore the affected objects into prod. |
 | Whole-DB corruption (filesystem damage, accidental `DROP DATABASE`, ransomware on the PG PVC) | **Replace-cluster restore** | Delete the broken `Cluster`, recreate from the latest valid backup. |
-| Cluster + MinIO both lost (cluster destroyed, node disk dead) | **Not covered.** | In-cluster MinIO is the only backup target in v1 — see ["Out of scope"](#out-of-scope) below. |
+| Cluster + MinIO both lost (cluster destroyed, node disk dead) | **Covered only with an external backup target.** | In-cluster MinIO can't help (same fate-sharing domain). Switch the DB backup to off-cluster B2 first — see ["Backblaze B2 setup"](#backblaze-b2-setup-worked-external-example); then this is a Mode B restore from B2. |
 
 The first two modes share the same recipe: create a **new** `Cluster`
 in a throwaway namespace that bootstraps from the backup, then move
@@ -337,14 +337,143 @@ bead at that time.
 
 ---
 
+## Backblaze B2 setup (worked external example)
+
+This is the concrete, copyable instance of "Migrating to external
+storage" for **Backblaze B2** — the recommended primary DB-backup
+target for public prod (V3 prerequisite, mi-lhsu). B2 is S3-compatible,
+~$6/TB/month, with free egress to Cloudflare. The example manifests
+live in
+[`example/prod/external-b2/`](./example/prod/external-b2/): a B2 Cluster
+patch (`mineral-cluster-patch.b2.yaml`) and a B2 SealedSecret stub
+(`minerals-pg-b2-creds.yaml`). This section is the operator runbook for
+applying them.
+
+> The in-cluster-MinIO example stays the default in the repo. B2 is the
+> documented external alternative; switching is the two-field swap below.
+
+### 1. Create the B2 bucket + a bucket-scoped application key (manual)
+
+Operator step, out of band (B2 buckets are not created by an in-cluster
+Job — so when you adopt B2 you also drop
+`postgres-backup-bucket-init.yaml` from the prod
+[`kustomization.yaml`](./example/prod/kustomization.yaml)).
+
+```bash
+# Create a private bucket.
+b2 create-bucket your-b2-bucket-name allPrivate
+
+# Confirm "Keep all versions" (versioning) is on — this is what defends
+# backup artifacts against silent overwrite/delete. Optionally add a
+# lifecycle rule to bound storage growth alongside the Cluster's 30d
+# retentionPolicy.
+
+# Create an application key scoped to ONLY this bucket (NOT the master
+# key). read+write is enough for Barman.
+b2 create-key --bucket your-b2-bucket-name minerals-pg-backup \
+  listBuckets,listFiles,readFiles,writeFiles,deleteFiles
+#   -> prints: <applicationKeyId> <applicationKey>
+#      applicationKey is shown ONCE — record it now.
+```
+
+### 2. Note the B2 S3 endpoint + region
+
+B2's S3 endpoint is `https://s3.<region>.backblazeb2.com`. The
+`<region>` comes from the bucket (B2 console, or `b2 get-bucket
+your-b2-bucket-name`), e.g. `us-west-004`. Unlike AWS, the region is
+**not** optional — it is encoded in the endpoint host. The aws-sdk
+Barman uses derives virtual-hosted-style URLs
+(`<bucket>.s3.<region>.backblazeb2.com`) from this endpoint; B2 supports
+that, so no path-style override is needed.
+
+### 3. Seal the B2 creds into `minerals-pg-backup-creds`
+
+Same Secret name + key contract as the in-cluster example, so only the
+plaintext values change (see
+[`example/prod/external-b2/minerals-pg-b2-creds.yaml`](./example/prod/external-b2/minerals-pg-b2-creds.yaml)
+and [`encrypt.md`](./encrypt.md)):
+
+```bash
+# .sec/minerals-pg-backup-creds.yaml (plaintext, NOT committed):
+#   stringData:
+#     ACCESS_KEY_ID:     <applicationKeyId>
+#     SECRET_ACCESS_KEY: <applicationKey>
+kubeseal --scope strict --format yaml \
+  < .sec/minerals-pg-backup-creds.yaml \
+  > example/prod/external-b2/minerals-pg-b2-creds.yaml  # then commit the sealed file
+```
+
+### 4. Swap the Cluster patch to B2
+
+Replace the in-cluster-MinIO `Cluster` patch block in
+[`example/prod/mineral.yaml`](./example/prod/mineral.yaml) with the B2
+block from
+[`example/prod/external-b2/mineral-cluster-patch.b2.yaml`](./example/prod/external-b2/mineral-cluster-patch.b2.yaml)
+(`destinationPath: s3://your-b2-bucket-name/`, `endpointURL:
+https://s3.<region>.backblazeb2.com`). Keep
+[`scheduledbackup.yaml`](./example/prod/scheduledbackup.yaml) (cadence
+is storage-independent). Promote with the `Promote to prod` workflow.
+
+### 5. Verify, then decommission the old in-cluster bucket
+
+```bash
+# After the next ScheduledBackup completes against B2:
+kubectl -n mineral-prod get backups.postgresql.cnpg.io
+#   Look for a recent Phase: completed entry written to B2.
+
+kubectl -n mineral-prod get cluster minerals-pg \
+  -o jsonpath='{.status.conditions[?(@.type=="ContinuousArchiving")].status}{"\n"}'
+#   Expect: True
+```
+
+Then run the **restore-from-B2 dry run** below. Only after a recovery
+succeeds from B2, decommission the in-cluster bucket
+(`mc rb --force --dangerous local/minerals-postgres-backups`).
+
+### Restore from B2
+
+Recovery is **identical to [Mode A](#mode-a-side-by-side-restore-into-a-throwaway-namespace)**;
+only the `externalClusters[].barmanObjectStore` endpoint + path point at
+B2, and the creds Secret you copy into the throwaway namespace holds the
+B2 application key. In the Mode A step-3 manifest, change:
+
+```yaml
+  externalClusters:
+    - name: minerals-pg-source
+      barmanObjectStore:
+        serverName: minerals-pg
+        destinationPath: s3://your-b2-bucket-name/
+        endpointURL: https://s3.your-region.backblazeb2.com
+        s3Credentials:
+          accessKeyId:    { name: minerals-pg-backup-creds, key: ACCESS_KEY_ID }
+          secretAccessKey: { name: minerals-pg-backup-creds, key: SECRET_ACCESS_KEY }
+        wal:  { compression: gzip }
+        data: { compression: gzip }
+```
+
+The B2 endpoint is reachable from any namespace (it's external — no
+in-cluster FQDN nuance, no cross-namespace NetworkPolicy concern that
+the MinIO path has). The bucket-reachability prerequisite check
+(["Prerequisites"](#prerequisites) step 3) becomes a B2-side `b2 ls`
+or `mc ls` against the B2 alias instead of the in-cluster MinIO `mc`.
+
+A restore-from-B2 dry run into a throwaway namespace is the acceptance
+gate for adopting B2 — run it before decommissioning the MinIO bucket
+(step 5 above), and quarterly thereafter per
+["Dry-run / rehearsal"](#dry-run--rehearsal).
+
+---
+
 ## Out of scope
 
 These failures need work beyond what mi-jgzi shipped:
 
 - **Total cluster loss** (node + MinIO PVC + cluster all destroyed).
   In-cluster MinIO is on the same fate-sharing domain as Postgres. Fix:
-  off-cluster backup destination (see ["Migrating to external
-  storage"](#migrating-to-external-storage)).
+  off-cluster backup destination — the worked example is ["Backblaze B2
+  setup"](#backblaze-b2-setup-worked-external-example) (recommended for
+  V3 public prod); the generic recipe is ["Migrating to external
+  storage"](#migrating-to-external-storage).
 - **Backup-bucket integrity attack**. Versioning gives object-level
   rollback but the bucket itself can still be wiped by an attacker
   with bucket-admin creds. The dedicated `minerals-pg-backup-creds`
@@ -363,6 +492,9 @@ These failures need work beyond what mi-jgzi shipped:
   backup patch), [`example/prod/scheduledbackup.yaml`](./example/prod/scheduledbackup.yaml),
   [`example/prod/postgres-backup-bucket-init.yaml`](./example/prod/postgres-backup-bucket-init.yaml),
   [`example/prod/minerals-pg-backup-creds.yaml`](./example/prod/minerals-pg-backup-creds.yaml).
+- External-B2 backup variant (the documented alternative):
+  [`example/prod/external-b2/`](./example/prod/external-b2/)
+  (`mineral-cluster-patch.b2.yaml`, `minerals-pg-b2-creds.yaml`, `README.md`).
 - Secret inventory (key contract, provisioning steps):
   [`secrets.md`](./secrets.md).
 - kubeseal mechanics:

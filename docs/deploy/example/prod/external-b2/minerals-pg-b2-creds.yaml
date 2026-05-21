@@ -1,0 +1,65 @@
+# SealedSecret stub for the Backblaze B2 application key CNPG (Barman)
+# uses to write base backups + WAL archives to the external B2 bucket.
+#
+# This is the EXTERNAL-storage counterpart of
+# ../minerals-pg-backup-creds.yaml (which holds MinIO creds). It uses
+# the SAME Secret name (minerals-pg-backup-creds) and the SAME key
+# contract (ACCESS_KEY_ID / SECRET_ACCESS_KEY) so that switching to B2
+# changes only the Cluster patch (endpoint + destinationPath) and the
+# sealed plaintext — not the Secret wiring. Use EITHER this stub OR the
+# MinIO one per env, never both (same name = one Secret).
+#
+# Why a B2 APPLICATION KEY, not the master key:
+#   The master/account key can administer the whole B2 account. A
+#   bucket-scoped application key limits blast radius to the one backup
+#   bucket — the external analogue of the MinIO pgbackup-rw policy.
+#
+# Generating the credentials (operator-side, one-time per env):
+#
+#   1. In the B2 console (or `b2` CLI), create a bucket, e.g.
+#        b2 create-bucket your-b2-bucket-name allPrivate
+#      then enable versioning ("Keep all versions of the file"):
+#        b2 update-bucket --default-server-side-encryption SSE-B2 \
+#           your-b2-bucket-name allPrivate
+#      (versioning is the bucket default in B2; confirm "Keep all
+#       versions" is set so backup artifacts can't be silently lost).
+#
+#   2. Create an application key scoped to ONLY that bucket, with
+#      read+write (listBuckets, listFiles, readFiles, writeFiles,
+#      deleteFiles):
+#        b2 create-key --bucket your-b2-bucket-name \
+#           minerals-pg-backup listBuckets,listFiles,readFiles,writeFiles,deleteFiles
+#      This prints: <applicationKeyId> <applicationKey>
+#        applicationKeyId -> ACCESS_KEY_ID
+#        applicationKey   -> SECRET_ACCESS_KEY
+#      Record the applicationKey now — B2 shows it ONCE.
+#
+#   3. Seal the credentials (per ../../../encrypt.md):
+#        Write plaintext to .sec/minerals-pg-backup-creds.yaml with both
+#        keys under stringData (ACCESS_KEY_ID = applicationKeyId,
+#        SECRET_ACCESS_KEY = applicationKey), then
+#        kubeseal --scope strict --format yaml and replace the
+#        encryptedData below with the output.
+#
+# Key contract (must equal the keys CNPG references in the Cluster patch
+# — see mineral-cluster-patch.b2.yaml, the backup.s3Credentials block):
+#   - ACCESS_KEY_ID      (= B2 applicationKeyId)
+#   - SECRET_ACCESS_KEY  (= B2 applicationKey)
+#
+# Ciphertext is namespace-scoped: re-seal per env if this overlay is
+# ever copied; do not reuse a different env's ciphertext.
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: minerals-pg-backup-creds
+  namespace: mineral-prod
+spec:
+  encryptedData:
+    ACCESS_KEY_ID: REPLACE_WITH_KUBESEAL_OUTPUT
+    SECRET_ACCESS_KEY: REPLACE_WITH_KUBESEAL_OUTPUT
+  template:
+    metadata:
+      name: minerals-pg-backup-creds
+      namespace: mineral-prod
+    type: Opaque
