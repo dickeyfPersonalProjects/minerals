@@ -896,42 +896,47 @@
           </button>
         {/if}
         {#if $isAuthenticated}
-          <button
-            type="button"
-            onclick={() => requestEditVisibility(heroPhoto.id)}
-            aria-label="Edit photo privacy"
-            data-testid="hero-photo-edit-visibility"
-            class="absolute right-56 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
+          <div
+            class="absolute right-2 top-2 flex items-center gap-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+            data-testid="hero-photo-actions"
           >
-            Privacy
-          </button>
-          <button
-            type="button"
-            onclick={() => requestEditKind(heroPhoto.id)}
-            aria-label="Edit photo type"
-            data-testid="hero-photo-edit-kind"
-            class="absolute right-44 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
-          >
-            Edit type
-          </button>
-          <button
-            type="button"
-            onclick={() => requestCropPhoto(heroPhoto.id)}
-            aria-label="Crop / Rotate photo"
-            data-testid="hero-photo-crop"
-            class="absolute right-12 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
-          >
-            Crop / Rotate
-          </button>
-          <button
-            type="button"
-            onclick={() => requestDeletePhoto(heroPhoto.id)}
-            aria-label="Delete photo"
-            data-testid="hero-photo-delete"
-            class="absolute right-2 top-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-red-600 focus-visible:opacity-100 group-hover:opacity-100"
-          >
-            ✕
-          </button>
+            <button
+              type="button"
+              onclick={() => requestEditVisibility(heroPhoto.id)}
+              aria-label="Edit photo privacy"
+              data-testid="hero-photo-edit-visibility"
+              class="rounded-full bg-black/55 px-2 py-1 text-xs text-white hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)]"
+            >
+              Privacy
+            </button>
+            <button
+              type="button"
+              onclick={() => requestEditKind(heroPhoto.id)}
+              aria-label="Edit photo type"
+              data-testid="hero-photo-edit-kind"
+              class="rounded-full bg-black/55 px-2 py-1 text-xs text-white hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)]"
+            >
+              Edit type
+            </button>
+            <button
+              type="button"
+              onclick={() => requestCropPhoto(heroPhoto.id)}
+              aria-label="Crop / Rotate photo"
+              data-testid="hero-photo-crop"
+              class="rounded-full bg-black/55 px-2 py-1 text-xs text-white hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)]"
+            >
+              Crop / Rotate
+            </button>
+            <button
+              type="button"
+              onclick={() => requestDeletePhoto(heroPhoto.id)}
+              aria-label="Delete photo"
+              data-testid="hero-photo-delete"
+              class="rounded-full bg-black/55 px-2 py-1 text-xs text-white hover:bg-red-600"
+            >
+              ✕
+            </button>
+          </div>
         {/if}
       </div>
 
