@@ -142,6 +142,16 @@ services:
       # Belt-and-suspenders with the generic CSRFMiddleware (which
       # is scoped to /api/v1/* and does not fire on /auth/*).
       BFF_ENFORCE_CSRF_LOGOUT: "true"
+      # API rate limiting (mi-tnru). Defaults to ON so the dev stack
+      # mirrors prod's strict per-tier limits. Overridable via env
+      # interpolation: the Keycloak auth-smoke job sets
+      # RATE_LIMIT_ENABLED=false (mi-y3wp) because its Playwright login
+      # round-trips fire many auth requests in quick succession and the
+      # strict auth tier would throttle legitimate test traffic. The
+      # limiter's own behaviour is proven by its unit tests with real
+      # low limits; the end-to-end smoke runs with limits off. Prod
+      # never sets this, so prod keeps the strict defaults.
+      RATE_LIMIT_ENABLED: "${RATE_LIMIT_ENABLED:-true}"
     ports:
       - "8080:8080"
       # Admin listener (mi-2b1k): Prometheus `/metrics` + health probes.

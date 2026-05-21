@@ -313,6 +313,19 @@ jobs:
     # for the spec itself (login + token exchange + logout). The
     # spec's own per-test cap is 90 s.
     timeout-minutes: 18
+    # Disable the API rate limiter for the whole smoke (mi-y3wp). The
+    # auth tier is deliberately strict in prod (10 req/min/IP, mi-tnru),
+    # but this job's Playwright spec drives multiple login round-trips
+    # (seeded fixture user + default-shaped user + logout) in quick
+    # succession from a single IP — strict limits throttle that
+    # legitimate test traffic and the login page.waitForURL times out.
+    # docker-compose.yml interpolates this into the app container's
+    # RATE_LIMIT_ENABLED, so it applies to both the initial `up` and the
+    # `--force-recreate`. The limiter's real-limit behaviour is covered
+    # by internal/ratelimit + internal/api unit tests; the end-to-end
+    # smoke runs with limits off so it isn't throttled.
+    env:
+      RATE_LIMIT_ENABLED: "false"
     steps:
       - uses: actions/checkout@v4
 
