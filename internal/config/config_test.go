@@ -524,3 +524,77 @@ func TestLoad_BFFAuthMalformedValues(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_RateLimitDefaults(t *testing.T) {
+	t.Parallel()
+	cfg, err := loadFrom(envFunc(nil))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	rl := cfg.RateLimit
+	if !rl.Enabled {
+		t.Fatal("rate limiting should be enabled by default")
+	}
+	checks := []struct {
+		name string
+		got  RateLimitTier
+		req  int
+		win  int
+	}{
+		{"auth", rl.Auth, defaultRateLimitAuthRequests, defaultRateLimitAuthWindowSec},
+		{"read", rl.Read, defaultRateLimitReadRequests, defaultRateLimitReadWindowSec},
+		{"write", rl.Write, defaultRateLimitWriteRequests, defaultRateLimitWriteWindowSec},
+		{"file", rl.File, defaultRateLimitFileRequests, defaultRateLimitFileWindowSec},
+	}
+	for _, c := range checks {
+		if c.got.Requests != c.req || c.got.WindowSeconds != c.win {
+			t.Errorf("%s tier: got %d/%ds, want %d/%ds", c.name, c.got.Requests, c.got.WindowSeconds, c.req, c.win)
+		}
+	}
+}
+
+func TestLoad_RateLimitDisabled(t *testing.T) {
+	t.Parallel()
+	cfg, err := loadFrom(envFunc(map[string]string{"RATE_LIMIT_ENABLED": "false"}))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.RateLimit.Enabled {
+		t.Fatal("RATE_LIMIT_ENABLED=false should disable rate limiting")
+	}
+}
+
+func TestLoad_RateLimitOverrides(t *testing.T) {
+	t.Parallel()
+	cfg, err := loadFrom(envFunc(map[string]string{
+		"RATE_LIMIT_AUTH_REQUESTS":       "3",
+		"RATE_LIMIT_AUTH_WINDOW_SECONDS": "30",
+	}))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.RateLimit.Auth.Requests != 3 || cfg.RateLimit.Auth.WindowSeconds != 30 {
+		t.Fatalf("auth override not applied: got %d/%ds", cfg.RateLimit.Auth.Requests, cfg.RateLimit.Auth.WindowSeconds)
+	}
+}
+
+func TestLoad_RateLimitRejectsNonPositive(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{"0", "-5", "abc"} {
+		_, err := loadFrom(envFunc(map[string]string{"RATE_LIMIT_READ_REQUESTS": raw}))
+		if err == nil {
+			t.Fatalf("RATE_LIMIT_READ_REQUESTS=%q should be rejected", raw)
+		}
+		if !strings.Contains(err.Error(), "RATE_LIMIT_READ_REQUESTS") {
+			t.Fatalf("error should name the offending var, got %v", err)
+		}
+	}
+}
+
+func TestLoad_RateLimitRejectsBadEnabled(t *testing.T) {
+	t.Parallel()
+	_, err := loadFrom(envFunc(map[string]string{"RATE_LIMIT_ENABLED": "yes"}))
+	if err == nil {
+		t.Fatal("RATE_LIMIT_ENABLED=yes should be rejected")
+	}
+}

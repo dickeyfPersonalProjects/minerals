@@ -160,6 +160,35 @@ type Config struct {
 	// cannot spoof the value. Default false — RemoteAddr is the
 	// safe fallback.
 	TrustForwardedFor bool
+
+	// RateLimit configures the per-tier token-bucket API rate limiting
+	// (mi-tnru). See RateLimitConfig.
+	RateLimit RateLimitConfig
+}
+
+// RateLimitConfig is the operator surface for the API rate limiter
+// (mi-tnru). Each tier is a requests-per-window budget; see
+// internal/api for how requests map to tiers. In-memory per-replica:
+// with 2 prod replicas a caller can draw up to 2× a tier's budget —
+// an accepted ops tradeoff (a shared store would be the upgrade for
+// exact global limits).
+type RateLimitConfig struct {
+	// Enabled gates the whole limiter. When false, cmd/minerals leaves
+	// Deps.RateLimitMW nil and no limiting is applied. Default true.
+	Enabled bool
+	// Auth/Read/Write/File are the per-tier budgets in
+	// requests-per-window form.
+	Auth  RateLimitTier
+	Read  RateLimitTier
+	Write RateLimitTier
+	File  RateLimitTier
+}
+
+// RateLimitTier is one tier's budget: Requests calls per WindowSeconds
+// per key.
+type RateLimitTier struct {
+	Requests      int
+	WindowSeconds int
 }
 
 // Defaults for ENV=dev or unset. Mirrors the inventory in CONTRACT.md
@@ -185,6 +214,19 @@ const (
 	// both via the minerals-config ConfigMap.
 	defaultOIDCIssuerURL = "http://localhost:8081/realms/minerals"
 	defaultOIDCClientID  = "minerals-frontend"
+
+	// Rate-limit tier defaults (mi-tnru). Windows are seconds.
+	// Auth is strict (brute-force defense); reads are generous (public
+	// browse traffic); writes moderate; file-serving guards the
+	// expensive binary/bandwidth surface.
+	defaultRateLimitAuthRequests   = 10
+	defaultRateLimitAuthWindowSec  = 60
+	defaultRateLimitReadRequests   = 300
+	defaultRateLimitReadWindowSec  = 60
+	defaultRateLimitWriteRequests  = 60
+	defaultRateLimitWriteWindowSec = 60
+	defaultRateLimitFileRequests   = 120
+	defaultRateLimitFileWindowSec  = 60
 )
 
 // Load reads the environment and produces a Config with format-level
@@ -281,6 +323,12 @@ func loadFrom(get func(string) string) (*Config, error) {
 	}
 	cfg.TrustForwardedFor = tf
 
+	rl, err := loadRateLimit(get)
+	if err != nil {
+		return nil, err
+	}
+	cfg.RateLimit = rl
+
 	// Required-in-prod variables: in dev, fall back to the inventory
 	// default; in prod, leave the field empty so ValidateFor* can
 	// flag it later if the active subcommand actually needs it.
@@ -325,11 +373,68 @@ func loadFrom(get func(string) string) (*Config, error) {
 	return cfg, nil
 }
 
+// loadRateLimit reads the RATE_LIMIT_* tier settings (mi-tnru). Each
+// per-tier requests/window value defaults from the inventory and must
+// be a positive integer when set — a zero or negative budget would
+// make the tier fail closed (reject everything), which is never the
+// intent, so it is rejected as a config error.
+func loadRateLimit(get func(string) string) (RateLimitConfig, error) {
+	enabled, err := parseBoolWithDefault(get("RATE_LIMIT_ENABLED"), true)
+	if err != nil {
+		return RateLimitConfig{}, fmt.Errorf("config: RATE_LIMIT_ENABLED: %w", err)
+	}
+	rl := RateLimitConfig{Enabled: enabled}
+
+	tiers := []struct {
+		tier       *RateLimitTier
+		reqEnv     string
+		winEnv     string
+		reqDefault int
+		winDefault int
+	}{
+		{&rl.Auth, "RATE_LIMIT_AUTH_REQUESTS", "RATE_LIMIT_AUTH_WINDOW_SECONDS", defaultRateLimitAuthRequests, defaultRateLimitAuthWindowSec},
+		{&rl.Read, "RATE_LIMIT_READ_REQUESTS", "RATE_LIMIT_READ_WINDOW_SECONDS", defaultRateLimitReadRequests, defaultRateLimitReadWindowSec},
+		{&rl.Write, "RATE_LIMIT_WRITE_REQUESTS", "RATE_LIMIT_WRITE_WINDOW_SECONDS", defaultRateLimitWriteRequests, defaultRateLimitWriteWindowSec},
+		{&rl.File, "RATE_LIMIT_FILE_REQUESTS", "RATE_LIMIT_FILE_WINDOW_SECONDS", defaultRateLimitFileRequests, defaultRateLimitFileWindowSec},
+	}
+	for _, t := range tiers {
+		req, err := parsePositiveIntWithDefault(get(t.reqEnv), t.reqDefault)
+		if err != nil {
+			return RateLimitConfig{}, fmt.Errorf("config: %s: %w", t.reqEnv, err)
+		}
+		win, err := parsePositiveIntWithDefault(get(t.winEnv), t.winDefault)
+		if err != nil {
+			return RateLimitConfig{}, fmt.Errorf("config: %s: %w", t.winEnv, err)
+		}
+		t.tier.Requests = req
+		t.tier.WindowSeconds = win
+	}
+	return rl, nil
+}
+
 func orDefault(v, def string) string {
 	if s := strings.TrimSpace(v); s != "" {
 		return s
 	}
 	return def
+}
+
+// parsePositiveIntWithDefault parses a strictly-positive integer from
+// raw; empty returns def. Zero and negatives are rejected — used for
+// the rate-limit budgets where a non-positive value is meaningless.
+func parsePositiveIntWithDefault(raw string, def int) (int, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("expected integer, got %q: %w", raw, err)
+	}
+	if n <= 0 {
+		return 0, fmt.Errorf("expected positive integer, got %d", n)
+	}
+	return n, nil
 }
 
 // parseBoolWithDefault parses "true"/"false"/"1"/"0" (and a small
