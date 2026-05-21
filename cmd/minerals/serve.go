@@ -193,13 +193,14 @@ func runServe(_ []string) error {
 			Repo:   db.NewMineralSpeciesPostgres(pool),
 			Mindat: newMindatClient(cfg.MindatAPIKey),
 		},
-		QRSheets:  db.NewQRSheetPostgres(pool),
-		Users:     users,
-		Verifier:  verifier,
-		Enforcer:  enforcer,
-		BFFAuth:   bffAuth,
-		SessionMW: buildSessionMW(cfg, oauthClient, sessions, users),
-		CSRFMW:    buildCSRFMW(oauthClient),
+		QRSheets:    db.NewQRSheetPostgres(pool),
+		Users:       users,
+		Verifier:    verifier,
+		Enforcer:    enforcer,
+		BFFAuth:     bffAuth,
+		SessionMW:   buildSessionMW(cfg, oauthClient, sessions, users),
+		CSRFMW:      buildCSRFMW(oauthClient),
+		RateLimitMW: buildRateLimitMW(cfg),
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        db.NewJournalEntryPostgres(pool),
 			Attachments:    db.NewJournalEntryFilePostgres(pool),
@@ -462,6 +463,28 @@ func buildCSRFMW(oauthClient bff.OAuthClient) func(http.Handler) http.Handler {
 		return nil
 	}
 	return bff.CSRFMiddleware
+}
+
+// buildRateLimitMW constructs the per-tier API rate limiter (mi-tnru)
+// from config. Returns nil when RATE_LIMIT_ENABLED is false, leaving
+// the chain unlimited. The limiter uses the real clock (time.Now);
+// tests inject their own.
+func buildRateLimitMW(cfg *config.Config) func(http.Handler) http.Handler {
+	if !cfg.RateLimit.Enabled {
+		return nil
+	}
+	tier := func(t config.RateLimitTier) api.RateLimitTier {
+		return api.RateLimitTier{
+			Requests: t.Requests,
+			Window:   time.Duration(t.WindowSeconds) * time.Second,
+		}
+	}
+	return api.NewRateLimitMiddleware(api.RateLimitOptions{
+		Auth:  tier(cfg.RateLimit.Auth),
+		Read:  tier(cfg.RateLimit.Read),
+		Write: tier(cfg.RateLimit.Write),
+		File:  tier(cfg.RateLimit.File),
+	})
 }
 
 // bffUserResolver bridges bff.UserResolver into the application's
