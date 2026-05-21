@@ -125,12 +125,12 @@ This is the source of truth for the project roadmap.
 
 ### Implied infra (likely needed for public — candidates, not yet beaded)
 *Bead these out as V3 planning matures.*
-- [ ] Public DNS + TLS for the real public hostname (not the private IP)
-- [ ] Edge protection (Cloudflare or similar) — DDoS, CDN for images, edge rate limiting (subsumes the deferred presigned-GET fast path)
+- [x] Public DNS + TLS — Cloudflare DNS + cluster Ingress + Let's Encrypt TLS + external-dns all configured. DNS currently resolves to a private IP (Cloudflare unproxied); flipping to public is a one-annotation change (Cloudflare proxy mode → public IPv6 ingress).
+- [x] Edge protection foundation — Cloudflare in place (DNS now; flip to proxy mode for DDoS/CDN/edge-rate-limiting at launch). Origin locked down: pfSense drops all non-Cloudflare IPs on 80/443, so the origin is unreachable except via Cloudflare and CF-Connecting-IP is non-spoofable (was bead mi-1d7q, closed). Remaining: enable proxy mode + any edge rules at launch.
 - [ ] Production monitoring / alerting — Prometheus metrics already exist `(mi-2b1k)`; need dashboards + alerts
 - [ ] Terms of service / privacy policy (legal, for public users + GDPR)
 - [ ] Abuse handling / moderation story (for publicly visible user-generated content)
-- [ ] Multi-replica scaling decisions — session cache + shared rate-limit store (currently single-replica)
+- [x] Multi-replica decisions — prod runs 2 replicas. Session lookup: no cache (mi-1d5i decision, SessionResolver interface ready if needed). Rate-limit store: in-memory per-replica accepted (a user hitting both replicas can get up to 2x quota — tolerated; shared store is the upgrade if exact global limits ever matter).
 
 ---
 
