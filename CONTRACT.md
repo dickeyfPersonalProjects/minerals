@@ -2387,13 +2387,18 @@ implementation detail.
 
 - One `*pgxpool.Pool` per running binary, constructed in `main()`
   from `DATABASE_URL` (per §15 — Configuration & env vars).
-- Default pool sizing (sensible for v1 traffic):
-  - `max_conns`: 10
+- Default pool sizing:
+  - `max_conns`: 20 (raised from 10 after the mi-hkh6 saturation
+    incident — `/readyz` shares this pool, so a pool saturated by the
+    SpecimenCard `/photos` fan-out across 2 replicas flapped the
+    readiness probe to 503. Keep `max_conns × replicas` under Postgres
+    `max_connections`.)
   - `min_conns`: 2
   - `max_conn_lifetime`: 1 hour
   - `max_conn_idle_time`: 30 minutes
-- These can be overridden via the URL's query string
-  (`?pool_max_conns=...`) without code changes.
+- `max_conns` can be overridden via the URL's query string
+  (`?pool_max_conns=...`) or the `DB_MAX_CONNS` env var, without code
+  changes. Precedence: DSN query string > `DB_MAX_CONNS` > default.
 - The pool is wired into every repo via constructor injection.
   Repos do not reach for a global pool.
 
