@@ -71,7 +71,7 @@ jobs:
           docker logs minio >&2 || true
           exit 1
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -101,7 +101,7 @@ jobs:
       - name: Unit tests
         # Combines race detection, shuffled execution, and JUnit output
         # in one invocation per mi-qb3. -race needs CGO_ENABLED=1 (the
-        # actions/setup-go@v5 default).
+        # actions/setup-go@v6 default).
         run: gotestsum --junitfile junit.xml -- -race -shuffle=on ./...
 
       # Fuzz smoke (mi-h8j, CONTRACT §17). Main-only — keeps PR latency
