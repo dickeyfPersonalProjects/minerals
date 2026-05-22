@@ -34,7 +34,7 @@ jobs:
       MINIO_SECRET_KEY: minioadmin
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # MinIO is started via `docker run` rather than a GHA service container
       # because the official `minio/minio` image requires `server /data` as its
@@ -133,7 +133,7 @@ jobs:
     name: Frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Detect frontend
         id: detect
@@ -201,7 +201,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: docker compose up
         # Per mi-8ky, the default-mode contract is: this single command
@@ -327,7 +327,7 @@ jobs:
     env:
       RATE_LIMIT_ENABLED: "false"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: hashicorp/setup-terraform@v4
         with:
