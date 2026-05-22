@@ -1,57 +1,72 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 
-// cropperjs is a vanilla DOM library that wires itself onto an <img>
-// after load. jsdom can't run its layout-aware internals, so we mock
-// the whole module and capture the `cropend` callback so tests can
-// drive it manually.
+// cropperjs v2 is a web-component library that mounts <cropper-*> custom
+// elements into the DOM and drives them via a shadow-DOM render loop. jsdom
+// can't run that, so we mock the whole module. The mock mirrors the v2 API the
+// component touches: getCropperImage().$rotate (relative, degree-string),
+// getCropperSelection().$toCanvas (async), and the <cropper-canvas>'s
+// `actionend` event. We capture the actionend listener so tests can drive the
+// "user finished dragging the crop box" path manually.
 interface MockCropper {
-  options: { cropend?: () => void };
   destroyed: boolean;
   rotation: number;
   canvasBlob: Blob | null;
   destroy: () => void;
-  getCroppedCanvas: () => HTMLCanvasElement | null;
-  rotate: (deg: number) => MockCropper;
-  rotateTo: (deg: number) => MockCropper;
+  getCropperImage: () => { $rotate: (angle: string) => void } | null;
+  getCropperSelection: () => { $toCanvas: () => Promise<HTMLCanvasElement | null> } | null;
+  getCropperCanvas: () => { addEventListener: (type: string, cb: () => void) => void } | null;
+  // Invokes the captured `actionend` handler — the v2 analog of v1's `cropend`.
+  fireActionEnd: () => void;
 }
 
 let lastCropper: MockCropper | null = null;
 let nextCanvasBlob: Blob | null = new Blob(['x'], { type: 'image/jpeg' });
 let nextCanvasReturnsNull = false;
 
-function MockCropperCtor(_el: HTMLImageElement, options: { cropend?: () => void }): MockCropper {
+function MockCropperCtor(): MockCropper {
+  let actionEndHandler: (() => void) | null = null;
   const instance: MockCropper = {
-    options,
     destroyed: false,
     rotation: 0,
     canvasBlob: nextCanvasBlob,
     destroy() {
       instance.destroyed = true;
     },
-    getCroppedCanvas() {
-      if (nextCanvasReturnsNull) return null;
+    getCropperImage() {
       return {
-        toBlob: (cb: (blob: Blob | null) => void) => cb(instance.canvasBlob),
-      } as unknown as HTMLCanvasElement;
+        // The component rotates by a signed degree delta ("90deg", "-90deg").
+        // Accumulate it so `rotation` tracks the absolute applied angle.
+        $rotate(angle: string) {
+          instance.rotation += parseFloat(angle);
+        },
+      };
     },
-    rotate(deg: number) {
-      instance.rotation += deg;
-      return instance;
+    getCropperSelection() {
+      return {
+        $toCanvas() {
+          if (nextCanvasReturnsNull) return Promise.resolve(null);
+          return Promise.resolve({
+            toBlob: (cb: (blob: Blob | null) => void) => cb(instance.canvasBlob),
+          } as unknown as HTMLCanvasElement);
+        },
+      };
     },
-    rotateTo(deg: number) {
-      instance.rotation = deg;
-      return instance;
+    getCropperCanvas() {
+      return {
+        addEventListener(type: string, cb: () => void) {
+          if (type === 'actionend') actionEndHandler = cb;
+        },
+      };
+    },
+    fireActionEnd() {
+      actionEndHandler?.();
     },
   };
   lastCropper = instance;
   return instance;
 }
 vi.mock('cropperjs', () => ({ default: MockCropperCtor }));
-// cropperjs ships a CSS file we import in the component; jsdom can't
-// parse it but the vite plugin handles the resolution. No-op stub is
-// fine for tests since we don't render the real cropper UI.
-vi.mock('cropperjs/dist/cropper.css', () => ({}));
 
 // Mock the typed API client. Each verb is a fresh vi.fn() per test so
 // we can assert call args and shape responses independently.
@@ -135,7 +150,7 @@ describe('ImageCropModal', () => {
 
     // Simulate cropperjs firing its cropend event after the user
     // drags a handle — the only path that flips the dirty flag.
-    lastCropper!.options.cropend?.();
+    lastCropper!.fireActionEnd();
 
     await waitFor(() => {
       expect((screen.getByTestId('crop-modal-apply') as HTMLButtonElement).disabled).toBe(false);
@@ -273,7 +288,7 @@ describe('ImageCropModal', () => {
     await fireImageLoad();
 
     // Mark dirty via the cropend hook so Apply enables.
-    lastCropper!.options.cropend?.();
+    lastCropper!.fireActionEnd();
     await waitFor(() => {
       expect((screen.getByTestId('crop-modal-apply') as HTMLButtonElement).disabled).toBe(false);
     });
@@ -336,7 +351,7 @@ describe('ImageCropModal', () => {
       onApplied: vi.fn(),
     });
     await fireImageLoad();
-    lastCropper!.options.cropend?.();
+    lastCropper!.fireActionEnd();
 
     await waitFor(() => {
       expect((screen.getByTestId('crop-modal-apply') as HTMLButtonElement).disabled).toBe(false);
@@ -362,7 +377,7 @@ describe('ImageCropModal', () => {
     const onApplied = vi.fn();
     renderModal({ onClose, onApplied });
     await fireImageLoad();
-    lastCropper!.options.cropend?.();
+    lastCropper!.fireActionEnd();
     await waitFor(() => {
       expect((screen.getByTestId('crop-modal-apply') as HTMLButtonElement).disabled).toBe(false);
     });
@@ -386,7 +401,7 @@ describe('ImageCropModal', () => {
     mockPOST.mockResolvedValue({ data: {}, response: { status: 201 } });
     renderModal();
     await fireImageLoad();
-    lastCropper!.options.cropend?.();
+    lastCropper!.fireActionEnd();
     await waitFor(() => {
       expect((screen.getByTestId('crop-modal-apply') as HTMLButtonElement).disabled).toBe(false);
     });
@@ -412,7 +427,7 @@ describe('ImageCropModal', () => {
     const onClose = vi.fn();
     renderModal({ onApplied, onClose });
     await fireImageLoad();
-    lastCropper!.options.cropend?.();
+    lastCropper!.fireActionEnd();
     await waitFor(() => {
       expect((screen.getByTestId('crop-modal-apply') as HTMLButtonElement).disabled).toBe(false);
     });
@@ -433,7 +448,7 @@ describe('ImageCropModal', () => {
     nextCanvasBlob = null;
     renderModal();
     await fireImageLoad();
-    lastCropper!.options.cropend?.();
+    lastCropper!.fireActionEnd();
     await waitFor(() => {
       expect((screen.getByTestId('crop-modal-apply') as HTMLButtonElement).disabled).toBe(false);
     });
@@ -448,11 +463,11 @@ describe('ImageCropModal', () => {
     expect(mockPOST).not.toHaveBeenCalled();
   });
 
-  it('toasts when getCroppedCanvas returns null', async () => {
+  it('toasts when $toCanvas resolves no canvas', async () => {
     nextCanvasReturnsNull = true;
     renderModal();
     await fireImageLoad();
-    lastCropper!.options.cropend?.();
+    lastCropper!.fireActionEnd();
     await waitFor(() => {
       expect((screen.getByTestId('crop-modal-apply') as HTMLButtonElement).disabled).toBe(false);
     });
@@ -477,7 +492,7 @@ describe('ImageCropModal', () => {
     const onClose = vi.fn();
     renderModal({ onClose });
     await fireImageLoad();
-    lastCropper!.options.cropend?.();
+    lastCropper!.fireActionEnd();
     await waitFor(() => {
       expect((screen.getByTestId('crop-modal-apply') as HTMLButtonElement).disabled).toBe(false);
     });
