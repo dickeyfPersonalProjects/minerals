@@ -62,7 +62,10 @@ func SetSessionCookie(w http.ResponseWriter, sessionID [32]byte, cfg CookieConfi
 	// gosec G124 cannot tell statically that Secure is intentionally
 	// per-environment (true in prod/staging, false in dev) — the
 	// callsite, not this helper, owns the security-relevant choice.
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec
+	// CodeQL go/cookie-secure-not-set raises the same false positive
+	// (it doesn't honour the gosec nolint); reviewed in mi-l1eg and
+	// suppressed inline — Secure is cfg.Secure, never a literal false.
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // codeql[go/cookie-secure-not-set]
 		Name:     SessionCookieName,
 		Value:    base64.RawURLEncoding.EncodeToString(sessionID[:]),
 		Path:     mustPath(cfg.Path),
@@ -84,8 +87,9 @@ func SetSessionCookie(w http.ResponseWriter, sessionID [32]byte, cfg CookieConfi
 // Hand-rolled clears are the documented logout-bug source.
 func ClearSessionCookie(w http.ResponseWriter, cfg CookieConfig) {
 	// gosec G124: see SetSessionCookie — Secure is per-environment
-	// by design.
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec
+	// by design. CodeQL go/cookie-secure-not-set raises the same
+	// false positive here; reviewed in mi-l1eg and suppressed inline.
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // codeql[go/cookie-secure-not-set]
 		Name:     SessionCookieName,
 		Value:    "",
 		Path:     mustPath(cfg.Path),
