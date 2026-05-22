@@ -104,17 +104,6 @@ jobs:
         # actions/setup-go@v6 default).
         run: gotestsum --junitfile junit.xml -- -race -shuffle=on ./...
 
-      # Fuzz smoke (mi-h8j, CONTRACT §17). Main-only — keeps PR latency
-      # low while still catching regressions in the untrusted-input
-      # parsers before a release. `go test -fuzz` is single-package, so
-      # we invoke it once per harness rather than the multi-package
-      # form. Failing seeds (if any) are surfaced via the fuzz output;
-      # corpora are not persisted between runs.
-      - name: fuzz-smoke
-        run: |
-          go test -run='^$' -fuzz=FuzzRender -fuzztime=30s ./internal/markdown
-          go test -run='^$' -fuzz=FuzzParseExif -fuzztime=30s ./internal/storage/exif
-
       # SCA: known CVEs in direct + transitive Go deps, scoped to
       # reachable callgraph (per mi-xql / Q-1 R3).
       - name: Install govulncheck
@@ -176,6 +165,61 @@ jobs:
           name: frontend-coverage
           path: frontend/coverage/
           if-no-files-found: ignore
+
+  # Fuzz smoke (mi-h8j, CONTRACT §17). Runs as its OWN job that is
+  # deliberately NOT in the publish dependency chain (detect -> image
+  # -> merge gates on `test` only). Rationale (mi-d1bk): the fuzzers
+  # are CPU-heavy and non-deterministic, so a runner-perf hiccup can
+  # SIGTERM the step (exit 143) with no real bug found. When this step
+  # lived inside `test`, that flake failed `test` and blocked the image
+  # publish/promote chain — which on 2026-05-22 stalled a P0 prod
+  # DB-pool fix (mi-hkh6) mid-incident. Publish must gate only on
+  # DETERMINISTIC checks; fuzzing is a non-gating signal.
+  #
+  # Crash vs. flake: a genuine fuzz-discovered crash makes `go test`
+  # write the failing input to testdata/fuzz/<Fuzz>/<id> and print
+  # "Failing input written to". A timeout/SIGTERM writes no such file.
+  # So this job fails (surfacing a real bug for triage) ONLY when a
+  # crash corpus was written; a bare timeout is logged as a warning and
+  # left green. `go test -fuzz` is single-package, so each harness is
+  # invoked separately. Pure parser fuzzers — no Postgres/MinIO needed.
+  fuzz-smoke:
+    name: Fuzz smoke (non-gating)
+    runs-on: ubuntu-latest
+    # Generous headroom so the JOB timeout itself never becomes the gate
+    # we just removed: baseline-coverage build + 2×30s fuzztime + overhead.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: fuzz-smoke
+        run: |
+          set +e
+          real_crash=0
+          run_fuzz() {
+            name="$1"; pkg="$2"
+            echo "::group::${name} (${pkg})"
+            out="$(go test -run='^$' -fuzz="${name}" -fuzztime=30s "${pkg}" 2>&1)"
+            rc=$?
+            printf '%s\n' "$out"
+            echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then
+              if printf '%s\n' "$out" | grep -q 'Failing input written to'; then
+                echo "::error::${name} found a crash (corpus written) — commit the seed under testdata/fuzz and fix the parser"
+                real_crash=1
+              else
+                echo "::warning::${name} exited ${rc} with no failing input (timeout/SIGTERM flake) — not failing the job"
+              fi
+            fi
+          }
+          run_fuzz FuzzRender ./internal/markdown
+          run_fuzz FuzzParseExif ./internal/storage/exif
+          exit "${real_crash}"
 
   # Validates the committed docker-compose.yml end-to-end. The `test`
   # job above brings up Postgres + MinIO via GHA service containers
