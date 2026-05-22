@@ -527,3 +527,50 @@ func TestJournalFileDownload_NotFound(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestJournalFileDownload_RejectsNonAttachmentFile is the IDOR
+// regression test for mi-l1eg. Photo originals are stored in the same
+// `files` table as journal attachments, but they must be served only
+// through /api/v1/photos/{id} (which enforces parent-specimen
+// visibility). The /api/v1/files/{file_id} download path must refuse to
+// serve any file that is NOT a journal attachment — otherwise a caller
+// who learns or enumerates a private photo's file_id can pull its bytes
+// without any visibility check. Here we seed a file directly into the
+// files repo + object store with NO journal-attachment row (i.e. a
+// photo original), then assert the download path 404s instead of
+// streaming the bytes. Before the mi-l1eg fix this returned 200 + the
+// original bytes — a cross-tenant disclosure of private images.
+func TestJournalFileDownload_RejectsNonAttachmentFile(t *testing.T) {
+	h, _, _, files, store := newJournalFileServer(t)
+
+	// A file with no attachment row — exactly how a photo original
+	// (key "files/{fileID}") looks in these tables.
+	fileID := uuid.New()
+	key := "files/" + fileID.String()
+	secret := []byte("private photo original bytes")
+	if err := store.Upload(context.Background(), key, bytes.NewReader(secret), "image/jpeg"); err != nil {
+		t.Fatalf("seed object: %v", err)
+	}
+	if err := files.Create(context.Background(), nil, domain.File{
+		ID:          fileID,
+		S3Key:       key,
+		ContentType: "image/jpeg",
+		ByteSize:    int64(len(secret)),
+		SHA256:      "deadbeef",
+	}); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+fileID.String(), nil)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("non-attachment file download: status = %d (want 404); "+
+			"a non-attachment file (photo original) must NOT be served by "+
+			"/api/v1/files/{file_id} — IDOR (mi-l1eg)", rec.Code)
+	}
+	if bytes.Contains(rec.Body.Bytes(), secret) {
+		t.Fatalf("non-attachment file bytes leaked through /api/v1/files/{file_id} (IDOR, mi-l1eg)")
+	}
+}

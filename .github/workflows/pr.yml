@@ -157,6 +157,13 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      # SCA: frontend dependency CVEs (mi-l1eg). Fails the job on a
+      # high- or critical-severity advisory in the dependency tree.
+      - name: npm audit (high+ severity)
+        if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
       - name: prettier check
         if: steps.detect.outputs.present == 'true'
         working-directory: frontend
@@ -184,6 +191,28 @@ jobs:
           name: frontend-coverage
           path: frontend/coverage/
           if-no-files-found: ignore
+
+  # SCA + IaC scan (mi-l1eg). Trivy in filesystem mode scans the repo
+  # for vulnerable dependencies (Go + npm lockfiles) and misconfigured
+  # IaC / Dockerfiles. Scoped to HIGH+CRITICAL so the job fails only on
+  # actionable findings; govulncheck (reachable Go CVEs) and npm audit
+  # (frontend CVEs) remain the primary per-ecosystem gates and this is
+  # the broad backstop that also covers config/Dockerfile issues.
+  trivy:
+    name: Trivy scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy filesystem + config scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
 
   # Validates the committed docker-compose.yml end-to-end. The Backend
   # job above brings up Postgres + MinIO via GHA service containers
