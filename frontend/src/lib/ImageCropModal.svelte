@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import Cropper from 'cropperjs';
-  import 'cropperjs/dist/cropper.css';
   import { client } from './api';
   import { SUPPRESS_TOAST_HEADERS, envelopeMessage } from './api/wrapper';
   import { toastError, toastSuccess } from './toasts';
@@ -24,6 +23,40 @@
   let busy = $state(false);
   let imageError = $state(false);
   let rotation = $state(0);
+  // The rotation actually applied to the cropper-image so far. cropperjs v2's
+  // `$rotate` is *relative* (unlike v1's absolute `rotateTo`), so we track the
+  // applied angle and rotate by the shortest delta to reach a new target.
+  let appliedRotation = 0;
+
+  // cropperjs v2 is a web-component rewrite: there is no single `Cropper`
+  // instance with options. We feed a template into `new Cropper(img, …)` and
+  // then drive the `<cropper-image>` / `<cropper-selection>` elements. This
+  // template mirrors the v1 config: `initial-coverage="1"` reproduces v1's
+  // `autoCropArea: 1` (selection covers the whole image), and dropping the
+  // `background` attribute reproduces v1's `background: false`. Free-form crop
+  // (no `aspect-ratio`) is preserved.
+  // The <cropper-canvas> doesn't auto-size to the image (its shadow CSS only
+  // sets min-height: 100px), so we give it an explicit height matching v1's
+  // `max-h-[60vh]` editor stage — otherwise it renders as a ~100px strip.
+  const CROPPER_TEMPLATE =
+    '<cropper-canvas style="height: 60vh; width: 100%;">' +
+    '<cropper-image rotatable scalable translatable></cropper-image>' +
+    '<cropper-shade hidden></cropper-shade>' +
+    '<cropper-handle action="select" plain></cropper-handle>' +
+    '<cropper-selection initial-coverage="1" movable resizable>' +
+    '<cropper-grid role="grid" bordered covered></cropper-grid>' +
+    '<cropper-crosshair centered></cropper-crosshair>' +
+    '<cropper-handle action="move" theme-color="rgba(255, 255, 255, 0.35)"></cropper-handle>' +
+    '<cropper-handle action="n-resize"></cropper-handle>' +
+    '<cropper-handle action="e-resize"></cropper-handle>' +
+    '<cropper-handle action="s-resize"></cropper-handle>' +
+    '<cropper-handle action="w-resize"></cropper-handle>' +
+    '<cropper-handle action="ne-resize"></cropper-handle>' +
+    '<cropper-handle action="nw-resize"></cropper-handle>' +
+    '<cropper-handle action="se-resize"></cropper-handle>' +
+    '<cropper-handle action="sw-resize"></cropper-handle>' +
+    '</cropper-selection>' +
+    '</cropper-canvas>';
 
   // V2 BFF (mi-3vc4): cookies travel on <img> requests automatically,
   // so the image URL is the backend path directly — no auth header to
@@ -44,10 +77,21 @@
     return n;
   }
 
+  // Rotate the cropper-image to an absolute angle. v2's `$rotate` is relative
+  // and angle units default to radians; we pass a `deg` string and rotate by
+  // the shortest signed delta so the image never spins the long way round.
+  function rotateTo(target: number) {
+    const image = cropper?.getCropperImage();
+    if (!image) return;
+    const delta = normalizeAngle(target - appliedRotation);
+    image.$rotate(`${delta}deg`);
+    appliedRotation = target;
+  }
+
   function rotateBy(delta: number) {
     if (!cropper) return;
     rotation = normalizeAngle(rotation + delta);
-    cropper.rotateTo(rotation);
+    rotateTo(rotation);
     markDirty();
   }
 
@@ -55,28 +99,29 @@
     if (!cropper) return;
     const val = Number((e.currentTarget as HTMLInputElement).value);
     rotation = val;
-    cropper.rotateTo(val);
+    rotateTo(val);
     markDirty();
   }
 
   function resetRotation() {
     if (!cropper) return;
     rotation = 0;
-    cropper.rotateTo(0);
+    rotateTo(0);
     markDirty();
   }
 
   function handleImageLoad() {
     if (!imgEl) return;
     cropper?.destroy();
-    cropper = new Cropper(imgEl, {
-      viewMode: 1,
-      autoCropArea: 1,
-      background: false,
-      responsive: true,
-      checkOrientation: false,
-      cropend: markDirty,
-    });
+    rotation = 0;
+    appliedRotation = 0;
+    cropper = new Cropper(imgEl, { template: CROPPER_TEMPLATE });
+    // v1 fired a `cropend` option callback when the user finished dragging the
+    // crop box. v2's analog is the `actionend` event the <cropper-canvas>
+    // emits when a pointer interaction (move/resize/select) finishes. Unlike
+    // the selection's `change` event, `actionend` only fires on real user
+    // interaction, so it won't mark the modal dirty on initial render.
+    cropper.getCropperCanvas()?.addEventListener('actionend', markDirty);
   }
 
   function handleImageError() {
@@ -113,7 +158,16 @@
     if (!dirty || busy || !cropper) return;
     busy = true;
     try {
-      const canvas = cropper.getCroppedCanvas({ imageSmoothingQuality: 'high' });
+      const selection = cropper.getCropperSelection();
+      // v1's `getCroppedCanvas()` returned a canvas synchronously; v2's
+      // `$toCanvas()` is async and lives on the <cropper-selection>. It draws
+      // only the selected area, honouring the image's rotation transform.
+      const canvas = await selection?.$toCanvas({
+        beforeDraw: (ctx) => {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+        },
+      });
       if (!canvas) {
         toastError('Crop failed: no cropped canvas');
         return;
