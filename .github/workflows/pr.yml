@@ -145,7 +145,7 @@ jobs:
             echo "::notice::frontend/ not present — skipping frontend gates"
           fi
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         if: steps.detect.outputs.present == 'true'
         with:
           node-version: '22'
@@ -749,7 +749,7 @@ jobs:
       # backend-only checks can only approximate. Sequential P0 bugs
       # (mi-rvn, mi-0ag, mi-cl1) all shipped past the curl-based smoke
       # because each lives in a layer only a real browser exercises.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'npm'
