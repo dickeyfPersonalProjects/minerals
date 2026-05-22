@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"sync"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
@@ -155,6 +156,43 @@ func autoMigrateDev(ctx context.Context, dbURL string) error {
 		return fmt.Errorf("migrate up: %w", err)
 	}
 	return nil
+}
+
+// newSchemaVersionProbe returns the SchemaVersion reader wired into
+// /readyz, caching the first successful read. The applied schema
+// version is immutable for the process lifetime — in prod the migrate
+// Job runs before the deployment rolls (design §6.4) and serve startup
+// already asserts the version via verifySchemaVersion — so re-reading
+// it on every readiness probe only churns a fresh golang-migrate DB
+// connection (schemaVersion → newMigrate opens its own short-lived
+// sql.DB) against the same Postgres the app pool depends on. Under the
+// mi-hkh6 saturation incident that per-probe connect competed for
+// Postgres backend slots on the very path meant to report health;
+// caching removes it from the hot path entirely.
+//
+// Errors are NOT cached: until the first success the probe keeps
+// retrying, so a DB that is briefly unreachable still resolves to a
+// real version once it comes up rather than latching a stale failure.
+func newSchemaVersionProbe(dbURL string) func(context.Context) (uint, bool, error) {
+	var (
+		mu     sync.Mutex
+		cached bool
+		ver    uint
+		dirty  bool
+	)
+	return func(ctx context.Context) (uint, bool, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if cached {
+			return ver, dirty, nil
+		}
+		v, d, err := schemaVersion(ctx, dbURL)
+		if err != nil {
+			return 0, false, err
+		}
+		ver, dirty, cached = v, d, true
+		return ver, dirty, nil
+	}
 }
 
 // schemaVersion reports the current applied migration version. If no
