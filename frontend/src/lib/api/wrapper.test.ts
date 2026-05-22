@@ -213,6 +213,37 @@ describe('auto-toast middleware', () => {
     expect(list[0]?.type).toBe('error');
     expect(list[0]?.message).toBe('network down');
   });
+
+  it('does NOT toast when the request is aborted (AbortError, onError path)', async () => {
+    // Mirror the live bug: ctrl.abort() with no argument rejects the
+    // fetch with a DOMException name='AbortError' message="signal is
+    // aborted without reason". That string must never reach the user.
+    const fetchStub = vi.fn(async () => {
+      throw new DOMException('signal is aborted without reason', 'AbortError');
+    });
+
+    await expect(withFetch(fetchStub as unknown as typeof fetch)('/healthz')).rejects.toThrow(
+      'signal is aborted without reason',
+    );
+
+    expect(get(toasts)).toHaveLength(0);
+  });
+
+  it('does NOT toast when an Error-named AbortError surfaces', async () => {
+    // Some environments reject with a plain Error whose name is
+    // 'AbortError' rather than a DOMException — filter that too.
+    const fetchStub = vi.fn(async () => {
+      const err = new Error('aborted');
+      err.name = 'AbortError';
+      throw err;
+    });
+
+    await expect(withFetch(fetchStub as unknown as typeof fetch)('/healthz')).rejects.toThrow(
+      'aborted',
+    );
+
+    expect(get(toasts)).toHaveLength(0);
+  });
 });
 
 // CSRF middleware (V2 BFF cookie flow, mi-3vc4). Exercises the
