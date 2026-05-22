@@ -217,6 +217,14 @@ export function installToastMiddleware(): void {
       // Network failures / aborts surface here. Same suppression
       // contract as onResponse.
       if (request.headers.get(SUPPRESS_HEADER) === '1') return;
+      // Intentional cancellations (component unmount, navigation,
+      // superseded request) reject with AbortError — never surface
+      // them to the user. ctrl.abort() with no argument produces a
+      // DOMException name='AbortError' message="signal is aborted
+      // without reason"; that string must not be toasted.
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      if (error instanceof Error && error.name === 'AbortError') return;
+      if (request.signal?.aborted) return;
       const message = error instanceof Error ? error.message : String(error);
       toastError(message);
     },
