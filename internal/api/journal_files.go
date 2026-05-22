@@ -514,15 +514,25 @@ func (s *JournalFileService) downloadOriginal(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// CONTRACT.md §13 v2: when this file is a journal attachment,
-	// viewing its bytes requires view access to the parent entry. A
-	// file_id that is not a journal attachment falls through to the
-	// existing authenticated-download behaviour (photo files enforce
-	// via their own /api/v1/photos/{id} route).
-	if s.authz.active() {
-		att, aerr := s.deps.Attachments.GetByFileID(ctx, id)
-		switch {
-		case aerr == nil:
+	// CONTRACT.md §13 v2 + mi-l1eg: GET /api/v1/files/{file_id} serves
+	// ONLY journal attachments. Photo originals live in the same
+	// `files` table, but they are served exclusively via
+	// /api/v1/photos/{id}, which enforces parent-specimen visibility +
+	// per-photo redaction. A file_id that is not a journal attachment
+	// (a photo original, or any other file) MUST NOT be served here:
+	// doing so bypasses the photo authorization gate entirely, letting
+	// any caller who learns (or enumerates the time-ordered UUIDv7 of)
+	// another user's private photo file_id download its bytes (IDOR).
+	// So: resolve the attachment first; non-attachments 404 (default-
+	// deny on unknown provenance, 404 rather than 403 to avoid leaking
+	// existence). The attachment lookup runs regardless of enforcer
+	// state — it gates which files this endpoint will serve at all,
+	// not a per-user authorization decision. The parent-entry view
+	// check is what's gated on the enforcer being active.
+	att, aerr := s.deps.Attachments.GetByFileID(ctx, id)
+	switch {
+	case aerr == nil:
+		if s.authz.active() {
 			entry, eerr := s.deps.Entries.GetByID(ctx, att.EntryID)
 			if eerr != nil {
 				writeError(w, http.StatusInternalServerError, "internal_error",
@@ -533,13 +543,17 @@ func (s *JournalFileService) downloadOriginal(w http.ResponseWriter, r *http.Req
 				"file_not_found", "no such file") {
 				return
 			}
-		case errors.Is(aerr, domain.ErrJournalAttachmentNotFound):
-			// Not a journal attachment — nothing to enforce here.
-		default:
-			writeError(w, http.StatusInternalServerError, "internal_error",
-				"internal server error", nil)
-			return
 		}
+	case errors.Is(aerr, domain.ErrJournalAttachmentNotFound):
+		// Not a journal attachment — this endpoint does not serve it
+		// (photo originals go through /api/v1/photos/{id}). 404 so we
+		// don't disclose that a file with this id exists.
+		writeError(w, http.StatusNotFound, "file_not_found", "no such file", nil)
+		return
+	default:
+		writeError(w, http.StatusInternalServerError, "internal_error",
+			"internal server error", nil)
+		return
 	}
 
 	etag := `"` + f.SHA256 + `"`
