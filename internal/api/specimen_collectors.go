@@ -63,19 +63,21 @@ type putSpecimenCollectorsBody struct {
 // so the GET handler can return 404 when the specimen itself is
 // missing (vs an empty 200 for a known specimen with no chain).
 type SpecimenCollectorService struct {
-	specimens domain.SpecimenRepo
-	links     domain.SpecimenCollectorRepo
-	authz     authzGuard
+	specimens  domain.SpecimenRepo
+	collectors domain.CollectorRepo
+	links      domain.SpecimenCollectorRepo
+	authz      authzGuard
 }
 
 func registerSpecimenCollectorOperations(
 	api huma.API, authMW authMiddlewares, guard authzGuard,
-	specimens domain.SpecimenRepo, links domain.SpecimenCollectorRepo,
+	specimens domain.SpecimenRepo, collectors domain.CollectorRepo,
+	links domain.SpecimenCollectorRepo,
 ) {
-	if specimens == nil || links == nil {
+	if specimens == nil || collectors == nil || links == nil {
 		return
 	}
-	s := &SpecimenCollectorService{specimens: specimens, links: links, authz: guard}
+	s := &SpecimenCollectorService{specimens: specimens, collectors: collectors, links: links, authz: guard}
 	mws := authMW.Protected()
 	optionalMWs := authMW.Optional()
 
@@ -170,6 +172,32 @@ func (s *SpecimenCollectorService) put(
 		}
 		seen[cid] = struct{}{}
 		ids = append(ids, cid)
+	}
+
+	// Authorize every collector before linking it. Collectors are
+	// owned-only and GetChain embeds the full CollectorView (name,
+	// notes) into the response — without this check a caller could
+	// link another user's private collector to their own specimen and
+	// read it back (mi-6863). A view check is sufficient: collectors
+	// carry no public visibility, so `view` already resolves to `own`
+	// via the enforcer. A forbidden collector is rewritten as the same
+	// collector_not_found 404 ReplaceChain would raise for a missing
+	// id, so the wire response does not leak which ids exist.
+	for _, cid := range ids {
+		c, gerr := s.collectors.GetByID(ctx, cid)
+		if gerr != nil {
+			if errors.Is(gerr, domain.ErrCollectorNotFound) {
+				return nil, newAPIError(http.StatusNotFound, "collector_not_found",
+					"one or more collector_ids do not exist",
+					map[string]any{"field": "collector_ids"})
+			}
+			return nil, newAPIError(http.StatusInternalServerError, "internal_error",
+				"internal server error", nil)
+		}
+		if err := s.authz.checkView(ctx, collectorResource(c),
+			"collector_not_found", "one or more collector_ids do not exist"); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := s.links.ReplaceChain(ctx, nil, id, ids); err != nil {
