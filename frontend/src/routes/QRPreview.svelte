@@ -12,9 +12,9 @@
   //                     destructive action.
   //
   // The print area contains ONLY the QR(s); a `qr-screen-only`
-  // wrapper holds the controls. `@media print` rules in the head
-  // hide everything else so the sticker grid lands cleanly on the
-  // Avery sheet.
+  // wrapper holds the controls. `@media print` rules in app.css
+  // (scoped by `body[data-qr-print='true']`) hide everything else so
+  // the sticker grid lands cleanly on the Avery sheet.
   import { onMount, untrack } from 'svelte';
   import { link, push, router } from 'svelte-spa-router';
   import { client } from '../lib/api';
@@ -223,7 +223,7 @@
   }
 
   onMount(() => {
-    // The print stylesheet matches `body[data-qr-print="true"]`
+    // The print rules in app.css match `body[data-qr-print="true"]`
     // so we hide the layout chrome only while this route is
     // mounted — every other page keeps its default print
     // behaviour.
@@ -282,46 +282,6 @@
 
 <svelte:head>
   <title>QR preview · Minerals</title>
-  <!--
-    Print rules — only injected while this route is mounted, so
-    the rest of the SPA keeps its normal print behaviour. `@page
-    margin: 0` is required for the sticker grid to align with the
-    physical labels (any browser-default margin pushes the cells
-    off-axis).
-  -->
-  <style>
-    @media print {
-      @page {
-        margin: 0;
-      }
-      html,
-      body {
-        background: white !important;
-        margin: 0 !important;
-      }
-      body[data-qr-print='true'] header,
-      body[data-qr-print='true'] footer,
-      body[data-qr-print='true'] [data-testid='toaster'] {
-        display: none !important;
-      }
-      body[data-qr-print='true'] main {
-        max-width: none !important;
-        padding: 0 !important;
-        margin: 0 !important;
-      }
-      .qr-screen-only {
-        display: none !important;
-      }
-      .qr-page-break {
-        break-after: page;
-        page-break-after: always;
-      }
-      .qr-page-break:last-child {
-        break-after: auto;
-        page-break-after: auto;
-      }
-    }
-  </style>
 </svelte:head>
 
 <section data-testid="qr-preview" class="space-y-6">

@@ -163,9 +163,19 @@ func SecurityHeaders(next http.Handler) http.Handler {
 // response. Under V2 BFF the SPA never speaks OAuth directly, so
 // `connect-src 'self'` is sufficient — no cross-origin Keycloak POST
 // to allow-list.
+//
+// `style-src 'self'` (no 'unsafe-inline') locks <style>/<link>
+// stylesheets to same-origin, closing the CSS-injection surface from
+// injected style elements (mi-97cl). The SPA's compiled CSS is a
+// bundled same-origin stylesheet, so it loads cleanly. `'unsafe-inline'`
+// is confined to `style-src-attr`, which only governs inline `style=""`
+// attributes — Svelte emits these for genuinely dynamic values (e.g.
+// the QR sheet's per-template mm dimensions) that cannot be hashed or
+// nonced. The /docs route keeps its own relaxed override (Redoc).
 const cspPolicy = "default-src 'self'; " +
 	"script-src 'self'; " +
-	"style-src 'self' 'unsafe-inline'; " +
+	"style-src 'self'; " +
+	"style-src-attr 'unsafe-inline'; " +
 	"img-src 'self' data:; " +
 	"font-src 'self'; " +
 	"connect-src 'self'; " +
