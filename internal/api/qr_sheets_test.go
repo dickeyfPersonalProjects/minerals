@@ -16,6 +16,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/dickeyfPersonalProjects/minerals/internal/auth"
+	"github.com/dickeyfPersonalProjects/minerals/internal/authz"
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
 )
 
@@ -864,5 +866,134 @@ func TestQRSheetRoutesAreNotRegisteredWithoutRepo(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+// newAuthzQRSheetService builds a QRSheetService with a live Casbin
+// enforcer (seeded with the §13 v2 default policies) and a real
+// SpecimenRepo, so the per-specimen authorization on the add path
+// actually runs — the server-level handler tests above wire neither
+// (Specimens is nil, the enforcer inactive) and the check is a no-op.
+// Used by the add-specimen authorization regression tests below.
+func newAuthzQRSheetService(t *testing.T, repo domain.QRSheetRepo, specimens domain.SpecimenRepo) *QRSheetService {
+	t.Helper()
+	enf, err := authz.NewEnforcer(nil, nil)
+	if err != nil {
+		t.Fatalf("authz.NewEnforcer: %v", err)
+	}
+	if err := authz.SeedDefaultPolicies(enf); err != nil {
+		t.Fatalf("seed policies: %v", err)
+	}
+	return &QRSheetService{repo: repo, specimens: specimens, authz: authzGuard{enforcer: enf}}
+}
+
+// seedSheetFor seeds an empty sheet owned by userID (seedSheet hardcodes
+// the StubUser id, but the authz tests need the sheet owner to be an
+// arbitrary caller). Registers the supplied specimen ids so the repo's
+// own ErrSpecimenNotFound guard passes for the success paths.
+func (f *fakeQRSheetRepo) seedSheetFor(userID uuid.UUID, template domain.QRSheetTemplate, specimens ...uuid.UUID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	now := time.Now().UTC()
+	f.sheets[userID] = domain.QRSheet{
+		ID: uuid.New(), UserID: userID, Template: template, CreatedAt: now, UpdatedAt: now,
+	}
+	for _, id := range specimens {
+		f.specimens[id] = struct{}{}
+	}
+}
+
+// TestQRSheetAddSpecimenAuthorizesSpecimen is the regression guard for
+// mi-os89: addSpecimen() authorized the sheet (own) but appended an
+// arbitrary specimen_id with no view check. Because loadView surfaces
+// the specimen name + first-photo thumbnail, a caller could pull
+// another user's *private* specimen name/thumbnail onto their own
+// sheet by guessing its id. The fix view-checks the specimen first.
+//
+// The matrix proves the boundary: a stranger's private specimen is
+// denied (rewritten to 404 specimen_not_found so existence never
+// leaks), while a public specimen — whose name/thumbnail are not
+// private — and the caller's own specimen both stay addable.
+func TestQRSheetAddSpecimenAuthorizesSpecimen(t *testing.T) {
+	caller := uuid.New()   // owns the sheet, doing the add
+	stranger := uuid.New() // owns the specimen being added
+
+	cases := []struct {
+		name       string
+		owner      uuid.UUID
+		visibility domain.Visibility
+		wantAdded  bool // true => append succeeds, false => 404 + nothing persisted
+	}{
+		{"stranger private specimen denied", stranger, domain.VisibilityPrivate, false},
+		{"stranger public specimen allowed", stranger, domain.VisibilityPublic, true},
+		{"own private specimen allowed", caller, domain.VisibilityPrivate, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newFakeQRSheetRepo()
+			specRepo := newFakeSpecimenRepo()
+			specID := uuid.New()
+			specRepo.rows[specID] = domain.Specimen{
+				ID: specID, AuthorID: tc.owner, Visibility: tc.visibility,
+			}
+			repo.seedSheetFor(caller, "avery-5160", specID)
+			s := newAuthzQRSheetService(t, repo, specRepo)
+
+			in := &addQRSheetSpecimenInput{Body: addQRSheetSpecimenBody{SpecimenID: specID.String()}}
+			ctx := auth.WithUser(context.Background(),
+				auth.User{ID: caller, Roles: []string{"user"}})
+			out, err := s.addSpecimen(ctx, in)
+
+			if tc.wantAdded {
+				if err != nil {
+					t.Fatalf("add failed: %v", err)
+				}
+				if len(out.Body.Specimens) != 1 || out.Body.Specimens[0].SpecimenID != specID {
+					t.Errorf("specimen list = %+v, want the added specimen", out.Body.Specimens)
+				}
+				return
+			}
+
+			var ae *apiError
+			if !errors.As(err, &ae) {
+				t.Fatalf("expected *apiError, got %T (%v)", err, err)
+			}
+			if ae.Status != http.StatusNotFound {
+				t.Errorf("status = %d, want 404 (existence must not leak)", ae.Status)
+			}
+			if ae.Envelope.Code != "specimen_not_found" {
+				t.Errorf("code = %q, want specimen_not_found", ae.Envelope.Code)
+			}
+			if entries := repo.entries[repo.sheets[caller].ID]; len(entries) != 0 {
+				t.Errorf("specimen persisted despite denial: %d entries", len(entries))
+			}
+		})
+	}
+}
+
+// TestQRSheetAddSpecimenMissingUnderAuthz pins the 404 on the enforce
+// path itself (active enforcer + real specimen repo): a named specimen
+// that does not exist surfaces specimen_not_found from the
+// authorization preflight, before the repo insert.
+func TestQRSheetAddSpecimenMissingUnderAuthz(t *testing.T) {
+	caller := uuid.New()
+	repo := newFakeQRSheetRepo()
+	repo.seedSheetFor(caller, "avery-5160")
+	s := newAuthzQRSheetService(t, repo, newFakeSpecimenRepo())
+
+	in := &addQRSheetSpecimenInput{Body: addQRSheetSpecimenBody{SpecimenID: uuid.New().String()}}
+	ctx := auth.WithUser(context.Background(),
+		auth.User{ID: caller, Roles: []string{"user"}})
+	_, err := s.addSpecimen(ctx, in)
+
+	var ae *apiError
+	if !errors.As(err, &ae) {
+		t.Fatalf("expected *apiError, got %T (%v)", err, err)
+	}
+	if ae.Status != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", ae.Status)
+	}
+	if ae.Envelope.Code != "specimen_not_found" {
+		t.Errorf("code = %q, want specimen_not_found", ae.Envelope.Code)
 	}
 }
