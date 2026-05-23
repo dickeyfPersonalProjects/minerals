@@ -209,6 +209,16 @@ func (s *JournalService) create(ctx context.Context, in *createJournalInput) (*c
 	if err := s.authz.check(ctx, ownedResource("journal", authorID), actCreate); err != nil {
 		return nil, err
 	}
+	// CONTRACT.md §13 v2: creating a journal entry mutates the parent
+	// specimen's observation log, so the caller must be authorized
+	// against the specimen itself — `journal:create:own` only proves
+	// they may own journal entries, never that *this* specimen is
+	// theirs. Without this check the foreign key is the sole guard
+	// against attaching an entry to another user's specimen (mi-f5sm).
+	// Mirrors enforcePhoto(..., actCreate) on the photo upload path.
+	if err := s.enforceParentSpecimen(ctx, specimenID, actEdit); err != nil {
+		return nil, err
+	}
 
 	now := time.Now().UTC()
 	e := domain.JournalEntry{
@@ -354,6 +364,26 @@ func (s *JournalService) gateParentSpecimen(ctx context.Context, specimenID uuid
 	}
 	return s.authz.checkView(ctx, specimenResource(sp),
 		"specimen_not_found", "no such specimen")
+}
+
+// enforceParentSpecimen resolves the parent specimen and requires the
+// caller to hold `act` on it before a sub-resource write. Unlike
+// gateParentSpecimen (a view gate for the list endpoint), this is the
+// write gate: `actEdit` resolves `own` against the specimen's
+// author_id, so a caller who is neither the owner nor a share-edit
+// grantee is denied — including on public/unlisted specimens, which a
+// view check would have waved through. A nil specimens repo (the
+// unit-test path) skips the check, matching gateParentSpecimen and
+// enforcePhoto.
+func (s *JournalService) enforceParentSpecimen(ctx context.Context, specimenID uuid.UUID, act string) error {
+	if s.specimens == nil {
+		return nil
+	}
+	sp, err := s.specimens.GetByID(ctx, specimenID)
+	if err != nil {
+		return mapSpecimenError(err)
+	}
+	return s.authz.check(ctx, specimenResource(sp), act)
 }
 
 func toJournalView(e domain.JournalEntry, html string) JournalView {
