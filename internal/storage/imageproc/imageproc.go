@@ -72,19 +72,50 @@ func Generate(data []byte, contentType string) (Variants, error) {
 // decode.
 var ErrUnsupportedContentType = errors.New("imageproc: unsupported content type")
 
+// MaxPixels caps the decoded pixel count (width × height) we'll accept.
+// The 100 MiB byte cap on uploads bounds only *compressed* input; a
+// few-KB image header can declare enormous dimensions (e.g. 30000×30000)
+// that decode to gigabytes of RGBA — a decompression-bomb DoS. We read
+// the dimensions via DecodeConfig (which parses only the header, not the
+// pixel data) and reject before the full decode allocates anything.
+//
+// 100 megapixels comfortably exceeds any legitimate phone/camera photo
+// (a 100 MP source decodes to ~400 MiB RGBA) while rejecting bombs.
+const MaxPixels = 100 * 1000 * 1000
+
+// ErrImageTooLarge is returned by decode when an image's declared pixel
+// dimensions exceed MaxPixels.
+var ErrImageTooLarge = errors.New("imageproc: image pixel dimensions exceed cap")
+
 func decode(data []byte, contentType string) (image.Image, error) {
+	switch contentType {
+	case ContentTypeJPEG, ContentTypePNG, ContentTypeWebP:
+	default:
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedContentType, contentType)
+	}
+
+	// Pixel-dimension cap: parse just the header to reject oversized
+	// images before the full decode allocates the pixel buffer. The
+	// stdlib jpeg/png decoders and the x/image/webp decoder all register
+	// with image, so image.DecodeConfig dispatches by sniffing the bytes.
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > MaxPixels {
+		return nil, fmt.Errorf("%w: %d×%d", ErrImageTooLarge, cfg.Width, cfg.Height)
+	}
+
 	switch contentType {
 	case ContentTypeJPEG:
 		return jpeg.Decode(bytes.NewReader(data))
 	case ContentTypePNG:
 		return png.Decode(bytes.NewReader(data))
-	case ContentTypeWebP:
+	default: // ContentTypeWebP
 		// image.Decode dispatches via the package-level registrations
 		// in the side-effect import above.
 		img, _, err := image.Decode(bytes.NewReader(data))
 		return img, err
-	default:
-		return nil, fmt.Errorf("%w: %s", ErrUnsupportedContentType, contentType)
 	}
 }
 
