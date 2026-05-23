@@ -107,18 +107,21 @@ type generateQRSheetPDFOutput struct {
 }
 
 // QRSheetService wires huma operations against a domain.QRSheetRepo
-// and the specimen repo (needed to surface ErrSpecimenNotFound up
-// front for the add path).
+// and the specimen repo. The specimen repo is needed to authorize the
+// specimen named on the add path: appending a specimen surfaces its
+// name + first-photo thumbnail through loadView, so the caller must be
+// able to view it (mi-os89).
 type QRSheetService struct {
-	repo  domain.QRSheetRepo
-	authz authzGuard
+	repo      domain.QRSheetRepo
+	specimens domain.SpecimenRepo
+	authz     authzGuard
 }
 
-func registerQRSheetOperations(api huma.API, authMW authMiddlewares, guard authzGuard, repo domain.QRSheetRepo) {
+func registerQRSheetOperations(api huma.API, authMW authMiddlewares, guard authzGuard, repo domain.QRSheetRepo, specimens domain.SpecimenRepo) {
 	if repo == nil {
 		return
 	}
-	s := &QRSheetService{repo: repo, authz: guard}
+	s := &QRSheetService{repo: repo, specimens: specimens, authz: guard}
 	mws := authMW.Protected()
 
 	huma.Register(api, huma.Operation{
@@ -296,6 +299,9 @@ func (s *QRSheetService) addSpecimen(
 	if err := s.authz.check(ctx, ownedResource("qr-sheets", user.ID), actEdit); err != nil {
 		return nil, err
 	}
+	if err := s.enforceSpecimen(ctx, specimenID); err != nil {
+		return nil, err
+	}
 
 	now := time.Now().UTC()
 	if err := s.repo.AddSpecimen(ctx, nil, user.ID, specimenID, now); err != nil {
@@ -323,6 +329,33 @@ func (s *QRSheetService) removeSpecimen(
 		return nil, mapQRSheetError(err)
 	}
 	return &removeQRSheetSpecimenOutput{}, nil
+}
+
+// enforceSpecimen resolves the specimen named on the add path and
+// requires the caller to be able to view it before it is appended.
+// Appending a specimen surfaces its name and first-photo thumbnail
+// through loadView, so without this check a caller could pull another
+// user's private specimen name + thumbnail onto their own sheet by
+// guessing its id — the sheet-ownership check above only proves the
+// sheet is theirs, never that the specimen is (mi-os89).
+//
+// This is a *view* gate, not a write gate: a label reference reads the
+// specimen, it does not mutate it. A forbidden private specimen is
+// therefore rewritten to 404 specimen_not_found — indistinguishable
+// from a genuinely missing row, so existence is never leaked
+// (CONTRACT.md §13 v2). Public/unlisted specimens stay addable; their
+// name and thumbnail are not private. A nil specimens repo (the
+// unit-test seam) skips the check, matching enforcePhoto and the
+// repo's own ErrSpecimenNotFound guard.
+func (s *QRSheetService) enforceSpecimen(ctx context.Context, specimenID uuid.UUID) error {
+	if s.specimens == nil {
+		return nil
+	}
+	sp, err := s.specimens.GetByID(ctx, specimenID)
+	if err != nil {
+		return mapSpecimenError(err)
+	}
+	return s.authz.checkView(ctx, specimenResource(sp), "specimen_not_found", "no such specimen")
 }
 
 // generatePDF builds a PDF of the user's active sheet and streams

@@ -193,7 +193,7 @@ func New(deps Deps) http.Handler {
 	registerSpecimenCollectorOperations(humaAPI, authMW, guard, deps.Specimens, deps.Collectors, deps.SpecimenCollectors)
 	registerJournalFileOperations(humaAPI, mux, authMW, guard, deps.JournalFiles)
 	registerMineralSpeciesOperations(humaAPI, authMW, deps.MineralSpecies)
-	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets)
+	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets, deps.Specimens)
 	registerProfileOperations(humaAPI, authMW, deps.Users)
 	registerSpecimenRedirect(mux)
 
