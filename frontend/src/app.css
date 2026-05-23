@@ -65,3 +65,49 @@ body {
   font-family: var(--font-sans);
   min-height: 100vh;
 }
+
+/* QR label print layout (mi-97cl).
+   Previously injected at runtime via QRPreview's `<svelte:head><style>`
+   block. That made it a dynamically inserted <style> element, which the
+   hardened global CSP (`style-src 'self'`, no 'unsafe-inline') blocks.
+   Living in the bundled, same-origin stylesheet keeps the rules under
+   `'self'` and the print layout intact.
+
+   Route scoping is preserved through `body[data-qr-print='true']`, an
+   attribute QRPreview sets on mount and clears on unmount, so every
+   other page keeps its default print behaviour. `.qr-screen-only` /
+   `.qr-page-break` only appear in QRPreview's markup but are guarded by
+   the same attribute for belt-and-braces. `@page { margin: 0 }` cannot
+   be scoped by a selector; it is harmless app-wide because the QR
+   preview is the only route that triggers printing. */
+@media print {
+  @page {
+    margin: 0;
+  }
+  html:has(body[data-qr-print='true']),
+  body[data-qr-print='true'] {
+    background: white !important;
+    margin: 0 !important;
+  }
+  body[data-qr-print='true'] header,
+  body[data-qr-print='true'] footer,
+  body[data-qr-print='true'] [data-testid='toaster'] {
+    display: none !important;
+  }
+  body[data-qr-print='true'] main {
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  body[data-qr-print='true'] .qr-screen-only {
+    display: none !important;
+  }
+  body[data-qr-print='true'] .qr-page-break {
+    break-after: page;
+    page-break-after: always;
+  }
+  body[data-qr-print='true'] .qr-page-break:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+}
