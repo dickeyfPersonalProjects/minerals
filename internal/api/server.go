@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -380,7 +381,13 @@ func evaluateReadiness(ctx context.Context, deps Deps) (readyzBody, int) {
 	if deps.DB != nil {
 		cctx, cancel := context.WithTimeout(ctx, readyzDBTimeout)
 		if err := deps.DB.Ping(cctx); err != nil {
-			dbCheck = readyzCheck{OK: false, Error: err.Error()}
+			// /readyz is a public, unauthenticated endpoint (see
+			// huma_auth.go) and is also served on the admin port.
+			// The raw driver error can carry the DSN, host, or
+			// internal topology, so log it server-side and return a
+			// static, non-leaking string to the caller (mi-f5v3).
+			slog.ErrorContext(ctx, "readyz: database probe failed", "err", err)
+			dbCheck = readyzCheck{OK: false, Error: "database ping failed"}
 			ready = false
 		}
 		cancel()
@@ -394,7 +401,10 @@ func evaluateReadiness(ctx context.Context, deps Deps) (readyzBody, int) {
 	if deps.Storage != nil {
 		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		if err := deps.Storage.HeadBucket(cctx); err != nil {
-			storageCheck = readyzCheck{OK: false, Error: err.Error()}
+			// Static string only — the S3/MinIO error can leak the
+			// endpoint URL, bucket name, or credentials hint (mi-f5v3).
+			slog.ErrorContext(ctx, "readyz: storage probe failed", "err", err)
+			storageCheck = readyzCheck{OK: false, Error: "storage check failed"}
 			ready = false
 		}
 		cancel()
@@ -411,7 +421,10 @@ func evaluateReadiness(ctx context.Context, deps Deps) (readyzBody, int) {
 		cancel()
 		switch {
 		case err != nil:
-			schemaCheck = readyzCheck{OK: false, Error: err.Error()}
+			// Static string only — the migration/query error can leak
+			// SQL, schema names, or driver internals (mi-f5v3).
+			slog.ErrorContext(ctx, "readyz: schema probe failed", "err", err)
+			schemaCheck = readyzCheck{OK: false, Error: "schema version check failed"}
 			ready = false
 		case dirty:
 			schemaCheck = readyzCheck{OK: false, Error: "schema is dirty", Version: ver}
