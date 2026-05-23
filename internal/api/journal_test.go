@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,8 +14,17 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/dickeyfPersonalProjects/minerals/internal/auth"
+	"github.com/dickeyfPersonalProjects/minerals/internal/authz"
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
 )
+
+// stubMarkdownRenderer is a no-op MarkdownRenderer for service-level
+// tests that construct a JournalService directly (bypassing
+// registerJournalOperations, which otherwise defaults Markdown).
+type stubMarkdownRenderer struct{}
+
+func (stubMarkdownRenderer) RenderString(src string) (string, error) { return src, nil }
 
 // fakeJournalRepo is an in-memory domain.JournalEntryRepo for handler
 // tests.
@@ -322,5 +332,125 @@ func TestJournalListReturnsRendered(t *testing.T) {
 		if item.BodyHTML == "" {
 			t.Errorf("item missing body_html: %+v", item)
 		}
+	}
+}
+
+// newAuthzJournalService builds a JournalService with a live Casbin
+// enforcer (seeded with the §13 v2 default policies) and a real
+// SpecimenRepo, so per-resource authorization actually runs — the
+// unit-test path used elsewhere wires neither and is a no-op. Used by
+// the parent-specimen authorization regression tests below.
+func newAuthzJournalService(t *testing.T, specimens domain.SpecimenRepo, entries domain.JournalEntryRepo) *JournalService {
+	t.Helper()
+	enf, err := authz.NewEnforcer(nil, nil)
+	if err != nil {
+		t.Fatalf("authz.NewEnforcer: %v", err)
+	}
+	if err := authz.SeedDefaultPolicies(enf); err != nil {
+		t.Fatalf("seed policies: %v", err)
+	}
+	return &JournalService{
+		deps:      JournalServiceDeps{Entries: entries, Markdown: stubMarkdownRenderer{}},
+		specimens: specimens,
+		authz:     authzGuard{enforcer: enf},
+	}
+}
+
+// TestJournalCreateAuthorizesParentSpecimen is the regression guard for
+// mi-f5sm: create() must authorize the parent specimen, not merely the
+// caller's own journal-collection grant. Before the fix a user could
+// attach a journal entry to any specimen they could name — the FK was
+// the only protection (IDOR-adjacent). The matrix proves a non-owner is
+// denied (private and public alike, since a public specimen is still
+// not editable by a stranger) while the owner still succeeds.
+func TestJournalCreateAuthorizesParentSpecimen(t *testing.T) {
+	owner := uuid.New()    // user B — owns the specimen
+	attacker := uuid.New() // user A — names B's specimen in the path
+
+	cases := []struct {
+		name       string
+		visibility domain.Visibility
+	}{
+		{"private specimen", domain.VisibilityPrivate},
+		{"public specimen", domain.VisibilityPublic},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			specRepo := newFakeSpecimenRepo()
+			specID := uuid.New()
+			specRepo.rows[specID] = domain.Specimen{
+				ID: specID, AuthorID: owner, Visibility: tc.visibility,
+			}
+			journalRepo := newFakeJournalRepo()
+			s := newAuthzJournalService(t, specRepo, journalRepo)
+
+			in := &createJournalInput{
+				SpecimenID: specID.String(),
+				Body:       createJournalBody{BodyMD: "unauthorized entry"},
+			}
+
+			// Attacker (a valid `user`, but not the owner) is denied.
+			attackerCtx := auth.WithUser(context.Background(),
+				auth.User{ID: attacker, Roles: []string{"user"}})
+			_, err := s.create(attackerCtx, in)
+			var ae *apiError
+			if !errors.As(err, &ae) {
+				t.Fatalf("expected *apiError, got %T (%v)", err, err)
+			}
+			if ae.Status != http.StatusForbidden {
+				t.Errorf("attacker create status = %d, want 403", ae.Status)
+			}
+			if len(journalRepo.rows) != 0 {
+				t.Errorf("entry persisted despite denial: %d rows", len(journalRepo.rows))
+			}
+
+			// Owner of the specimen still succeeds.
+			ownerCtx := auth.WithUser(context.Background(),
+				auth.User{ID: owner, Roles: []string{"user"}})
+			out, err := s.create(ownerCtx, in)
+			if err != nil {
+				t.Fatalf("owner create failed: %v", err)
+			}
+			if out.Body.SpecimenID != specID {
+				t.Errorf("created specimen_id = %s, want %s", out.Body.SpecimenID, specID)
+			}
+			if out.Body.AuthorID != owner {
+				t.Errorf("created author_id = %s, want owner %s", out.Body.AuthorID, owner)
+			}
+			if len(journalRepo.rows) != 1 {
+				t.Errorf("owner create persisted %d rows, want 1", len(journalRepo.rows))
+			}
+		})
+	}
+}
+
+// TestJournalCreateParentSpecimenMissing pins the 404 path: when the
+// named parent specimen does not exist, create() surfaces the §10
+// specimen_not_found envelope (from the authorization preflight) rather
+// than failing later on the FK insert.
+func TestJournalCreateParentSpecimenMissing(t *testing.T) {
+	specRepo := newFakeSpecimenRepo() // empty — no such specimen
+	journalRepo := newFakeJournalRepo()
+	s := newAuthzJournalService(t, specRepo, journalRepo)
+
+	in := &createJournalInput{
+		SpecimenID: uuid.New().String(),
+		Body:       createJournalBody{BodyMD: "orphan entry"},
+	}
+	ctx := auth.WithUser(context.Background(),
+		auth.User{ID: uuid.New(), Roles: []string{"user"}})
+	_, err := s.create(ctx, in)
+	var ae *apiError
+	if !errors.As(err, &ae) {
+		t.Fatalf("expected *apiError, got %T (%v)", err, err)
+	}
+	if ae.Status != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", ae.Status)
+	}
+	if ae.Envelope.Code != "specimen_not_found" {
+		t.Errorf("code = %q, want specimen_not_found", ae.Envelope.Code)
+	}
+	if len(journalRepo.rows) != 0 {
+		t.Errorf("entry persisted despite missing parent: %d rows", len(journalRepo.rows))
 	}
 }
