@@ -110,3 +110,71 @@ func TestIntegration_Authz_SpecimenEnforcement(t *testing.T) {
 		t.Errorf("GET own specimen: status %d, want 200; body=%s", status, body)
 	}
 }
+
+// TestIntegration_Authz_ChainCollectorEnforcement is the regression
+// guard for mi-6863: PUT /specimens/{id}/collectors must authorize
+// every collector_id in the body, not just the specimen. Collectors
+// are owned-only and GET embeds the full collector (name, notes); a
+// caller who could link another user's private collector to their own
+// specimen would read it straight back. The foreign collector must be
+// rejected as collector_not_found (a forbidden view rewritten to 404,
+// so the response doesn't leak that the id exists), while the caller's
+// own collector links normally.
+func TestIntegration_Authz_ChainCollectorEnforcement(t *testing.T) {
+	pool := scopedDB(t)
+	enforcer, err := authz.NewEnforcer(nil, db.NewSharesLookup(pool))
+	if err != nil {
+		t.Fatalf("new enforcer: %v", err)
+	}
+	if err := authz.SeedDefaultPolicies(enforcer); err != nil {
+		t.Fatalf("seed policies: %v", err)
+	}
+	h := api.New(api.Deps{
+		Specimens:          db.NewSpecimenPostgres(pool),
+		Collectors:         db.NewCollectorPostgres(pool),
+		SpecimenCollectors: db.NewSpecimenCollectorPostgres(pool),
+		Enforcer:           enforcer,
+	})
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	// Seed a foreign user and a private collector they own. The stub
+	// user driving the HTTP requests is deliberately NOT the author.
+	other := domain.NewID()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO users (id, keycloak_sub, email, status)
+		VALUES ($1, $2, $3, 'active')`,
+		other, "authz-chain-"+other.String(), other.String()+"@example.invalid",
+	); err != nil {
+		t.Fatalf("seed foreign user: %v", err)
+	}
+	otherCtx := auth.WithUser(context.Background(), auth.User{ID: other, Roles: []string{"user"}})
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	foreignColl := domain.Collector{
+		ID: domain.NewID(), Name: "foreign-collector", AuthorID: other,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.NewCollectorPostgres(pool).Create(otherCtx, nil, foreignColl); err != nil {
+		t.Fatalf("create foreign collector: %v", err)
+	}
+
+	// The stub user owns the specimen they're editing.
+	specID := createMineral(t, srv, "stub-chain-owner").ID
+
+	// Linking the foreign collector must be rejected as a 404 — the
+	// stub user can't view it, and that's indistinguishable on the wire
+	// from a missing id.
+	if status, body := doJSON(t, srv.Client(), http.MethodPut,
+		srv.URL+"/api/v1/specimens/"+specID.String()+"/collectors",
+		map[string]any{"collector_ids": []string{foreignColl.ID.String()}}); status != http.StatusNotFound {
+		t.Errorf("PUT foreign collector: status %d, want 404; body=%s", status, body)
+	}
+
+	// The stub user's own collector links normally.
+	ownColl := createCollector(t, srv, "stub-own-collector").ID
+	if status, body := doJSON(t, srv.Client(), http.MethodPut,
+		srv.URL+"/api/v1/specimens/"+specID.String()+"/collectors",
+		map[string]any{"collector_ids": []string{ownColl.String()}}); status != http.StatusOK {
+		t.Errorf("PUT own collector: status %d, want 200; body=%s", status, body)
+	}
+}
