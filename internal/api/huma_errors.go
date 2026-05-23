@@ -113,6 +113,15 @@ func codeForStatus(status int) string {
 // collectDetails folds huma error detail values into the envelope's
 // `details.errors` slot when present. The shape is intentionally
 // minimal (a list of strings) so internals never leak through.
+//
+// Only errors that implement huma.ErrorDetailer are echoed (mi-f5v3).
+// Those are huma's structured request-validation details (*huma.ErrorDetail
+// with a message/location/value), which are safe and useful to return to
+// the caller. Any other error — a content-negotiation failure, a wrapped
+// handler error, or anything carrying internal state (paths, SQL, host
+// names) — is dropped here rather than forwarded verbatim. The top-level
+// envelope `message` still conveys the gist; the raw error is recoverable
+// from server-side logs.
 func collectDetails(errs []error) map[string]any {
 	if len(errs) == 0 {
 		return nil
@@ -120,6 +129,9 @@ func collectDetails(errs []error) map[string]any {
 	msgs := make([]string, 0, len(errs))
 	for _, e := range errs {
 		if e == nil {
+			continue
+		}
+		if _, ok := e.(huma.ErrorDetailer); !ok {
 			continue
 		}
 		msgs = append(msgs, e.Error())

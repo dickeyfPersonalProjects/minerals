@@ -214,14 +214,39 @@ func TestCollectDetails(t *testing.T) {
 			t.Errorf("got %v, want nil", got)
 		}
 	})
-	t.Run("mixed errs flatten to {errors:[...]}", func(t *testing.T) {
-		got := collectDetails([]error{errors.New("a"), nil, errors.New("b")})
+	t.Run("ErrorDetailer errs flatten to {errors:[...]}", func(t *testing.T) {
+		got := collectDetails([]error{
+			&huma.ErrorDetail{Message: "a"},
+			nil,
+			&huma.ErrorDetail{Message: "b"},
+		})
 		msgs, ok := got["errors"].([]string)
 		if !ok {
 			t.Fatalf("details[\"errors\"] type = %T, want []string", got["errors"])
 		}
 		if len(msgs) != 2 || msgs[0] != "a" || msgs[1] != "b" {
 			t.Errorf("msgs = %v, want [a b]", msgs)
+		}
+	})
+	t.Run("non-ErrorDetailer errs are dropped (mi-f5v3)", func(t *testing.T) {
+		// Arbitrary errors may carry internal state (paths, SQL,
+		// host names) and must never reach the client. Only huma's
+		// structured validation details are whitelisted.
+		if got := collectDetails([]error{
+			errors.New("dial tcp 10.0.0.5:5432: connection refused"),
+			fmt.Errorf("open /etc/secrets/key.pem: permission denied"),
+		}); got != nil {
+			t.Errorf("got %v, want nil (raw errors must not leak)", got)
+		}
+	})
+	t.Run("mixed whitelisted + raw keeps only whitelisted", func(t *testing.T) {
+		got := collectDetails([]error{
+			&huma.ErrorDetail{Message: "field foo required"},
+			errors.New("internal: dial tcp 10.0.0.5:5432"),
+		})
+		msgs, ok := got["errors"].([]string)
+		if !ok || len(msgs) != 1 || msgs[0] != "field foo required" {
+			t.Errorf("msgs = %#v, want [field foo required]", got["errors"])
 		}
 	})
 }
@@ -271,13 +296,22 @@ func TestInstallEnvelopeErrors_EnvelopeShape(t *testing.T) {
 		}
 	})
 
-	t.Run("attached errs flow into details.errors", func(t *testing.T) {
+	t.Run("attached validation details flow into details.errors", func(t *testing.T) {
 		err := huma.NewError(http.StatusBadRequest, "bad input",
-			errors.New("field foo required"))
+			&huma.ErrorDetail{Message: "field foo required", Location: "body.foo"})
 		ae := asAPIError(t, err)
 		msgs, ok := ae.Envelope.Details["errors"].([]string)
-		if !ok || len(msgs) != 1 || msgs[0] != "field foo required" {
-			t.Errorf("details = %#v, want errors=[field foo required]", ae.Envelope.Details)
+		if !ok || len(msgs) != 1 || msgs[0] != "field foo required (body.foo: <nil>)" {
+			t.Errorf("details = %#v, want errors=[field foo required (body.foo: <nil>)]", ae.Envelope.Details)
+		}
+	})
+
+	t.Run("attached raw errs are not echoed (mi-f5v3)", func(t *testing.T) {
+		err := huma.NewError(http.StatusBadGateway, "upstream down",
+			errors.New("dial tcp 10.0.0.5:5432: connection refused"))
+		ae := asAPIError(t, err)
+		if _, present := ae.Envelope.Details["errors"]; present {
+			t.Errorf("details = %#v, want no errors key (raw error must not leak)", ae.Envelope.Details)
 		}
 	})
 }
