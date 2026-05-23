@@ -34,7 +34,7 @@ jobs:
       MINIO_SECRET_KEY: minioadmin
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # MinIO is started via `docker run` rather than a GHA service container
       # because the official `minio/minio` image requires `server /data` as its
@@ -66,7 +66,7 @@ jobs:
           docker logs minio >&2 || true
           exit 1
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -96,7 +96,7 @@ jobs:
       - name: Unit tests
         # Combines race detection, shuffled execution, and JUnit output
         # in one invocation per mi-qb3. -race needs CGO_ENABLED=1 (the
-        # actions/setup-go@v5 default).
+        # actions/setup-go@v6 default).
         run: gotestsum --junitfile junit.xml -- -race -shuffle=on ./...
 
       # SCA: known CVEs in direct + transitive Go deps, scoped to
@@ -133,7 +133,7 @@ jobs:
     name: Frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Detect frontend
         id: detect
@@ -145,7 +145,7 @@ jobs:
             echo "::notice::frontend/ not present — skipping frontend gates"
           fi
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         if: steps.detect.outputs.present == 'true'
         with:
           node-version: '22'
@@ -201,7 +201,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: docker compose up
         # Per mi-8ky, the default-mode contract is: this single command
@@ -327,7 +327,7 @@ jobs:
     env:
       RATE_LIMIT_ENABLED: "false"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: hashicorp/setup-terraform@v4
         with:
@@ -749,7 +749,7 @@ jobs:
       # backend-only checks can only approximate. Sequential P0 bugs
       # (mi-rvn, mi-0ag, mi-cl1) all shipped past the curl-based smoke
       # because each lives in a layer only a real browser exercises.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'npm'

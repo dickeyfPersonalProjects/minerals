@@ -53,7 +53,7 @@ env:
   # The operator MUST set these to match their gitops layout — the pin
   # step fails loudly if the file path is wrong.
   FLEET_INFRA_REPO: dickeyfpersonalprojects/fleet-infra
-  FLEET_INFRA_PROD_KUSTOMIZATION: clusters/prod/mineral/mineral.yaml
+  FLEET_INFRA_PROD_KUSTOMIZATION: clusters/new-k3s/mineral/prod/mineral.yaml
 
 jobs:
   promote:
@@ -95,7 +95,7 @@ jobs:
           echo "ref=${ref}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout source ref
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ steps.src.outputs.ref }}
           # Full history + tags so the conflict check sees every existing
@@ -233,7 +233,7 @@ jobs:
         # (with its tags) intact in the workspace root. The token is the
         # cross-repo write credential validated in the pre-flight step.
         if: ${{ !inputs.dry_run }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.FLEET_INFRA_REPO }}
           token: ${{ secrets.FLEET_INFRA_TOKEN }}

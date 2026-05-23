@@ -60,9 +60,14 @@ type CookieConfig struct {
 // doc, Domain is omitted (host-only) and Partitioned is never set.
 func SetSessionCookie(w http.ResponseWriter, sessionID [32]byte, cfg CookieConfig) {
 	// gosec G124 cannot tell statically that Secure is intentionally
-	// per-environment (true in prod/staging, false in dev) — the
-	// callsite, not this helper, owns the security-relevant choice.
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec
+	// per-environment (cfg.Secure — true in prod/staging, false only
+	// in local-dev HTTP); the callsite, not this helper, owns the
+	// security-relevant choice. The //nolint:gosec below silences it.
+	// CodeQL go/cookie-secure-not-set flags the same pattern but does
+	// NOT honor inline suppression in Default Setup — that alert is
+	// dismissed as a false positive in the code-scanning UI/API, not
+	// here. (Reviewed in mi-l1eg.)
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure is per-environment by design; see comment above
 		Name:     SessionCookieName,
 		Value:    base64.RawURLEncoding.EncodeToString(sessionID[:]),
 		Path:     mustPath(cfg.Path),
@@ -83,9 +88,14 @@ func SetSessionCookie(w http.ResponseWriter, sessionID [32]byte, cfg CookieConfi
 // wants to evict the session cookie MUST go through this helper.
 // Hand-rolled clears are the documented logout-bug source.
 func ClearSessionCookie(w http.ResponseWriter, cfg CookieConfig) {
-	// gosec G124: see SetSessionCookie — Secure is per-environment
-	// by design.
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec
+	// gosec G124 (//nolint below): Secure is per-environment by design
+	// (cfg.Secure — true in prod/staging, false only in local-dev HTTP);
+	// this is the cookie-CLEAR path (empty value, MaxAge -1) so there is
+	// no secret to protect. CodeQL go/cookie-secure-not-set flags the
+	// same pattern but does NOT honor inline suppression in Default
+	// Setup — the alert is dismissed as a false positive in the
+	// code-scanning UI/API, not here. (Reviewed in mi-l1eg.)
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure is per-environment by design; see comment above
 		Name:     SessionCookieName,
 		Value:    "",
 		Path:     mustPath(cfg.Path),

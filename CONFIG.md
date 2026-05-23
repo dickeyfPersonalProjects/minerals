@@ -26,6 +26,7 @@ setting" — updating this inventory is the first and mandatory step.
 | `PORT` | env | `8080` | no | HTTP listen port | `internal/config/config.go:62` |
 | `ADMIN_PORT` | env | `9090` | no | Operator-facing admin listen port — serves Prometheus `/metrics` plus the kubelet's `/healthz` / `/readyz` probes. MUST NOT be wired into the public Ingress; the base `Service` exposes it as a named port (`admin`) only for in-cluster scrape and probe traffic (mi-2b1k). | `internal/config/config.go` |
 | `DATABASE_URL` | env | `postgres://minerals:minerals@localhost:5432/minerals?sslmode=disable` | **yes** | Postgres DSN | `internal/config/config.go:71` |
+| `DB_MAX_CONNS` | env | _(unset → built-in default `20`)_ | no | Caps the app's pgx connection pool size. Precedence: an explicit `?pool_max_conns=` in `DATABASE_URL` wins; else this var; else the compiled default (20). A missing/empty/non-positive value falls through to the default — it can never shrink the pool to 0. Exists so the immediate mitigation for a pool-saturation incident (raise the ceiling, roll the pods) is one env change with no rebuild (mi-hkh6). Keep `DB_MAX_CONNS × replicas` under Postgres `max_connections`. | `internal/db/pool.go` |
 | `S3_ENDPOINT` | env | `http://localhost:9000` | **yes** | MinIO endpoint URL | `internal/config/config.go:72` |
 | `S3_ACCESS_KEY_ID` | env | `minioadmin` | **yes** | MinIO access key | `internal/config/config.go:73` |
 | `S3_SECRET_ACCESS_KEY` | env | `minioadmin` | **yes** | MinIO secret key | `internal/config/config.go:74` |

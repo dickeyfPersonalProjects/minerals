@@ -179,7 +179,7 @@ func runServe(_ []string) error {
 	deps := api.Deps{
 		DB:              dbPinger{pool: pool},
 		Storage:         store,
-		SchemaVersion:   func(ctx context.Context) (uint, bool, error) { return schemaVersion(ctx, cfg.DatabaseURL) },
+		SchemaVersion:   newSchemaVersionProbe(cfg.DatabaseURL),
 		ExpectedVersion: expected,
 		WebHandler:      web.Handler(),
 		Collectors:      db.NewCollectorPostgres(pool),

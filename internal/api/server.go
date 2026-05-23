@@ -280,6 +280,15 @@ type healthzOutput struct {
 	Body func(huma.Context)
 }
 
+// readyzDBTimeout bounds the readiness DB ping. It is deliberately
+// SHORTER than the other readiness checks (mi-hkh6): /readyz pings the
+// SAME pgxpool that serves app traffic, so a momentarily-saturated pool
+// (e.g. the SpecimenCard fan-out holding every connection for a beat)
+// must not block the probe long enough to flap the pod to NotReady. A
+// 1s bound fails fast and lets the probe ride out a transient burst
+// rather than amplifying it by pulling the replica out of rotation.
+const readyzDBTimeout = 1 * time.Second
+
 // readyzCheck mirrors the §14 readiness probe shape.
 type readyzCheck struct {
 	OK      bool   `json:"ok"`
@@ -369,7 +378,7 @@ func evaluateReadiness(ctx context.Context, deps Deps) (readyzBody, int) {
 
 	dbCheck := readyzCheck{OK: true}
 	if deps.DB != nil {
-		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		cctx, cancel := context.WithTimeout(ctx, readyzDBTimeout)
 		if err := deps.DB.Ping(cctx); err != nil {
 			dbCheck = readyzCheck{OK: false, Error: err.Error()}
 			ready = false
