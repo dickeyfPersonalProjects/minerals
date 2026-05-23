@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -221,6 +222,54 @@ func TestReadyzReports503OnDBFailure(t *testing.T) {
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}
+
+// TestReadyzRedactsRawDependencyError guards mi-f5v3: /readyz is a
+// public, unauthenticated endpoint, so a failing dependency probe must
+// return a static, non-leaking error string — never the raw driver
+// error, which can carry the DSN, host, or bucket endpoint.
+func TestReadyzRedactsRawDependencyError(t *testing.T) {
+	t.Parallel()
+	dbErr := "dial tcp 10.0.0.5:5432: connection refused (db-primary.internal)"
+	h := New(Deps{
+		DB:      fakePinger{err: errors.New(dbErr)},
+		Storage: fakeBucket{err: errors.New("https://minio.internal:9000 AccessDenied")},
+		SchemaVersion: func(_ context.Context) (uint, bool, error) {
+			return 0, false, errors.New("SELECT version FROM schema_migrations: relation does not exist")
+		},
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, leak := range []string{"10.0.0.5", "db-primary.internal", "minio.internal", "schema_migrations", "AccessDenied"} {
+		if strings.Contains(body, leak) {
+			t.Errorf("response leaked %q; body=%s", leak, body)
+		}
+	}
+	var parsed struct {
+		Checks map[string]struct {
+			OK    bool   `json:"ok"`
+			Error string `json:"error"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The static replacements must still be present so operators see
+	// which dependency failed.
+	if got := parsed.Checks["database"].Error; got != "database ping failed" {
+		t.Errorf("database error = %q, want %q", got, "database ping failed")
+	}
+	if got := parsed.Checks["storage"].Error; got != "storage check failed" {
+		t.Errorf("storage error = %q, want %q", got, "storage check failed")
+	}
+	if got := parsed.Checks["schema"].Error; got != "schema version check failed" {
+		t.Errorf("schema error = %q, want %q", got, "schema version check failed")
 	}
 }
 

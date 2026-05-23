@@ -2,6 +2,9 @@ package imageproc
 
 import (
 	"bytes"
+	"encoding/binary"
+	"errors"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -83,6 +86,61 @@ func TestGenerate_UnsupportedContentType(t *testing.T) {
 	_, err := Generate([]byte{0, 0}, "image/heic")
 	if err == nil {
 		t.Fatal("expected error for unsupported type")
+	}
+}
+
+// bombPNG builds a valid PNG header (signature + IHDR) declaring the
+// given dimensions but no pixel data. DecodeConfig parses only this
+// header, so it's enough to exercise the pixel-dimension cap without
+// allocating a multi-gigabyte buffer.
+func bombPNG(width, height uint32) []byte {
+	var buf bytes.Buffer
+	buf.Write([]byte("\x89PNG\r\n\x1a\n")) // PNG signature
+
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:4], width)
+	binary.BigEndian.PutUint32(ihdr[4:8], height)
+	ihdr[8] = 8 // bit depth
+	ihdr[9] = 2 // color type: truecolor RGB
+	// bytes 10-12 (compression, filter, interlace) stay 0
+
+	chunk := append([]byte("IHDR"), ihdr...)
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], 13) // IHDR data is always 13 bytes
+	buf.Write(lenBuf[:])
+	buf.Write(chunk)
+	var crcBuf [4]byte
+	binary.BigEndian.PutUint32(crcBuf[:], crc32.ChecksumIEEE(chunk))
+	buf.Write(crcBuf[:])
+	return buf.Bytes()
+}
+
+func TestGenerate_RejectsDecompressionBomb(t *testing.T) {
+	t.Parallel()
+	// 30000×30000 = 900 MP → ~3.6 GiB RGBA if decoded. Header is a
+	// few dozen bytes; the cap must reject it before decode.
+	bomb := bombPNG(30000, 30000)
+
+	_, err := Generate(bomb, ContentTypePNG)
+	if err == nil {
+		t.Fatal("expected decompression bomb to be rejected")
+	}
+	if !errors.Is(err, ErrImageTooLarge) {
+		t.Errorf("got %v, want ErrImageTooLarge", err)
+	}
+}
+
+func TestGenerate_AllowsImageAtPixelCap(t *testing.T) {
+	t.Parallel()
+	// A header declaring exactly MaxPixels must pass the cap check
+	// (it fails later for lack of pixel data, but not with
+	// ErrImageTooLarge).
+	const side = 10000 // 10000×10000 = 100 MP == MaxPixels
+	hdr := bombPNG(side, side)
+
+	_, err := Generate(hdr, ContentTypePNG)
+	if errors.Is(err, ErrImageTooLarge) {
+		t.Errorf("image at the pixel cap should not be rejected as too large: %v", err)
 	}
 }
 
