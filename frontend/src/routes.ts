@@ -16,6 +16,8 @@ import ProfileSetup from './routes/ProfileSetup.svelte';
 import Profile from './routes/Profile.svelte';
 import Settings from './routes/Settings.svelte';
 import AdminConsole from './routes/AdminConsole.svelte';
+import Privacy from './routes/Privacy.svelte';
+import Terms from './routes/Terms.svelte';
 
 // V2 BFF cookie flow (mi-3vc4): /auth/callback is no longer a SPA
 // route — Keycloak redirects back to the BACKEND's /auth/callback
@@ -29,6 +31,10 @@ export const routes: RouteDefinition = {
   // (GET /api/v1/admin/overview → 403 for non-admins); the nav link is
   // additionally hidden client-side via canAccessAdminConsole.
   '/admin': AdminConsole,
+  // Public static legal pages (mi-97kr). No auth — reachable
+  // pre-login from the footer and the registration entry point.
+  '/privacy': Privacy,
+  '/terms': Terms,
   '/specimens': Specimens,
   // "Browse my collection" (mi-xue7): same component, owner-scoped via
   // the route path (Specimens.svelte derives scope=mine from /collection).

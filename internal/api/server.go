@@ -194,6 +194,9 @@ func New(deps Deps) http.Handler {
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "admin", Description: "Admin/devops console (mi-agff). Gated to the admin/devops role via the §13 v2 `devops` Casbin resource. Foundation pass ships the gated shell + placeholder landing.",
 	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "legal", Description: "Public static legal documents — privacy policy + terms of service (mi-97kr). Server-rendered via the §17 markdown pipeline; no auth.",
+	})
 
 	humaAPI := humago.New(mux, cfg)
 	authMW := newAuthMiddlewares(deps.Users, deps.Verifier)
@@ -210,6 +213,7 @@ func New(deps Deps) http.Handler {
 	registerProfileOperations(humaAPI, authMW, deps.Users)
 	registerAccountOperations(humaAPI, authMW, deps.Account)
 	registerAdminOperations(humaAPI, authMW, guard)
+	registerLegalOperations(humaAPI)
 	registerSpecimenRedirect(mux)
 
 	// BFF V2 auth routes (mi-bm5b). The three routes attach to the

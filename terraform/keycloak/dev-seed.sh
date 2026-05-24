@@ -137,6 +137,25 @@ create_user() {
   user_id "$email"
 }
 
+# Clear all pending required actions from a seed/CI user (mi-97kr).
+#
+# The realm's TERMS_AND_CONDITIONS required action has default_action=true
+# so that human self-registrants (browser registration flow) are prompted to
+# accept ToS + Privacy Policy. However, Keycloak's Admin API user-creation
+# path also respects default_action and stamps the action on every new user,
+# regardless of how it was created. Seed/CI users must bypass this: the
+# direct-grant (ROPC) flow cannot complete a pending required action and
+# returns 400 "Account is not fully set up".
+#
+# This function clears requiredActions to [] on any seed user — idempotent,
+# safe on re-runs (setting [] on a user with no pending actions is a no-op).
+clear_required_actions() {
+  local uid=$1
+  curl -fsS -o /dev/null "${AUTH[@]}" "${JSON[@]}" \
+    -X PUT "${KEYCLOAK_URL}/admin/realms/${REALM}/users/${uid}" \
+    -d '{"requiredActions":[]}'
+}
+
 # Assign a realm role to a user. Re-assigning an existing role is a no-op.
 assign_realm_role() {
   local uid=$1
@@ -156,6 +175,7 @@ echo "==> seeding test users"
 
 for u in user1 user2 user3 user4 user5; do
   id=$(create_user "$u")
+  clear_required_actions "$id"
   echo "    + $u ($id)"
 done
 
@@ -163,6 +183,7 @@ for pair in "devops_viewer_user:devops-viewer" "devops_admin_user:devops-admin";
   user="${pair%%:*}"
   role="${pair##*:}"
   id=$(create_user "$user")
+  clear_required_actions "$id"
   assign_realm_role "$id" "$role"
   echo "    + $user ($id) -> role:$role"
 done

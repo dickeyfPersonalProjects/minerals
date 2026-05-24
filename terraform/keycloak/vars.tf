@@ -53,6 +53,12 @@ variable "registration_allowed" {
   default     = false
 }
 
+variable "registration_consent_enabled" {
+  description = "Enable the Keycloak Terms and Conditions required action as a default action (mi-97kr consent gate). Forces new users to accept ToS + Privacy Policy at registration."
+  type        = bool
+  default     = true
+}
+
 # SMTP -----------------------------------------------------------------------
 
 variable "smtp_host" {
