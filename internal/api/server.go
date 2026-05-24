@@ -86,6 +86,12 @@ type Deps struct {
 	// QRSheets is wired in production (mi-c78.1) to expose the
 	// /api/v1/qr-sheet surface backing the printable label workflow.
 	QRSheets domain.QRSheetRepo
+	// Account wires DELETE /api/v1/account, the GDPR right-to-erasure
+	// endpoint (mi-nwg5). nil leaves the route unregistered (tests that
+	// don't exercise account deletion). The Eraser field inside is the
+	// only hard requirement; Storage/Sessions/Identity are best-effort
+	// cleanup collaborators.
+	Account *AccountServiceDeps
 	// Users powers the first-login gate (mi-2hf): the auth chain
 	// resolves the JWT `sub` to a row here, auto-creates a pending
 	// row on first-login, and gates protected endpoints with a 403
@@ -182,6 +188,9 @@ func New(deps Deps) http.Handler {
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "profile", Description: "First-login profile completion (mi-2hf). Pending users complete setup here before any other protected endpoint becomes reachable.",
 	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "account", Description: "Account lifecycle: GDPR right-to-erasure self-service deletion (mi-nwg5).",
+	})
 
 	humaAPI := humago.New(mux, cfg)
 	authMW := newAuthMiddlewares(deps.Users, deps.Verifier)
@@ -196,6 +205,7 @@ func New(deps Deps) http.Handler {
 	registerMineralSpeciesOperations(humaAPI, authMW, deps.MineralSpecies)
 	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets, deps.Specimens)
 	registerProfileOperations(humaAPI, authMW, deps.Users)
+	registerAccountOperations(humaAPI, authMW, deps.Account)
 	registerSpecimenRedirect(mux)
 
 	// BFF V2 auth routes (mi-bm5b). The three routes attach to the

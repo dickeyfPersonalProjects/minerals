@@ -225,6 +225,15 @@ func (specStubUserRepo) UpdateDefaultSpecimenVisibility(context.Context, domain.
 	return domain.ErrUserNotFound
 }
 
+// specStubAccountEraser is a never-called stand-in so the type-derived
+// OpenAPI spec advertises DELETE /api/v1/account during codegen
+// (mi-nwg5).
+type specStubAccountEraser struct{}
+
+func (specStubAccountEraser) Erase(context.Context, uuid.UUID) (domain.AccountErasure, error) {
+	return domain.AccountErasure{}, domain.ErrUserNotFound
+}
+
 // specStubSpecimenCollectorRepo is a never-called stand-in so the
 // type-derived OpenAPI spec advertises the chain routes during
 // codegen (mi-zv3 / C-3).
@@ -270,6 +279,7 @@ func runOpenAPI(args []string) error {
 			Repo: specStubMineralSpeciesRepo{},
 		},
 		QRSheets: specStubQRSheetRepo{},
+		Account:  &api.AccountServiceDeps{Eraser: specStubAccountEraser{}},
 		Users:    specStubUserRepo{},
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        specStubJournalRepo{},

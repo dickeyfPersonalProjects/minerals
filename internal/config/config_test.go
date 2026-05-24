@@ -122,6 +122,15 @@ func TestLoad_OIDCBackendDefaults(t *testing.T) {
 	if cfg.OIDCClientID != defaultOIDCClientID {
 		t.Errorf("OIDCClientID = %q, want %q", cfg.OIDCClientID, defaultOIDCClientID)
 	}
+	// Keycloak admin (mi-nwg5): realm defaults; credentials are empty
+	// so account deletion wires the no-op IdP deleter.
+	if cfg.KeycloakRealm != defaultKeycloakRealm {
+		t.Errorf("KeycloakRealm = %q, want %q", cfg.KeycloakRealm, defaultKeycloakRealm)
+	}
+	if cfg.KeycloakAdminBaseURL != "" || cfg.KeycloakAdminClientID != "" || cfg.KeycloakAdminClientSecret != "" {
+		t.Errorf("Keycloak admin credentials should default empty, got base=%q id=%q secretSet=%t",
+			cfg.KeycloakAdminBaseURL, cfg.KeycloakAdminClientID, cfg.KeycloakAdminClientSecret != "")
+	}
 }
 
 func TestLoad_OIDCBackendExplicit(t *testing.T) {

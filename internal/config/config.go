@@ -95,6 +95,28 @@ type Config struct {
 	// overlay; never logged.
 	OIDCClientSecret string
 
+	// Keycloak admin REST credentials for GDPR account erasure
+	// (mi-nwg5). The backend is otherwise a pure resource server and
+	// never calls the admin API; these power the single privileged
+	// operation — deleting the IdP user behind a deleted app account.
+	// All four are required to enable IdP-user deletion; when any is
+	// empty the account-deletion flow wires keycloak.NoopDeleter and
+	// leaves the Keycloak user in place (the app row + sessions are
+	// gone regardless). The service account behind
+	// KEYCLOAK_ADMIN_CLIENT_ID must hold the realm-management
+	// `manage-users` role. Sealed in the gitops overlay; never logged.
+	//
+	//   KeycloakAdminBaseURL — server root, e.g. https://kc.example.com
+	//                          (NO /realms/... suffix).
+	//   KeycloakRealm        — realm the app's users live in (default
+	//                          "minerals").
+	//   KeycloakAdminClientID / KeycloakAdminClientSecret — the admin
+	//                          service-account client credentials.
+	KeycloakAdminBaseURL      string
+	KeycloakRealm             string
+	KeycloakAdminClientID     string
+	KeycloakAdminClientSecret string
+
 	// OAuthStateHMACKey signs the short-lived state cookie issued
 	// by /auth/login and verified on /auth/callback (mi-bm5b). 32-
 	// byte minimum, enforced when the BFF handlers boot. Treat as a
@@ -215,6 +237,11 @@ const (
 	defaultOIDCIssuerURL = "http://localhost:8081/realms/minerals"
 	defaultOIDCClientID  = "minerals-frontend"
 
+	// defaultKeycloakRealm is the realm the app's users live in. Used
+	// by the GDPR account-erasure admin client (mi-nwg5) to build the
+	// admin API path; prod overlays override via KEYCLOAK_REALM.
+	defaultKeycloakRealm = "minerals"
+
 	// Rate-limit tier defaults (mi-tnru). Windows are seconds.
 	// Auth is strict (brute-force defense); reads are generous (public
 	// browse traffic); writes moderate; file-serving guards the
@@ -274,6 +301,10 @@ func loadFrom(get func(string) string) (*Config, error) {
 	cfg.OIDCJWKSURL = strings.TrimSpace(get("OIDC_JWKS_URL"))
 	cfg.OIDCDiscoveryURL = strings.TrimSpace(get("OIDC_DISCOVERY_URL"))
 	cfg.OIDCClientSecret = strings.TrimSpace(get("OIDC_CLIENT_SECRET"))
+	cfg.KeycloakAdminBaseURL = strings.TrimSpace(get("KEYCLOAK_ADMIN_BASE_URL"))
+	cfg.KeycloakRealm = orDefault(get("KEYCLOAK_REALM"), defaultKeycloakRealm)
+	cfg.KeycloakAdminClientID = strings.TrimSpace(get("KEYCLOAK_ADMIN_CLIENT_ID"))
+	cfg.KeycloakAdminClientSecret = strings.TrimSpace(get("KEYCLOAK_ADMIN_CLIENT_SECRET"))
 	cfg.OAuthStateHMACKey = strings.TrimSpace(get("OAUTH_STATE_HMAC_KEY"))
 	cfg.PostLogoutRedirectURI = strings.TrimSpace(get("POST_LOGOUT_REDIRECT_URI"))
 

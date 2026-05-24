@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/api/v1/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete the caller's account and all personal data (GDPR erasure)
+         * @description Irreversibly erases the caller's account: every specimen, photo, journal entry, journal attachment, collector, uploaded file, and QR sheet is hard-deleted from the database, the backing object-store files are purged, all sessions are revoked, and the Keycloak identity is removed (when an admin client is configured). Mineral-species catalog entries the user authored are reassigned to the system account rather than deleted (shared reference data). The request body MUST carry `{"confirm":"DELETE"}`. Returns 204 on success. This action cannot be undone.
+         */
+        delete: operations["delete-account"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collectors": {
         parameters: {
             query?: never;
@@ -521,6 +541,16 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AccountDeleteInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/AccountDeleteInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description Must be the literal string "DELETE" to authorize the irreversible erasure. */
+            confirm: string;
+        };
         AddQRSheetSpecimenBody: {
             /**
              * Format: uri
@@ -1343,6 +1373,82 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "delete-account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountDeleteInputBody"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     "list-collectors": {
         parameters: {
             query?: {
