@@ -182,6 +182,9 @@ func New(deps Deps) http.Handler {
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "profile", Description: "First-login profile completion (mi-2hf). Pending users complete setup here before any other protected endpoint becomes reachable.",
 	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "admin", Description: "Admin/devops console (mi-agff). Gated to the admin/devops role via the §13 v2 `devops` Casbin resource. Foundation pass ships the gated shell + placeholder landing.",
+	})
 
 	humaAPI := humago.New(mux, cfg)
 	authMW := newAuthMiddlewares(deps.Users, deps.Verifier)
@@ -196,6 +199,7 @@ func New(deps Deps) http.Handler {
 	registerMineralSpeciesOperations(humaAPI, authMW, deps.MineralSpecies)
 	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets, deps.Specimens)
 	registerProfileOperations(humaAPI, authMW, deps.Users)
+	registerAdminOperations(humaAPI, authMW, guard)
 	registerSpecimenRedirect(mux)
 
 	// BFF V2 auth routes (mi-bm5b). The three routes attach to the

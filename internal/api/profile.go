@@ -44,10 +44,18 @@ type profileSetupInput struct {
 // the user has set no defaults and the resolution chain falls through
 // to the system default for every field.
 type profileBody struct {
-	ID            string             `json:"id" doc:"User row UUID."`
-	Email         string             `json:"email" doc:"Email from the JWT claim, persisted at first-login."`
-	DisplayName   string             `json:"display_name" doc:"Display name as persisted."`
-	Pending       bool               `json:"pending" doc:"Profile-setup-required flag; always false on a successful response."`
+	ID          string `json:"id" doc:"User row UUID."`
+	Email       string `json:"email" doc:"Email from the JWT claim, persisted at first-login."`
+	DisplayName string `json:"display_name" doc:"Display name as persisted."`
+	Pending     bool   `json:"pending" doc:"Profile-setup-required flag; always false on a successful response."`
+	// Roles are the caller's JWT realm roles, surfaced so the SPA can
+	// gate role-specific UI (e.g. the admin/devops console nav link,
+	// mi-agff) without a second round-trip. This is a UI hint only —
+	// the authoritative gate is server-side per-endpoint Casbin
+	// enforcement. Always a (possibly empty) array, never null. Does
+	// not include the implicit base `user` role (that is a backend
+	// authz detail, not a Keycloak realm role).
+	Roles         []string           `json:"roles" doc:"Caller's Keycloak realm roles (UI-gating hint only; real authorization is enforced server-side per endpoint)."`
 	FieldDefaults *fieldDefaultsView `json:"field_defaults" doc:"Per-field default visibility map (mi-fo8). Sparse — absent keys mean 'no user default; fall through to system default'. Null when the user has no defaults set at all."`
 	// DefaultSpecimenVisibility is the per-user default whole-specimen
 	// visibility the create form pre-fills with (mi-q2d8). Null when
@@ -344,7 +352,21 @@ func (s *profileService) complete(
 		Email:       full.Email,
 		DisplayName: name,
 		Pending:     false,
+		Roles:       rolesFromContext(ctx),
 	}}, nil
+}
+
+// rolesFromContext returns the caller's JWT realm roles as a non-nil
+// (possibly empty) slice for the profile body's UI-gating hint. The
+// slice is copied so callers can't mutate the request-scoped
+// auth.User. Note this is the raw JWT role set — it deliberately omits
+// the implicit base `user` role that authzUser injects, since that is
+// a backend authz detail, not a Keycloak realm role the SPA should see.
+func rolesFromContext(ctx context.Context) []string {
+	roles := auth.FromContext(ctx).Roles
+	out := make([]string, len(roles))
+	copy(out, roles)
+	return out
 }
 
 func (s *profileService) get(ctx context.Context, _ *struct{}) (*profileOutput, error) {
@@ -361,7 +383,9 @@ func (s *profileService) get(ctx context.Context, _ *struct{}) (*profileOutput, 
 		}
 		return nil, err
 	}
-	return &profileOutput{Body: toProfileBody(full)}, nil
+	body := toProfileBody(full)
+	body.Roles = rolesFromContext(ctx)
+	return &profileOutput{Body: body}, nil
 }
 
 func (s *profileService) patch(ctx context.Context, in *profilePatchInput) (*profileOutput, error) {
@@ -465,7 +489,9 @@ func (s *profileService) patch(ctx context.Context, in *profilePatchInput) (*pro
 		full.UpdatedAt = now
 	}
 
-	return &profileOutput{Body: toProfileBody(full)}, nil
+	body := toProfileBody(full)
+	body.Roles = rolesFromContext(ctx)
+	return &profileOutput{Body: body}, nil
 }
 
 // toProfileBody is the canonical projection from the persisted user

@@ -194,7 +194,7 @@ Separate from the collection. Tracks field trips the user has logged. Each trip 
 
 ### Admin / devops console
 A dedicated admin-facing console for operating the site. Gated to the admin/devops role (Keycloak role + Casbin policy already exist). Distinct from a normal user's view — this is the operator's window into the whole instance.
-- [ ] Admin login + console shell (admin/devops role only)
+- [x] Admin login + console shell (admin/devops role only) `(mi-agff)` — gated `/admin` SPA route + `GET /api/v1/admin/overview`, reuses the §13 v2 `devops` Casbin resource; placeholder landing, data-bearing surfaces follow as sub-beads
 - [ ] Site management surface (operational controls for running the instance)
 - [ ] View the **non-personal** information of all users (no PII beyond what's needed to operate; respects the GDPR/PII boundary)
 - [ ] View **all published data** across all users (specimens, photos, journal entries that are public/unlisted) for **usage-policy compliance review**

@@ -38,6 +38,20 @@ export const authStore: Readable<AuthState> = { subscribe: store.subscribe };
 // UI because writes require auth (CONTRACT §13).
 export const isAuthenticated: Readable<boolean> = derived(store, ($s) => $s.user !== null);
 
+// Realm roles that may reach the admin/devops console (mi-agff). Must
+// match the roles the backend `devops` Casbin resource grants:
+// devops-viewer + devops-admin hold `devops:view`, and admin is the
+// superset. This is a UI-gating hint ONLY — the backend enforces the
+// real gate per endpoint, so a forged role here buys nothing.
+const ADMIN_CONSOLE_ROLES = ['admin', 'devops-admin', 'devops-viewer'];
+
+// True iff the current user holds a role that can reach the
+// admin/devops console. Drives the nav link and the /admin route's
+// client-side gate; the page still trusts the server's 200/403.
+export const canAccessAdminConsole: Readable<boolean> = derived(store, ($s) =>
+  ($s.user?.roles ?? []).some((r) => ADMIN_CONSOLE_ROLES.includes(r)),
+);
+
 let inflight: Promise<AuthUser | null> | null = null;
 
 /**
@@ -118,6 +132,7 @@ export function __authenticate(over: Partial<AuthUser> = {}): void {
     display_name: 'Test User',
     email: 'test@example.com',
     pending: false,
+    roles: [],
     field_defaults: null as unknown as AuthUser['field_defaults'],
     default_specimen_visibility: null,
     ...over,
