@@ -110,26 +110,31 @@ This is the source of truth for the project roadmap.
 
 *Theme: **cut the app public.** It currently runs privately over a private IP for personal use. V3 makes it safe + ready for outside users — the visibility/discovery/sharing UX plus the hardening that must land before the public cut.*
 
+**V3 status:** the launch-blocking criticals are **DONE** — auth/IDOR (cross-tenant authz fixed + live), API rate limiting, DB backups, public DNS/TLS, and origin lockdown. Remaining before the public cut: live pen test `(mi-sx35)`, user data export/import `(mi-dkuu)`, production monitoring/alerting `(mi-vp0w)`, legal (ToS/privacy) `(mi-97kr)`, abuse/moderation `(mi-b2q0)`, and the design-first friends/sharing feature `(mi-qtq3)`.
+
 ### Features — visibility / discovery / sharing UX
 - [x] Inline visibility editor on the specimens list — owner-only quick public/unlisted/private toggle `(mi-35hk)`
-- [ ] 'New specimens' default visibility setting in Settings; create-form pre-fills from it `(mi-q2d8)` *(in progress)*
-- [ ] 'Browse all specimens' + 'Browse my collection' — two scoped list views `(mi-xue7)`
+- [x] 'New specimens' default visibility setting in Settings; create-form pre-fills from it `(mi-q2d8)`
+- [x] 'Browse all specimens' + 'Browse my collection' — two scoped list views `(mi-xue7)` (merged via mi-6yjp / mi-bd81)
 - [ ] Friends / sharing — targeted per-user grants on private specimens. **DESIGN-FIRST; not yet specced** `(mi-qtq3)`
 
 ### Hardening prerequisites (must land before the public cut)
-- [ ] DB backup to Backblaze B2 (external, off-cluster); MinIO images mirrored to a local bucket for cost `(mi-lhsu)`
-- [ ] MinIO bucket versioning on the primary image bucket — data-safety; distinct from the backup-bucket versioning in `(mi-lhsu)`
+- [x] DB backup to Backblaze B2 (external, off-cluster) — example manifests + restore docs `(mi-lhsu)`. The MinIO image-mirror was split out to `(mi-a3pt)` (still open).
+- [ ] MinIO image mirror to a second local bucket (replication, delete-marker off) — cost-efficient image copy, split out of `(mi-lhsu)` `(mi-a3pt)`
+- [ ] MinIO bucket versioning on the primary image bucket — data-safety; distinct from the backup-bucket versioning in `(mi-lhsu)` *(unbeaded)*
 - [ ] User data Export / Import — collection + images; portability + user-controlled backup + GDPR data-access `(mi-dkuu)`
-- [ ] API rate limiting — tiered limits to prevent abuse once publicly reachable `(mi-tnru)`
-- [ ] Penetration test / security audit — self-conducted, good quality; OWASP ZAP + manual IDOR/visibility/CSRF probing; fix-beads per finding `(mi-z58x)`
+- [x] API rate limiting — tiered limits to prevent abuse once publicly reachable `(mi-tnru)` (merged via mi-y3wp; account-bucket + per-IP CF-Connecting-IP + 429; in-memory per-replica accepted)
+- [x] Static security audit — source review + tooling + regression tests; all 7 findings resolved (F2/F3 cross-tenant authz fixed + live in prod, F4 qr-sheet, F5 decompression cap, F6 CSP tightened, F7 error strings; T3 CodeQL was a false finding, closed) `(mi-l1eg)`, parent `(mi-z58x)`
+- [ ] LIVE penetration test — operator-driven runbook; OWASP ZAP/Burp + manual IDOR/visibility/CSRF probing against staging `(mi-sx35)`
+- [ ] CI: re-add Trivy scan with valid action versions + soft-fail (decoupled from the IDOR fix) `(mi-craf)`
 
 ### Implied infra (likely needed for public — candidates, not yet beaded)
 *Bead these out as V3 planning matures.*
 - [x] Public DNS + TLS — Cloudflare DNS + cluster Ingress + Let's Encrypt TLS + external-dns all configured. DNS currently resolves to a private IP (Cloudflare unproxied); flipping to public is a one-annotation change (Cloudflare proxy mode → public IPv6 ingress).
 - [x] Edge protection foundation — Cloudflare in place (DNS now; flip to proxy mode for DDoS/CDN/edge-rate-limiting at launch). Origin locked down: pfSense drops all non-Cloudflare IPs on 80/443, so the origin is unreachable except via Cloudflare and CF-Connecting-IP is non-spoofable (was bead mi-1d7q, closed). Remaining: enable proxy mode + any edge rules at launch.
-- [ ] Production monitoring / alerting — Prometheus metrics already exist `(mi-2b1k)`; need dashboards + alerts
-- [ ] Terms of service / privacy policy (legal, for public users + GDPR)
-- [ ] Abuse handling / moderation story (for publicly visible user-generated content)
+- [ ] Production monitoring / alerting — Prometheus metrics already exist `(mi-2b1k)`; need dashboards + alerts (PrometheusRule + Grafana + alert routing) `(mi-vp0w)`
+- [ ] Terms of service / privacy policy (legal, for public users + GDPR: consent + deletion + data-rights) `(mi-97kr)`
+- [ ] Abuse handling / moderation story (for publicly visible user-generated content; post-moderation + admin takedown + reporting) `(mi-b2q0)`
 - [x] Multi-replica decisions — prod runs 2 replicas. Session lookup: no cache (mi-1d5i decision, SessionResolver interface ready if needed). Rate-limit store: in-memory per-replica accepted (a user hitting both replicas can get up to 2x quota — tolerated; shared store is the upgrade if exact global limits ever matter).
 
 ---
