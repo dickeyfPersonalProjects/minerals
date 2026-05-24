@@ -7,7 +7,7 @@
   import ProfileMenu from './ProfileMenu.svelte';
   import Footer from './Footer.svelte';
   import { qrSheetState, refreshQrSheet } from './qrSheet';
-  import { authStore } from './auth';
+  import { authStore, canAccessAdminConsole } from './auth';
 
   interface Props {
     children?: Snippet;
@@ -31,6 +31,10 @@
   const auth = $derived($authStore);
   const showProfileMenu = $derived(auth.user !== null);
   const showLoginButton = $derived(!showProfileMenu);
+
+  // Admin/devops console link (mi-agff) — only for callers whose roles
+  // grant console access. Cosmetic gate; the backend enforces for real.
+  const showAdminLink = $derived($canAccessAdminConsole);
 
   onMount(() => {
     // Probe once on app load. The store ignores 404s and keeps the
@@ -101,6 +105,16 @@
         >
           Collectors
         </a>
+        {#if showAdminLink}
+          <a
+            href="/admin"
+            use:link
+            data-testid="nav-admin-console"
+            class="text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+          >
+            Admin
+          </a>
+        {/if}
         {#if showProfileMenu}
           <ProfileMenu />
         {:else if showLoginButton}

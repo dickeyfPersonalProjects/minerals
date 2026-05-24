@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/api/v1/admin/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin/devops console landing
+         * @description Returns the console landing manifest. Gated to the admin/devops role via the CONTRACT §13 v2 `devops` Casbin resource: anonymous callers receive 401, authenticated non-admin callers receive 403, and devops-viewer/devops-admin/admin receive 200. The foundation (mi-agff) ships the gated shell + a placeholder manifest only; the data-bearing surfaces follow as sub-beads.
+         */
+        get: operations["admin-overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collectors": {
         parameters: {
             query?: never;
@@ -530,6 +550,33 @@ export interface components {
             readonly $schema?: string;
             /** @description UUID of the specimen to append to the sheet. */
             specimen_id: string;
+        };
+        AdminConsoleSection: {
+            /** @description What the section will host once built. */
+            description: string;
+            /** @description Stable identifier for the planned console surface. */
+            key: string;
+            /**
+             * @description Implementation status; "planned" until the section's sub-bead lands.
+             * @enum {string}
+             */
+            status: "planned" | "available";
+            /** @description Human-readable section title. */
+            title: string;
+        };
+        AdminOverviewBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/AdminOverviewBody.json
+             */
+            readonly $schema?: string;
+            /** @description Console identifier; always "admin". */
+            console: string;
+            /** @description Operator-facing note that the console shell is live and surfaces are pending. */
+            message: string;
+            /** @description Planned console surfaces (mi-agff decomposition). Each lands as a follow-up sub-bead. */
+            sections: components["schemas"]["AdminConsoleSection"][] | null;
         };
         ApiError: {
             /**
@@ -1114,6 +1161,8 @@ export interface components {
             id: string;
             /** @description Profile-setup-required flag; always false on a successful response. */
             pending: boolean;
+            /** @description Caller's Keycloak realm roles (UI-gating hint only; real authorization is enforced server-side per endpoint). */
+            roles: string[] | null;
         };
         ProfilePatchBody: {
             /**
@@ -1343,6 +1392,53 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "admin-overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminOverviewBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     "list-collectors": {
         parameters: {
             query?: {
