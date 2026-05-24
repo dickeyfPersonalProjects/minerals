@@ -575,6 +575,29 @@ jobs:
           fi
           echo "default-shaped user provisioned: $DEFAULT_USERNAME (HTTP $code)"
 
+          # Clear any pending required actions (mi-97kr). The realm's
+          # TERMS_AND_CONDITIONS required action has default_action=true so
+          # self-registrants are prompted to accept ToS + Privacy Policy. The
+          # Admin API also respects that flag and stamps it on newly-created
+          # users, but the direct-grant (ROPC) flow used in the token-claims
+          # step below cannot complete a pending required action — Keycloak
+          # returns 400. Clearing requiredActions here is idempotent (no-op if
+          # already empty) and mirrors what dev-seed.sh does for its users.
+          uid=$(curl -fsS \
+            -H "Authorization: Bearer ${admin_token}" \
+            "http://localhost:8081/admin/realms/minerals/users?username=${DEFAULT_USERNAME}&exact=true" \
+            | jq -r '.[0].id')
+          if [ -z "$uid" ] || [ "$uid" = "null" ]; then
+            echo "could not look up uid for $DEFAULT_USERNAME — skipping requiredActions clear" >&2
+          else
+            curl -fsS -o /dev/null \
+              -H "Authorization: Bearer ${admin_token}" \
+              -H 'Content-Type: application/json' \
+              -X PUT "http://localhost:8081/admin/realms/minerals/users/${uid}" \
+              -d '{"requiredActions":[]}'
+            echo "cleared requiredActions for $DEFAULT_USERNAME ($uid)"
+          fi
+
       - name: Default-shaped user — token claims match snapshot (mi-2xa4)
         # Mint a token via the same minerals-test password-grant client
         # the fixture smoke uses, decode the payload, log roles + aud

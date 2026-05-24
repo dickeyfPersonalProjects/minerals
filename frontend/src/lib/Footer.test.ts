@@ -33,3 +33,19 @@ describe('Footer — deploy marker (mi-c0sv)', () => {
     expect(screen.getByTestId('build-info')).toHaveTextContent(/built/);
   });
 });
+
+describe('Footer — legal links (mi-97kr)', () => {
+  it('links to the privacy policy', () => {
+    render(Footer);
+    const link = screen.getByTestId('footer-privacy-link');
+    expect(link).toHaveTextContent('Privacy');
+    expect(link).toHaveAttribute('href', '#/privacy');
+  });
+
+  it('links to the terms of service', () => {
+    render(Footer);
+    const link = screen.getByTestId('footer-terms-link');
+    expect(link).toHaveTextContent('Terms');
+    expect(link).toHaveAttribute('href', '#/terms');
+  });
+});
