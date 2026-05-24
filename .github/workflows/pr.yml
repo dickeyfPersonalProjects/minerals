@@ -185,6 +185,49 @@ jobs:
           path: frontend/coverage/
           if-no-files-found: ignore
 
+  # Trivy SCA + config + secret scan (mi-craf; re-adds the step removed
+  # from the IDOR PR mi-uoq3, which had referenced the non-existent
+  # `aquasecurity/trivy-action@0.28.0` — the real tag is `v0.28.0`,
+  # with the `v` prefix). Filesystem mode covers the dependencies that
+  # actually ship in the image: `vuln` reads go.mod/go.sum and
+  # frontend/package-lock.json (the same Go + npm trees the multi-stage
+  # build compiles in), `misconfig` lints the Dockerfile + any IaC, and
+  # `secret` greps for committed credentials. A separate image scan is
+  # not run here because the runtime stage is distroless-static-nonroot
+  # (just the Go binary + minimal base) — its contents are exactly the
+  # Go module set this fs scan already covers, so building + scanning an
+  # image per-PR would add minutes for no extra coverage.
+  #
+  # SOFT-FAIL by design: `exit-code: '0'` makes Trivy report findings
+  # without ever returning non-zero, and `continue-on-error: true` keeps
+  # even an action-resolution / DB-download hiccup from failing the job.
+  # So a Trivy finding or version issue can NEVER block a merge. The
+  # primary per-ecosystem gates remain authoritative: govulncheck
+  # (reachable Go CVEs) and the Backend/Frontend jobs. This is the broad,
+  # non-gating backstop that also surfaces config/Dockerfile/secret
+  # issues those gates don't see. Once findings are triaged and the step
+  # is proven stable, a follow-up can flip it to hard-fail (drop
+  # continue-on-error and set exit-code: '1').
+  #
+  # The action is pinned to a commit SHA (supply-chain hygiene) with the
+  # human-readable tag in a trailing comment.
+  trivy:
+    name: Trivy scan (non-gating)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Trivy filesystem + config + secret scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '0'
+          format: table
+
   # Validates the committed docker-compose.yml end-to-end. The Backend
   # job above brings up Postgres + MinIO via GHA service containers
   # (and a `docker run` for MinIO), bypassing the compose file — so a
