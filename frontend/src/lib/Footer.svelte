@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { link } from 'svelte-spa-router';
   import { commitUrl, formatBuildDate } from './buildInfo';
 
   // Deploy marker (mi-c0sv). __GIT_SHA__ / __BUILD_DATE__ are compile-time
@@ -15,6 +16,20 @@
   class="border-t border-[var(--color-border)] bg-[var(--color-surface)]/60 px-4 py-3 text-center text-xs text-[var(--color-text-muted)] sm:px-6"
 >
   <span>Minerals · personal collection</span>
+  <span aria-hidden="true"> · </span>
+  <a
+    href="/privacy"
+    use:link
+    data-testid="footer-privacy-link"
+    class="hover:text-[var(--color-accent)] hover:underline">Privacy</a
+  >
+  <span aria-hidden="true"> · </span>
+  <a
+    href="/terms"
+    use:link
+    data-testid="footer-terms-link"
+    class="hover:text-[var(--color-accent)] hover:underline">Terms</a
+  >
   <span aria-hidden="true"> · </span>
   <span data-testid="build-info">
     {#if url}

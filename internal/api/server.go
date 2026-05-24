@@ -182,6 +182,9 @@ func New(deps Deps) http.Handler {
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "profile", Description: "First-login profile completion (mi-2hf). Pending users complete setup here before any other protected endpoint becomes reachable.",
 	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "legal", Description: "Public static legal documents — privacy policy + terms of service (mi-97kr). Server-rendered via the §17 markdown pipeline; no auth.",
+	})
 
 	humaAPI := humago.New(mux, cfg)
 	authMW := newAuthMiddlewares(deps.Users, deps.Verifier)
@@ -196,6 +199,7 @@ func New(deps Deps) http.Handler {
 	registerMineralSpeciesOperations(humaAPI, authMW, deps.MineralSpecies)
 	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets, deps.Specimens)
 	registerProfileOperations(humaAPI, authMW, deps.Users)
+	registerLegalOperations(humaAPI)
 	registerSpecimenRedirect(mux)
 
 	// BFF V2 auth routes (mi-bm5b). The three routes attach to the
