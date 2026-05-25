@@ -92,6 +92,14 @@ type Deps struct {
 	// only hard requirement; Storage/Sessions/Identity are best-effort
 	// cleanup collaborators.
 	Account *AccountServiceDeps
+	// AdminStats provides aggregate row counts for GET /api/v1/admin/stats
+	// (mi-ilvt). nil is safe — the endpoint still registers but returns
+	// zero for every counter (the unit-test seam).
+	AdminStats domain.AdminStatsProvider
+	// RegistrationEnabled is the operator-configured REGISTRATION_ENABLED
+	// switch (mi-ilvt). Wired from config in cmd/minerals; surfaced
+	// read-only by GET /api/v1/admin/health.
+	RegistrationEnabled bool
 	// Users powers the first-login gate (mi-2hf): the auth chain
 	// resolves the JWT `sub` to a row here, auto-creates a pending
 	// row on first-login, and gates protected endpoints with a 403
@@ -209,7 +217,7 @@ func New(deps Deps) http.Handler {
 	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets, deps.Specimens)
 	registerProfileOperations(humaAPI, authMW, deps.Users)
 	registerAccountOperations(humaAPI, authMW, deps.Account)
-	registerAdminOperations(humaAPI, authMW, guard)
+	registerAdminOperations(humaAPI, authMW, guard, deps)
 	registerSpecimenRedirect(mux)
 
 	// BFF V2 auth routes (mi-bm5b). The three routes attach to the

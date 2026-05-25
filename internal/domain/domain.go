@@ -753,6 +753,21 @@ type UserRepo interface {
 	UpdateDefaultSpecimenVisibility(ctx context.Context, tx Tx, id uuid.UUID, visibility *Visibility, updatedAt time.Time) error
 }
 
+// AdminStatsProvider is the consumer-side interface for the admin stats
+// endpoint (mi-ilvt). Provides aggregate counts across all core entities.
+// All methods are read-only and return non-PII aggregate values only.
+type AdminStatsProvider interface {
+	// CountUsers returns the total number of rows in the users table.
+	CountUsers(ctx context.Context) (int64, error)
+	// CountSpecimens returns the total number of rows in the specimens table.
+	CountSpecimens(ctx context.Context) (int64, error)
+	// CountPhotos returns the total number of rows in the photos table.
+	CountPhotos(ctx context.Context) (int64, error)
+	// CountJournalEntries returns the total number of rows in the
+	// journal_entries table.
+	CountJournalEntries(ctx context.Context) (int64, error)
+}
+
 // SpecimenCollectorRepo is the consumer-side interface for the
 // specimen↔collector join table (mi-zv3 / C-3). The chain is edited
 // atomically via ReplaceChain — there is no per-link API surface.
