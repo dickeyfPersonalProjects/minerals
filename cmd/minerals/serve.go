@@ -23,6 +23,7 @@ import (
 	"github.com/dickeyfPersonalProjects/minerals/internal/config"
 	"github.com/dickeyfPersonalProjects/minerals/internal/db"
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
+	"github.com/dickeyfPersonalProjects/minerals/internal/keycloak"
 	"github.com/dickeyfPersonalProjects/minerals/internal/mindat"
 	"github.com/dickeyfPersonalProjects/minerals/internal/oidc"
 	"github.com/dickeyfPersonalProjects/minerals/internal/storage"
@@ -193,7 +194,13 @@ func runServe(_ []string) error {
 			Repo:   db.NewMineralSpeciesPostgres(pool),
 			Mindat: newMindatClient(cfg.MindatAPIKey),
 		},
-		QRSheets:    db.NewQRSheetPostgres(pool),
+		QRSheets: db.NewQRSheetPostgres(pool),
+		Account: &api.AccountServiceDeps{
+			Eraser:   db.NewAccountErasePostgres(pool),
+			Storage:  store,
+			Sessions: bff.NewPostgresResolver(pool),
+			Identity: buildIdentityDeleter(rootCtx, cfg),
+		},
 		Users:       users,
 		Verifier:    verifier,
 		Enforcer:    enforcer,
@@ -452,6 +459,30 @@ func buildSessionMW(
 		},
 		IdleTimeout: time.Duration(cfg.SessionIdleTimeoutMinutes) * time.Minute,
 	})
+}
+
+// buildIdentityDeleter wires the GDPR account-erasure IdP deleter
+// (mi-nwg5). When all four Keycloak admin credentials are present it
+// returns a live admin-REST client; otherwise it returns the no-op
+// deleter so account deletion still succeeds (the app row + sessions
+// are gone; the orphaned IdP user can only re-register). Construction
+// is lazy on the token fetch, so a misconfigured base URL surfaces at
+// first deletion, not at boot.
+func buildIdentityDeleter(ctx context.Context, cfg *config.Config) domain.IdentityDeleter {
+	admin, err := keycloak.NewAdminClient(ctx, keycloak.AdminConfig{
+		BaseURL:      cfg.KeycloakAdminBaseURL,
+		Realm:        cfg.KeycloakRealm,
+		ClientID:     cfg.KeycloakAdminClientID,
+		ClientSecret: cfg.KeycloakAdminClientSecret,
+	})
+	if err != nil {
+		slog.Info("keycloak admin not configured; account deletion will not remove the IdP user",
+			"reason", err)
+		return keycloak.NoopDeleter{}
+	}
+	slog.Info("keycloak admin configured for account erasure",
+		"base_url", cfg.KeycloakAdminBaseURL, "realm", cfg.KeycloakRealm)
+	return admin
 }
 
 // buildCSRFMW returns the stored-synchronizer CSRF middleware only

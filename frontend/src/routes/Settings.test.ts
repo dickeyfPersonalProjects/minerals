@@ -3,13 +3,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { get } from 'svelte/store';
 import { toasts, _clearToasts } from '../lib/toasts';
 
-const { mockGET, mockPATCH } = vi.hoisted(() => ({
+const { mockGET, mockPATCH, mockDELETE } = vi.hoisted(() => ({
   mockGET: vi.fn(),
   mockPATCH: vi.fn(),
+  mockDELETE: vi.fn(),
 }));
 
 vi.mock('../lib/api', () => ({
-  client: { GET: mockGET, PATCH: mockPATCH },
+  client: { GET: mockGET, PATCH: mockPATCH, DELETE: mockDELETE },
 }));
 
 import Settings from './Settings.svelte';
@@ -31,6 +32,7 @@ function profileBody(
 beforeEach(() => {
   mockGET.mockReset();
   mockPATCH.mockReset();
+  mockDELETE.mockReset();
   _clearToasts();
 });
 
@@ -329,3 +331,86 @@ describe('Settings route — new specimens default visibility (mi-q2d8)', () => 
     });
   });
 });
+
+describe('Settings route — delete account (GDPR erasure, mi-nwg5)', () => {
+  it('disables the delete button until the confirmation phrase is typed exactly', async () => {
+    mockGET.mockResolvedValue({ data: profileBody(null), error: undefined });
+    render(Settings);
+
+    const btn = (await screen.findByTestId('settings-delete-account')) as HTMLButtonElement;
+    const input = screen.getByTestId('settings-delete-confirm') as HTMLInputElement;
+    expect(btn.disabled).toBe(true);
+
+    await fireEvent.input(input, { target: { value: 'delete' } });
+    expect(btn.disabled).toBe(true); // case-sensitive
+
+    await fireEvent.input(input, { target: { value: 'DELETE' } });
+    await waitFor(() => expect(btn.disabled).toBe(false));
+  });
+
+  it('DELETEs /api/v1/account with the confirm phrase and navigates home on success', async () => {
+    mockGET.mockResolvedValue({ data: profileBody(null), error: undefined });
+    const { assign, restore } = mockLocationAssign();
+    try {
+      render(Settings);
+
+      const input = (await screen.findByTestId('settings-delete-confirm')) as HTMLInputElement;
+      await fireEvent.input(input, { target: { value: 'DELETE' } });
+
+      mockDELETE.mockResolvedValue({ data: undefined, response: { ok: true }, error: undefined });
+      await fireEvent.click(screen.getByTestId('settings-delete-account'));
+
+      await waitFor(() => expect(mockDELETE).toHaveBeenCalled());
+      const [path, opts] = mockDELETE.mock.calls[0] as [string, { body: { confirm: string } }];
+      expect(path).toBe('/api/v1/account');
+      expect(opts.body).toEqual({ confirm: 'DELETE' });
+      await waitFor(() => expect(assign).toHaveBeenCalledWith('/'));
+    } finally {
+      restore();
+    }
+  });
+
+  it('does not navigate when the DELETE fails', async () => {
+    mockGET.mockResolvedValue({ data: profileBody(null), error: undefined });
+    const { assign, restore } = mockLocationAssign();
+    try {
+      render(Settings);
+
+      const input = (await screen.findByTestId('settings-delete-confirm')) as HTMLInputElement;
+      await fireEvent.input(input, { target: { value: 'DELETE' } });
+
+      mockDELETE.mockResolvedValue({
+        data: undefined,
+        response: { ok: false },
+        error: { error: { code: 'internal_error', message: 'boom' } },
+      });
+      await fireEvent.click(screen.getByTestId('settings-delete-account'));
+
+      await waitFor(() => expect(mockDELETE).toHaveBeenCalled());
+      expect(assign).not.toHaveBeenCalled();
+      // Button re-enabled so the user can retry.
+      const btn = screen.getByTestId('settings-delete-account') as HTMLButtonElement;
+      await waitFor(() => expect(btn.disabled).toBe(false));
+    } finally {
+      restore();
+    }
+  });
+});
+
+// mockLocationAssign swaps window.location for a stub exposing a mock
+// `assign`. jsdom's window.location.assign is non-configurable, so a
+// vi.spyOn fails; redefining the whole property is the supported route.
+function mockLocationAssign(): { assign: ReturnType<typeof vi.fn>; restore: () => void } {
+  const original = window.location;
+  const assign = vi.fn();
+  Object.defineProperty(window, 'location', {
+    configurable: true,
+    value: { ...original, assign },
+  });
+  return {
+    assign,
+    restore: () => {
+      Object.defineProperty(window, 'location', { configurable: true, value: original });
+    },
+  };
+}

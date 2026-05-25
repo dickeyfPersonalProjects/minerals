@@ -165,6 +165,34 @@
     loadInto(data.field_defaults, data.default_specimen_visibility);
     toastSuccess('Settings saved');
   }
+
+  // --- Danger zone: account deletion (GDPR right-to-erasure, mi-nwg5) -
+  // The backend requires the literal confirmation phrase "DELETE" in
+  // the request body; the UI mirrors that with a typed confirmation so
+  // the irreversible action can't fire on a stray click.
+  const DELETE_PHRASE = 'DELETE';
+  let deleteConfirm = $state('');
+  let deleting = $state(false);
+  const canDelete = $derived(deleteConfirm === DELETE_PHRASE);
+
+  async function deleteAccount(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    if (deleting || !canDelete) return;
+    deleting = true;
+    const { response, error } = await client.DELETE('/api/v1/account', {
+      body: { confirm: DELETE_PHRASE },
+    });
+    if (error || !response.ok) {
+      // Toast middleware already surfaced the error; re-enable the
+      // button so the user can retry.
+      deleting = false;
+      return;
+    }
+    // Account + session are gone server-side. Hard-navigate to reboot
+    // the SPA as an anonymous visitor; the now-revoked session cookie
+    // is cleared by the backend on the next request.
+    window.location.assign('/');
+  }
 </script>
 
 <section class="mx-auto max-w-3xl py-12" data-testid="settings">
@@ -265,4 +293,42 @@
       {saving ? 'Saving…' : 'Save'}
     </button>
   </form>
+
+  <section
+    class="mt-12 rounded-md border border-[var(--color-danger)] p-6"
+    data-testid="settings-danger-zone"
+  >
+    <h2 class="text-lg font-medium text-[var(--color-danger)]">Delete account</h2>
+    <p class="mt-2 text-sm text-[var(--color-text-muted)]">
+      Permanently deletes your account and <strong>all</strong> of your data — every specimen, photo,
+      journal entry, attachment, collector, uploaded file, and QR sheet. Your sign-in identity is removed
+      and your sessions are ended. This cannot be undone.
+    </p>
+    <form
+      onsubmit={deleteAccount}
+      class="mt-4 space-y-3"
+      data-testid="settings-delete-account-form"
+    >
+      <label for="settings-delete-confirm" class="block text-sm text-[var(--color-text)]">
+        Type <code class="font-semibold">{DELETE_PHRASE}</code> to confirm:
+      </label>
+      <input
+        id="settings-delete-confirm"
+        data-testid="settings-delete-confirm"
+        type="text"
+        autocomplete="off"
+        bind:value={deleteConfirm}
+        disabled={deleting}
+        class="w-full max-w-xs rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] focus:border-[var(--color-danger)] focus:outline-none"
+      />
+      <button
+        type="submit"
+        data-testid="settings-delete-account"
+        disabled={deleting || !canDelete}
+        class="inline-flex items-center justify-center rounded-md bg-[var(--color-danger)] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {deleting ? 'Deleting…' : 'Delete my account'}
+      </button>
+    </form>
+  </section>
 </section>

@@ -123,6 +123,7 @@ This is the source of truth for the project roadmap.
 - [ ] MinIO image mirror to a second local bucket (replication, delete-marker off) — cost-efficient image copy, split out of `(mi-lhsu)` `(mi-a3pt)`
 - [ ] MinIO bucket versioning on the primary image bucket — data-safety; distinct from the backup-bucket versioning in `(mi-lhsu)` *(unbeaded)*
 - [ ] User data Export / Import — collection + images; portability + user-controlled backup + GDPR data-access `(mi-dkuu)`
+- [x] GDPR right-to-erasure — Settings → Delete account: cascades the DB (specimens/photos/journal/attachments/collectors/files/qr-sheets), purges MinIO objects, revokes sessions, removes the Keycloak identity (when admin creds configured; no-op otherwise), reassigns the mineral-species catalog to the system account, and audit-logs without retaining PII `(mi-nwg5)`
 - [x] API rate limiting — tiered limits to prevent abuse once publicly reachable `(mi-tnru)` (merged via mi-y3wp; account-bucket + per-IP CF-Connecting-IP + 429; in-memory per-replica accepted)
 - [x] Static security audit — source review + tooling + regression tests; all 7 findings resolved (F2/F3 cross-tenant authz fixed + live in prod, F4 qr-sheet, F5 decompression cap, F6 CSP tightened, F7 error strings; T3 CodeQL was a false finding, closed) `(mi-l1eg)`, parent `(mi-z58x)`
 - [ ] LIVE penetration test — operator-driven runbook; OWASP ZAP/Burp + manual IDOR/visibility/CSRF probing against staging `(mi-sx35)`
