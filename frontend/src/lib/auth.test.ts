@@ -11,6 +11,7 @@ import {
   __resetAuthStore,
   __setAuthUser,
   authStore,
+  canAccessAdminConsole,
   isAuthenticated,
   probeAuth,
 } from './auth';
@@ -104,12 +105,36 @@ describe('auth store (V2 BFF cookie flow, mi-3vc4)', () => {
     expect(mockGet).toHaveBeenCalledTimes(1);
   });
 
+  // Admin/devops console gate (mi-agff). Cosmetic — drives the nav
+  // link + /admin route hint; the backend enforces the real gate.
+  describe('canAccessAdminConsole', () => {
+    it('is false when anonymous', () => {
+      expect(get(canAccessAdminConsole)).toBe(false);
+    });
+
+    it('is false for a plain user with no admin/devops role', () => {
+      __authenticate({ roles: ['user'] });
+      expect(get(canAccessAdminConsole)).toBe(false);
+    });
+
+    it.each(['admin', 'devops-admin', 'devops-viewer'])('is true for role %s', (role) => {
+      __authenticate({ roles: [role] });
+      expect(get(canAccessAdminConsole)).toBe(true);
+    });
+
+    it('is false when roles is null (older profile body)', () => {
+      __authenticate({ roles: null as unknown as string[] });
+      expect(get(canAccessAdminConsole)).toBe(false);
+    });
+  });
+
   it('__setAuthUser and __resetAuthStore round-trip the store', () => {
     __setAuthUser({
       id: 'u',
       display_name: 'X',
       email: 'x@x',
       pending: false,
+      roles: [],
       field_defaults: null as unknown as never,
       default_specimen_visibility: null,
     });

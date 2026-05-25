@@ -191,6 +191,9 @@ func New(deps Deps) http.Handler {
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "account", Description: "Account lifecycle: GDPR right-to-erasure self-service deletion (mi-nwg5).",
 	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "admin", Description: "Admin/devops console (mi-agff). Gated to the admin/devops role via the §13 v2 `devops` Casbin resource. Foundation pass ships the gated shell + placeholder landing.",
+	})
 
 	humaAPI := humago.New(mux, cfg)
 	authMW := newAuthMiddlewares(deps.Users, deps.Verifier)
@@ -206,6 +209,7 @@ func New(deps Deps) http.Handler {
 	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets, deps.Specimens)
 	registerProfileOperations(humaAPI, authMW, deps.Users)
 	registerAccountOperations(humaAPI, authMW, deps.Account)
+	registerAdminOperations(humaAPI, authMW, guard)
 	registerSpecimenRedirect(mux)
 
 	// BFF V2 auth routes (mi-bm5b). The three routes attach to the

@@ -15,6 +15,7 @@ import QRPreview from './routes/QRPreview.svelte';
 import ProfileSetup from './routes/ProfileSetup.svelte';
 import Profile from './routes/Profile.svelte';
 import Settings from './routes/Settings.svelte';
+import AdminConsole from './routes/AdminConsole.svelte';
 
 // V2 BFF cookie flow (mi-3vc4): /auth/callback is no longer a SPA
 // route — Keycloak redirects back to the BACKEND's /auth/callback
@@ -24,6 +25,10 @@ export const routes: RouteDefinition = {
   '/profile': Profile,
   '/profile/setup': ProfileSetup,
   '/settings': Settings,
+  // Admin/devops console (mi-agff). The page self-gates on the backend
+  // (GET /api/v1/admin/overview → 403 for non-admins); the nav link is
+  // additionally hidden client-side via canAccessAdminConsole.
+  '/admin': AdminConsole,
   '/specimens': Specimens,
   // "Browse my collection" (mi-xue7): same component, owner-scoped via
   // the route path (Specimens.svelte derives scope=mine from /collection).
