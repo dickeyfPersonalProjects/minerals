@@ -44,6 +44,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/specimens/{id}/takedown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Force a specimen private (operator takedown)
+         * @description Operator moderation action: forces any specimen's visibility to `private`, removing it from public/unlisted reach. Gated on `specimens:edit` for the target — only the `admin` role (Casbin `*:*:*` superset) can edit content it does not own, so this is admin-only in practice. Idempotent: a specimen that is already private returns 200 unchanged. The action is audit-logged. Photo/journal removal and the console UI follow as sub-beads (mi-jjzc).
+         */
+        post: operations["admin-takedown-specimen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collectors": {
         parameters: {
             query?: never;
@@ -511,6 +531,26 @@ export interface paths {
          * @description Multipart upload (`file` form field). Server-side EXIF allowlist filter (drops GPS, XMP, MakerNotes per CONTRACT.md §12), display + thumbnail variant generation, transactional MinIO + Postgres write.
          */
         post: operations["upload-photo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/specimens/{id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report a specimen
+         * @description Public abuse-report affordance for a publicly visible specimen. Anonymous callers are accepted (the page is internet-facing). The report is delivered to the operator as a structured log event; there is no moderation queue at launch. Returns 404 — not 403/401 — when the caller cannot see the specimen, so a report cannot probe for private content (CONTRACT.md §13 v2). Per-IP rate limiting (mi-tnru) blunts report spam.
+         */
+        post: operations["report-specimen"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1333,6 +1373,33 @@ export interface components {
             /** Format: int64 */
             version?: number;
         };
+        ReportAck: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/ReportAck.json
+             */
+            readonly $schema?: string;
+            /** @description Operator-facing acknowledgement. */
+            message: string;
+            /** @description Correlation id for this report (matches the logged moderation.report event). */
+            report_id: string;
+        };
+        ReportSpecimenBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/ReportSpecimenBody.json
+             */
+            readonly $schema?: string;
+            /** @description Optional free-text context for the operator. */
+            details?: string;
+            /**
+             * @description Report category.
+             * @enum {string}
+             */
+            reason: "abuse" | "illegal" | "spam" | "copyright" | "privacy" | "other";
+        };
         RockData: {
             composition?: string;
             formation_context?: string;
@@ -1453,6 +1520,16 @@ export interface components {
              */
             visibility_price?: "private" | "unlisted" | "public";
         };
+        TakedownSpecimenBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/TakedownSpecimenBody.json
+             */
+            readonly $schema?: string;
+            /** @description Optional operator note recorded in the takedown audit log. */
+            reason?: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -1567,6 +1644,87 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "admin-takedown-specimen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Specimen UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TakedownSpecimenBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecimenView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4126,6 +4284,69 @@ export interface operations {
             };
             /** @description Unsupported Media Type */
             415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "report-specimen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Specimen UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportSpecimenBody"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportAck"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

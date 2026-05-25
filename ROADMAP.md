@@ -135,7 +135,7 @@ This is the source of truth for the project roadmap.
 - [x] Edge protection foundation — Cloudflare in place (DNS now; flip to proxy mode for DDoS/CDN/edge-rate-limiting at launch). Origin locked down: pfSense drops all non-Cloudflare IPs on 80/443, so the origin is unreachable except via Cloudflare and CF-Connecting-IP is non-spoofable (was bead mi-1d7q, closed). Remaining: enable proxy mode + any edge rules at launch.
 - [ ] Production monitoring / alerting — Prometheus metrics already exist `(mi-2b1k)`; need dashboards + alerts (PrometheusRule + Grafana + alert routing) `(mi-vp0w)`
 - [ ] Terms of service / privacy policy (legal, for public users + GDPR: consent + deletion + data-rights) `(mi-97kr)`
-- [ ] Abuse handling / moderation story (for publicly visible user-generated content; post-moderation + admin takedown + reporting) `(mi-b2q0)`
+- [x] Abuse handling / moderation story (for publicly visible user-generated content; post-moderation + admin takedown + reporting) `(mi-b2q0)` — baseline shipped: public report affordance, admin force-private takedown, operator runbook (`docs/security/moderation.md`). Console takedown UI/photo+journal removal `(mi-jjzc)` and Keycloak account-disable `(mi-3gxz)` follow.
 - [x] Multi-replica decisions — prod runs 2 replicas. Session lookup: no cache (mi-1d5i decision, SessionResolver interface ready if needed). Rate-limit store: in-memory per-replica accepted (a user hitting both replicas can get up to 2x quota — tolerated; shared store is the upgrade if exact global limits ever matter).
 
 ---

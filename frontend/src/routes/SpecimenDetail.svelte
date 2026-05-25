@@ -72,6 +72,53 @@
   let deleteTarget = $state<DeleteTarget | null>(null);
   let deleting = $state(false);
 
+  // Public abuse-report affordance (mi-b2q0). Open to everyone,
+  // including anonymous viewers — public specimen pages are
+  // internet-facing, so the report path must not require auth. The
+  // backend rate-limits per-IP and delivers the report to the operator.
+  type ReportReason = 'abuse' | 'illegal' | 'spam' | 'copyright' | 'privacy' | 'other';
+  const REPORT_REASONS: { value: ReportReason; label: string }[] = [
+    { value: 'abuse', label: 'Abusive or harassing content' },
+    { value: 'illegal', label: 'Illegal content' },
+    { value: 'spam', label: 'Spam or misleading' },
+    { value: 'copyright', label: 'Copyright infringement' },
+    { value: 'privacy', label: 'Privacy violation' },
+    { value: 'other', label: 'Something else' },
+  ];
+  let reportOpen = $state(false);
+  let reportSubmitting = $state(false);
+  let reportReason = $state<ReportReason>('abuse');
+  let reportDetails = $state('');
+
+  function openReport() {
+    reportReason = 'abuse';
+    reportDetails = '';
+    reportOpen = true;
+  }
+
+  function closeReport() {
+    if (!reportSubmitting) reportOpen = false;
+  }
+
+  async function submitReport(): Promise<void> {
+    if (!specimen || reportSubmitting) return;
+    reportSubmitting = true;
+    try {
+      const { error, response } = await client.POST('/api/v1/specimens/{id}/report', {
+        params: { path: { id: specimen.id } },
+        body: { reason: reportReason, details: reportDetails.trim() || undefined },
+      });
+      if (error) {
+        toastError(errorMessage(error, response.status));
+        return;
+      }
+      toastSuccess('Report sent to the site operator. Thank you.');
+      reportOpen = false;
+    } finally {
+      reportSubmitting = false;
+    }
+  }
+
   function errorMessage(
     error: { error?: { code?: string; message?: string } } | undefined,
     status: number,
@@ -777,16 +824,26 @@
         >
           {specimen.name}
         </h1>
-        {#if $isAuthenticated}
-          <a
-            href={`/specimens/${specimen.id}/edit`}
-            use:link
-            data-testid="edit-specimen"
-            class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+        <div class="flex flex-wrap items-center gap-2">
+          {#if $isAuthenticated}
+            <a
+              href={`/specimens/${specimen.id}/edit`}
+              use:link
+              data-testid="edit-specimen"
+              class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+            >
+              Edit
+            </a>
+          {/if}
+          <button
+            type="button"
+            onclick={openReport}
+            data-testid="report-specimen"
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text-muted)] hover:border-red-500/60 hover:text-red-600"
           >
-            Edit
-          </a>
-        {/if}
+            Report
+          </button>
+        </div>
       </div>
       <div class="flex flex-wrap items-start gap-3">
         <div class="flex flex-wrap items-center gap-2 pt-2">
@@ -1521,5 +1578,91 @@
       onConfirm={confirmDelete}
       onCancel={cancelDelete}
     />
+  {/if}
+
+  {#if reportOpen}
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="report-title"
+      data-testid="report-modal"
+      onclick={(e) => {
+        if (e.target === e.currentTarget) closeReport();
+      }}
+      onkeydown={(e) => {
+        if (e.key === 'Escape') closeReport();
+      }}
+      tabindex="-1"
+    >
+      <div
+        class="w-full max-w-md rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
+      >
+        <h2 id="report-title" class="font-serif text-lg font-semibold text-[var(--color-text)]">
+          Report this specimen
+        </h2>
+        <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+          Flag content that violates the site's usage policy. The report goes to the site operator
+          for review.
+        </p>
+        <div class="mt-4 space-y-3">
+          <div>
+            <label
+              for="report-reason"
+              class="mb-1 block text-xs font-medium text-[var(--color-text-muted)]"
+            >
+              Reason
+            </label>
+            <select
+              id="report-reason"
+              bind:value={reportReason}
+              data-testid="report-reason"
+              class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)]"
+            >
+              {#each REPORT_REASONS as r (r.value)}
+                <option value={r.value}>{r.label}</option>
+              {/each}
+            </select>
+          </div>
+          <div>
+            <label
+              for="report-details"
+              class="mb-1 block text-xs font-medium text-[var(--color-text-muted)]"
+            >
+              Details <span class="font-normal">(optional)</span>
+            </label>
+            <textarea
+              id="report-details"
+              bind:value={reportDetails}
+              maxlength="2000"
+              rows="4"
+              data-testid="report-details"
+              placeholder="Anything that helps the operator review this report."
+              class="w-full resize-y rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)]"
+            ></textarea>
+          </div>
+        </div>
+        <div class="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onclick={closeReport}
+            disabled={reportSubmitting}
+            data-testid="report-cancel"
+            class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onclick={submitReport}
+            disabled={reportSubmitting}
+            data-testid="report-submit"
+            class="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {reportSubmitting ? 'Sending…' : 'Send report'}
+          </button>
+        </div>
+      </div>
+    </div>
   {/if}
 {/if}
