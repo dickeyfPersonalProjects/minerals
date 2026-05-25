@@ -45,6 +45,8 @@
     if (before) out.acquired_before = before;
     const collectorId = params.get('collector_id');
     if (collectorId) out.collector_id = collectorId;
+    const tagged = params.get('tagged');
+    if (tagged === 'true' || tagged === 'false') out.tagged = tagged;
     return out;
   }
 
@@ -62,6 +64,7 @@
     if (value.acquired_after) params.set('acquired_after', value.acquired_after);
     if (value.acquired_before) params.set('acquired_before', value.acquired_before);
     if (value.collector_id) params.set('collector_id', value.collector_id);
+    if (value.tagged) params.set('tagged', value.tagged);
     const qs = params.toString();
     // Keep filter changes on the current view (mi-xue7): /collection
     // stays owner-scoped, every other path stays on /specimens.
@@ -93,6 +96,7 @@
     acquired_before?: string;
     collector_id?: string;
     scope?: 'mine';
+    tagged?: 'true' | 'false';
   };
 
   function buildQuery(active: SpecimenFiltersValue, cursor?: string): ListQuery {
@@ -106,6 +110,9 @@
     if (active.acquired_before) q.acquired_before = active.acquired_before;
     if (active.collector_id) q.collector_id = active.collector_id;
     if (scope) q.scope = scope;
+    // tagged is owner-only — only pass it when scope=mine is active
+    // (the backend enforces the same rule, but be explicit here too).
+    if (scope === 'mine' && active.tagged) q.tagged = active.tagged;
     return q;
   }
 
@@ -230,7 +237,7 @@
       </a>
     </div>
   {:else}
-    <SpecimenFilters value={filters} onChange={applyFilters} />
+    <SpecimenFilters value={filters} onChange={applyFilters} showTaggedFilter={isCollection} />
 
     {#if filters.q}
       <p class="mb-3 text-xs text-[var(--color-text-muted)]" data-testid="relevance-hint">

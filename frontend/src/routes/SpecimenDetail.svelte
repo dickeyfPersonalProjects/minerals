@@ -1281,6 +1281,43 @@
             </p>
           </section>
         {/if}
+
+        <!-- Physical label status (mi-n28q). Owner-only: the API omits
+             `tagged` entirely for non-owners, so `specimen.tagged !== undefined`
+             is the ownership check here. Shows a status badge and a link to
+             the "my collection" untagged filter for quick workflow access. -->
+        {#if specimen.tagged !== undefined}
+          <section data-testid="tagged-section">
+            <h2 class="mb-2 font-serif text-base font-semibold text-[var(--color-text)]">
+              Physical label
+            </h2>
+            {#if specimen.tagged}
+              <span
+                class="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-0.5 text-xs text-[var(--color-text-muted)]"
+                data-testid="tagged-badge"
+              >
+                ✓ Physical label applied
+              </span>
+            {:else}
+              <div class="flex flex-wrap items-center gap-2">
+                <span
+                  class="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-0.5 text-xs text-[var(--color-text-muted)]"
+                  data-testid="untagged-badge"
+                >
+                  No physical label yet
+                </span>
+                <a
+                  href="/collection?tagged=false"
+                  use:link
+                  class="text-xs text-[var(--color-accent)] hover:underline"
+                  data-testid="untagged-collection-link"
+                >
+                  See all unlabeled →
+                </a>
+              </div>
+            {/if}
+          </section>
+        {/if}
       </div>
     </div>
   </article>

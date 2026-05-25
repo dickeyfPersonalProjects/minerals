@@ -33,11 +33,14 @@ func NewSpecimenPostgres(pool *pgxpool.Pool) *SpecimenPostgres {
 // visibility_price / visibility_acquired_from / visibility_images
 // are the per-field overrides added by migration 0013 (mi-fo8); all
 // three scan as *domain.Visibility (nullable).
+//
+// tagged is the owner-tracking physical-label flag added by migration
+// 0017 (mi-n28q); scans as bool (NOT NULL DEFAULT false).
 const specimenColumns = `id, type, catalog_number, name, description, visibility,
 		author_id, acquired_at, acquired_from, price_cents, source_notes,
 		locality_text, locality, mass_g::double precision, dimensions, type_data,
 		main_image_id, visibility_price, visibility_acquired_from, visibility_images,
-		created_at, updated_at`
+		tagged, created_at, updated_at`
 
 // Create inserts a new specimen. Caller has already populated s.ID
 // (UUIDv7), CreatedAt, UpdatedAt; author_id is taken from auth ctx
@@ -65,20 +68,20 @@ func (r *SpecimenPostgres) Create(ctx context.Context, tx domain.Tx, s domain.Sp
 			author_id, acquired_at, acquired_from, price_cents, source_notes,
 			locality_text, locality, mass_g, dimensions, type_data,
 			main_image_id, visibility_price, visibility_acquired_from, visibility_images,
-			created_at, updated_at
+			tagged, created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10, $11,
 			$12, $13, $14, $15, $16,
 			$17, $18, $19, $20,
-			$21, $22
+			$21, $22, $23
 		)`
 	_, err = exec.Exec(ctx, q,
 		s.ID, string(s.Type), s.CatalogNumber, s.Name, s.Description, string(s.Visibility),
 		user.ID, s.AcquiredAt, s.AcquiredFrom, s.PriceCents, s.SourceNotes,
 		s.LocalityText, locality, s.MassG, dimensions, typeData,
 		s.MainImageID, visibilityArg(s.VisibilityPrice), visibilityArg(s.VisibilityAcquiredFrom), visibilityArg(s.VisibilityImages),
-		s.CreatedAt, s.UpdatedAt,
+		s.Tagged, s.CreatedAt, s.UpdatedAt,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -143,14 +146,15 @@ func (r *SpecimenPostgres) Update(ctx context.Context, tx domain.Tx, s domain.Sp
 			visibility_price           = $16,
 			visibility_acquired_from   = $17,
 			visibility_images          = $18,
-			updated_at                 = $19
-		 WHERE id = $1 AND type = $20`
+			tagged                     = $19,
+			updated_at                 = $20
+		 WHERE id = $1 AND type = $21`
 	tag, err := exec.Exec(ctx, q,
 		s.ID, s.CatalogNumber, s.Name, s.Description, string(s.Visibility),
 		s.AcquiredAt, s.AcquiredFrom, s.PriceCents, s.SourceNotes,
 		s.LocalityText, locality, s.MassG, dimensions, typeData,
 		s.MainImageID, visibilityArg(s.VisibilityPrice), visibilityArg(s.VisibilityAcquiredFrom), visibilityArg(s.VisibilityImages),
-		s.UpdatedAt, string(s.Type),
+		s.Tagged, s.UpdatedAt, string(s.Type),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -415,6 +419,13 @@ func applySharedFilters(
 		where = append(where, fmt.Sprintf("specimens.author_id = $%d", len(args)+1))
 		args = append(args, *filter.OwnerID)
 	}
+	if filter.Tagged != nil {
+		// Owner-tracking physical-label filter (mi-n28q). Callers
+		// should only set this when scope=mine is active so non-owners
+		// can't use it to probe other users' label status.
+		where = append(where, fmt.Sprintf("tagged = $%d", len(args)+1))
+		args = append(args, *filter.Tagged)
+	}
 	return where, args
 }
 
@@ -430,7 +441,7 @@ func scanSpecimen(s rowScanner) (domain.Specimen, error) {
 		&sp.AuthorID, &sp.AcquiredAt, &sp.AcquiredFrom, &sp.PriceCents, &sp.SourceNotes,
 		&sp.LocalityText, &locality, &sp.MassG, &dimensions, &typeData,
 		&sp.MainImageID, &visPrice, &visAcq, &visImg,
-		&sp.CreatedAt, &sp.UpdatedAt,
+		&sp.Tagged, &sp.CreatedAt, &sp.UpdatedAt,
 	); err != nil {
 		return domain.Specimen{}, err
 	}
@@ -473,7 +484,7 @@ func scanSpecimenRanked(rs pgx.Rows) (domain.Specimen, float32, error) {
 		&sp.AuthorID, &sp.AcquiredAt, &sp.AcquiredFrom, &sp.PriceCents, &sp.SourceNotes,
 		&sp.LocalityText, &locality, &sp.MassG, &dimensions, &typeData,
 		&sp.MainImageID, &visPrice, &visAcq, &visImg,
-		&sp.CreatedAt, &sp.UpdatedAt, &rank,
+		&sp.Tagged, &sp.CreatedAt, &sp.UpdatedAt, &rank,
 	); err != nil {
 		return domain.Specimen{}, 0, err
 	}

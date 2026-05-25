@@ -10,6 +10,10 @@
     acquired_after?: string;
     acquired_before?: string;
     collector_id?: string;
+    // tagged filter (mi-n28q). Owner-only — only shown in the
+    // "my collection" view (scope=mine). 'false' = untagged /
+    // "what still needs a label?"; 'true' = already tagged.
+    tagged?: 'true' | 'false';
   }
 
   export const TYPE_OPTIONS: Array<{ value: 'mineral' | 'rock' | 'meteorite'; label: string }> = [
@@ -39,6 +43,7 @@
     if (value.acquired_after) n += 1;
     if (value.acquired_before) n += 1;
     if (value.collector_id) n += 1;
+    if (value.tagged) n += 1;
     return n;
   }
 </script>
@@ -53,9 +58,13 @@
   interface Props {
     value: SpecimenFiltersValue;
     onChange: (next: SpecimenFiltersValue) => void;
+    // When true, shows the "Physical label" (tagged) filter chips.
+    // Only meaningful in scope=mine ("my collection") view since
+    // tagged is owner-only metadata (mi-n28q).
+    showTaggedFilter?: boolean;
   }
 
-  const { value, onChange }: Props = $props();
+  const { value, onChange, showTaggedFilter = false }: Props = $props();
 
   // Search input is locally controlled and debounced — only the
   // settled value flows up to `onChange`. Initialised from the
@@ -119,6 +128,10 @@
 
   function setCatalog(state: 'true' | 'false' | undefined) {
     emit({ has_catalog_number: state });
+  }
+
+  function setTagged(state: 'true' | 'false' | undefined) {
+    emit({ tagged: state });
   }
 
   function setAcquiredAfter(e: Event) {
@@ -496,6 +509,52 @@
           </div>
         {/if}
       </fieldset>
+
+      <!-- Physical label (tagged) filter — owner-only (mi-n28q).
+           Only shown in the "my collection" view where scope=mine is
+           active, because the tagged field is owner-only metadata. -->
+      {#if showTaggedFilter}
+        <fieldset class="space-y-1.5 sm:col-span-2">
+          <legend
+            class="text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]"
+          >
+            Physical label
+          </legend>
+          <div
+            class="flex flex-wrap gap-1.5"
+            role="group"
+            aria-label="Filter by physical label status"
+          >
+            <button
+              type="button"
+              class={chipClass(!value.tagged)}
+              onclick={() => setTagged(undefined)}
+              data-testid="filter-tagged-all"
+              aria-pressed={!value.tagged}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              class={chipClass(value.tagged === 'false')}
+              onclick={() => setTagged('false')}
+              data-testid="filter-tagged-untagged"
+              aria-pressed={value.tagged === 'false'}
+            >
+              Needs label
+            </button>
+            <button
+              type="button"
+              class={chipClass(value.tagged === 'true')}
+              onclick={() => setTagged('true')}
+              data-testid="filter-tagged-tagged"
+              aria-pressed={value.tagged === 'true'}
+            >
+              Already labeled
+            </button>
+          </div>
+        </fieldset>
+      {/if}
     </div>
   {/if}
 </div>

@@ -172,6 +172,12 @@ export const specimenBaseSchema = z.object({
   visibility_price: visibilityFieldSchema,
   visibility_acquired_from: visibilityFieldSchema,
   visibility_images: visibilityFieldSchema,
+
+  // Owner-only physical-label tracking flag (mi-n28q). Not type-specific;
+  // applies to all specimen kinds. Omitted from the API response for
+  // non-owners, so on the edit form it starts false and is only sent
+  // when the owner explicitly toggles it.
+  tagged: z.boolean(),
 });
 
 // Full schema = base + all per-type fields. We always validate the
@@ -253,6 +259,7 @@ export function emptyFormValues(type: SpecimenType = 'mineral'): SpecimenFormVal
     visibility_price: VISIBILITY_INHERIT,
     visibility_acquired_from: VISIBILITY_INHERIT,
     visibility_images: VISIBILITY_INHERIT,
+    tagged: false,
   };
 }
 
@@ -310,6 +317,10 @@ export function specimenToFormValues(s: SpecimenView): SpecimenFormValues {
   v.visibility_price = s.visibility_price ?? VISIBILITY_INHERIT;
   v.visibility_acquired_from = s.visibility_acquired_from ?? VISIBILITY_INHERIT;
   v.visibility_images = s.visibility_images ?? VISIBILITY_INHERIT;
+  // tagged is owner-only: the API omits it for non-owners. The edit
+  // form is only reachable by the owner, so s.tagged is always present
+  // here; fall back to false defensively.
+  v.tagged = s.tagged ?? false;
   v.acquired_at = s.acquired_at ? toDateInputValue(s.acquired_at) : '';
   v.acquired_from = s.acquired_from ?? '';
   v.price_dollars = s.price_cents == null ? '' : (s.price_cents / 100).toString();
@@ -405,6 +416,10 @@ export function formToCreateBody(values: SpecimenFormValues): CreateBody {
   const td = buildTypeData(values);
   if (td) body.type_data = td;
 
+  // tagged is owner metadata — include it explicitly so a new
+  // specimen created via the form reflects the toggle state.
+  if (values.tagged) body.tagged = true;
+
   return body;
 }
 
@@ -481,6 +496,12 @@ export function formToPatchBody(initial: SpecimenView, values: SpecimenFormValue
   if (afDiff !== UNCHANGED) body.visibility_acquired_from = afDiff;
   const imgDiff = diffVisibilityField(values.visibility_images, initial.visibility_images ?? null);
   if (imgDiff !== UNCHANGED) body.visibility_images = imgDiff;
+
+  // tagged: only send when changed (mi-n28q). initial.tagged is
+  // undefined for non-owners (field redacted); the edit form is
+  // only reachable by the owner so treat undefined-initial as false.
+  const initTagged = initial.tagged ?? false;
+  if (values.tagged !== initTagged) body.tagged = values.tagged;
 
   return body;
 }
