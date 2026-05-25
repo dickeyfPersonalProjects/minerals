@@ -119,6 +119,11 @@ type SpecimenFilter struct {
 	// filter (specimenListScope) already permits a caller's own rows
 	// regardless of visibility.
 	OwnerID *uuid.UUID
+	// Tagged filters by the owner-tracking tagged flag (mi-n28q).
+	// nil disables the filter; true returns only tagged specimens;
+	// false returns only untagged specimens. Owner-only metadata —
+	// callers should only set this when the owner is in scope.
+	Tagged *bool
 }
 
 // Locality is the structured side of specimens.locality. All fields
@@ -171,8 +176,13 @@ type Specimen struct {
 	VisibilityPrice        *Visibility
 	VisibilityAcquiredFrom *Visibility
 	VisibilityImages       *Visibility
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	// Tagged is the owner-only physical-labeling tracking flag
+	// (mi-n28q / migration 0017). true means the owner has already
+	// applied a QR-code or other physical label to this specimen.
+	// Default false. Owner-only: never shown to non-owners.
+	Tagged    bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // PhotoKind discriminates the lighting condition a photo was taken

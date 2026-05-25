@@ -179,11 +179,18 @@ type SpecimenView struct {
 	VisibilityPrice        *domain.Visibility `json:"visibility_price,omitempty" enum:"private,unlisted,public" doc:"Per-field visibility override for price. Null/absent falls through to the owner's default."`
 	VisibilityAcquiredFrom *domain.Visibility `json:"visibility_acquired_from,omitempty" enum:"private,unlisted,public" doc:"Per-field visibility override for acquired_from. Null/absent falls through to the owner's default."`
 	VisibilityImages       *domain.Visibility `json:"visibility_images,omitempty" enum:"private,unlisted,public" doc:"Per-field visibility override governing photos that do not set their own visibility. Null/absent falls through to the specimen's overall visibility, then the owner's default."`
-	CreatedAt              time.Time          `json:"created_at" doc:"RFC 3339 creation timestamp."`
-	UpdatedAt              time.Time          `json:"updated_at" doc:"RFC 3339 last-update timestamp."`
+	// Tagged is the owner-only physical-labeling tracking flag
+	// (mi-n28q / migration 0017). Omitted entirely for non-owners
+	// (same omit-don't-null treatment as other redacted fields);
+	// present as false for owners who haven't tagged their specimen.
+	// nil pointer = field was redacted (viewer is not the owner).
+	Tagged    *bool     `json:"tagged,omitempty" doc:"Owner-only flag: true when the owner has applied a physical QR-code or other label to this specimen. Omitted for non-owners. Default false."`
+	CreatedAt time.Time `json:"created_at" doc:"RFC 3339 creation timestamp."`
+	UpdatedAt time.Time `json:"updated_at" doc:"RFC 3339 last-update timestamp."`
 }
 
 func toSpecimenView(s domain.Specimen) SpecimenView {
+	tagged := s.Tagged // capture bool for addressability
 	return SpecimenView{
 		ID:                     s.ID,
 		Type:                   s.Type,
@@ -205,6 +212,7 @@ func toSpecimenView(s domain.Specimen) SpecimenView {
 		VisibilityPrice:        s.VisibilityPrice,
 		VisibilityAcquiredFrom: s.VisibilityAcquiredFrom,
 		VisibilityImages:       s.VisibilityImages,
+		Tagged:                 &tagged,
 		CreatedAt:              s.CreatedAt,
 		UpdatedAt:              s.UpdatedAt,
 	}
@@ -223,6 +231,7 @@ type listSpecimensInput struct {
 	CollectorID      string `query:"collector_id" doc:"Filter by collector: returns specimens that have the given collector anywhere in their chain (mi-zv3 / C-3)."`
 	Q                string `query:"q" doc:"Full-text search; when present, ordering switches to ts_rank DESC and any cursor previously issued under default ordering becomes invalid."`
 	Scope            string `query:"scope" enum:"mine" doc:"When 'mine', restrict the list to the authenticated caller's own specimens across all visibilities (the 'browse my collection' view, mi-xue7). Anonymous callers receive an empty list (per CONTRACT.md §13: list endpoints never return 401)."`
+	Tagged           string `query:"tagged" enum:"true,false" doc:"Owner-only filter: 'true' returns only specimens the owner has physically labeled; 'false' returns only unlabeled ones (the 'what still needs a tag?' view, mi-n28q). Only meaningful with scope=mine; ignored for non-owners. Omit to disable the filter."`
 }
 
 type listSpecimensOutput struct {
@@ -261,6 +270,7 @@ type createSpecimenBody struct {
 	MassG         *float64            `json:"mass_g,omitempty" doc:"Mass in grams."`
 	Dimensions    *domain.Dimensions  `json:"dimensions,omitempty" doc:"Structured dimensions."`
 	TypeData      SpecimenTypeData    `json:"type_data,omitempty" doc:"Type-specific fields; shape selected by the type field."`
+	Tagged        *bool               `json:"tagged,omitempty" doc:"Owner-only physical-label tracking flag (mi-n28q). true means the owner has already applied a QR-code or other physical label to this specimen. Defaults to false."`
 }
 
 type createSpecimenOutput struct {
@@ -299,6 +309,7 @@ type patchSpecimenBody struct {
 	VisibilityPrice        VisibilityPatch `json:"visibility_price,omitempty" doc:"Per-field visibility for price. Omit to leave unchanged; pass null to clear (fall through to the owner default); pass an enum value to override."`
 	VisibilityAcquiredFrom VisibilityPatch `json:"visibility_acquired_from,omitempty" doc:"Per-field visibility for acquired_from. Same semantics as visibility_price."`
 	VisibilityImages       VisibilityPatch `json:"visibility_images,omitempty" doc:"Specimen-level default visibility for photos that do not set their own. Same semantics as visibility_price."`
+	Tagged                 *bool           `json:"tagged,omitempty" doc:"Owner-only physical-label tracking flag (mi-n28q). Omit to leave unchanged; pass true/false to set."`
 }
 
 type deleteSpecimenInput struct {
@@ -453,6 +464,24 @@ func (s *SpecimenService) list(ctx context.Context, in *listSpecimensInput) (*li
 		}
 		owner := viewer.ID
 		filter.OwnerID = &owner
+
+		// tagged filter is owner-only metadata — only apply it when
+		// scope=mine is active so we don't let non-owners probe other
+		// users' label status via the public list endpoint.
+		switch in.Tagged {
+		case "true":
+			yes := true
+			filter.Tagged = &yes
+		case "false":
+			no := false
+			filter.Tagged = &no
+		case "":
+			// filter disabled
+		default:
+			return nil, newAPIError(http.StatusBadRequest, "invalid_tagged",
+				"tagged must be true or false",
+				map[string]any{"field": "tagged"})
+		}
 	}
 
 	page := domain.Page{Limit: in.Limit, Cursor: in.Cursor}
@@ -523,6 +552,10 @@ func (s *SpecimenService) create(ctx context.Context, in *createSpecimenInput) (
 	}
 
 	now := time.Now().UTC()
+	tagged := false
+	if b.Tagged != nil {
+		tagged = *b.Tagged
+	}
 	sp := domain.Specimen{
 		ID:            domain.NewID(),
 		Type:          b.Type,
@@ -540,6 +573,7 @@ func (s *SpecimenService) create(ctx context.Context, in *createSpecimenInput) (
 		MassG:         b.MassG,
 		Dimensions:    b.Dimensions,
 		TypeData:      typeDataBytes,
+		Tagged:        tagged,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
@@ -654,6 +688,9 @@ func (s *SpecimenService) patch(ctx context.Context, in *patchSpecimenInput) (*s
 	}
 	if err := applyVisibilityPatch(b.VisibilityImages, "visibility_images", &current.VisibilityImages); err != nil {
 		return nil, err
+	}
+	if b.Tagged != nil {
+		current.Tagged = *b.Tagged
 	}
 
 	current.UpdatedAt = time.Now().UTC()

@@ -753,6 +753,8 @@ export interface components {
             price_cents?: number;
             /** @description Free-form provenance notes. */
             source_notes?: string;
+            /** @description Owner-only physical-label tracking flag (mi-n28q). true means the owner has already applied a QR-code or other physical label to this specimen. Defaults to false. */
+            tagged?: boolean;
             /**
              * @description Specimen kind. Immutable after creation.
              * @enum {string}
@@ -1083,6 +1085,8 @@ export interface components {
             price_cents?: number;
             /** @description Omit to leave unchanged. */
             source_notes?: string;
+            /** @description Owner-only physical-label tracking flag (mi-n28q). Omit to leave unchanged; pass true/false to set. */
+            tagged?: boolean;
             /**
              * @description Sending a value other than the stored type is rejected with 409 (immutable per design §2).
              * @enum {string}
@@ -1380,6 +1384,8 @@ export interface components {
             price_cents?: number;
             /** @description Free-form provenance notes. */
             source_notes: string | null;
+            /** @description Owner-only flag: true when the owner has applied a physical QR-code or other label to this specimen. Omitted for non-owners. Default false. */
+            tagged?: boolean;
             /**
              * @description Specimen kind discriminator (immutable after creation).
              * @enum {string}
@@ -3300,6 +3306,8 @@ export interface operations {
                 q?: string;
                 /** @description When 'mine', restrict the list to the authenticated caller's own specimens across all visibilities (the 'browse my collection' view, mi-xue7). Anonymous callers receive an empty list (per CONTRACT.md §13: list endpoints never return 401). */
                 scope?: "mine";
+                /** @description Owner-only filter: 'true' returns only specimens the owner has physically labeled; 'false' returns only unlabeled ones (the 'what still needs a tag?' view, mi-n28q). Only meaningful with scope=mine; ignored for non-owners. Omit to disable the filter. */
+                tagged?: "true" | "false";
             };
             header?: never;
             path?: never;

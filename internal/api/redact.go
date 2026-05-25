@@ -72,6 +72,13 @@ func (r redactor) redactSpecimen(ctx context.Context, sp domain.Specimen) Specim
 	if !r.canSeeField(ctx, sp, visibility.ResolveScalar(visibility.FieldCatalogNumber, sp, owner).Visibility) {
 		view.CatalogNumber = nil
 	}
+	// tagged is owner-only metadata (mi-n28q): always treated as
+	// private visibility. Non-owners get nil (omit-don't-null —
+	// indistinguishable from "field never sent", a deliberate privacy
+	// property matching the other redacted fields).
+	if !r.canSeeField(ctx, sp, domain.VisibilityPrivate) {
+		view.Tagged = nil
+	}
 	return view
 }
 

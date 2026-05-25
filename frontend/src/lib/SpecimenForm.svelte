@@ -713,6 +713,27 @@
     </div>
   </fieldset>
 
+  <!-- Physical-label tracking (mi-n28q). Owner-only toggle: marks whether
+       the owner has already applied a QR-code or other physical label to
+       this specimen. Only meaningful to the owner so we show it on the edit
+       form without visibility controls. -->
+  <fieldset class="space-y-2" data-testid="tagged-fieldset">
+    <legend class="text-sm font-medium text-[var(--color-text)]">Physical label</legend>
+    <label class="flex items-center gap-2 text-sm text-[var(--color-text)]">
+      <input
+        type="checkbox"
+        name="tagged"
+        checked={$data.tagged}
+        data-testid="tagged-checkbox"
+        class="text-[var(--color-accent)]"
+      />
+      Tagged — physical QR-code or label applied
+    </label>
+    <p class="text-xs text-[var(--color-text-muted)]">
+      Only visible to you. Use this to track which specimens still need a physical label.
+    </p>
+  </fieldset>
+
   {#if $data.type === 'mineral'}
     <fieldset class="space-y-3" data-testid="mineral-fields">
       <legend class="text-sm font-medium text-[var(--color-text)]">Mineralogy</legend>
