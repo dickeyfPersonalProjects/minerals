@@ -820,210 +820,221 @@
       </div>
     </header>
 
-    {#if photos.length > 0}
-      <div
-        class="flex flex-wrap items-center gap-2"
-        role="group"
-        aria-label="Filter photos by kind"
-        data-testid="photo-kind-filter"
-      >
-        {#each kindFilterOptions as opt (opt.value)}
-          {#if opt.value === 'all' || opt.count > 0}
-            {@const active = kindFilter === opt.value}
-            <button
-              type="button"
-              onclick={() => (kindFilter = opt.value)}
-              data-testid={`photo-kind-filter-${opt.value}`}
-              data-active={active}
-              aria-pressed={active}
-              class="rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition {active
-                ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-fg)]'
-                : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]'}"
-            >
-              {opt.label}
-              <span class="ml-1 font-mono text-[10px] opacity-70">{opt.count}</span>
-            </button>
-          {/if}
-        {/each}
-      </div>
-    {/if}
-
-    {#if heroPhoto}
-      {@const heroKind: PhotoKind = (heroPhoto.kind as PhotoKind | undefined) ?? 'visible'}
-      {@const heroIsMain =
-        specimen.main_image_id != null && heroPhoto.file_id === specimen.main_image_id}
-      <div class="group relative">
-        <button
-          type="button"
-          class="block w-full overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
-          onclick={() => openLightboxForPhoto(heroPhoto)}
-          aria-label="Open photo viewer"
-          data-testid="hero-photo"
-        >
-          <img
-            src={`/api/v1/photos/${heroPhoto.id}/display`}
-            alt={`Photo of ${specimen.name}`}
-            class="block h-auto w-full transition group-hover:opacity-95"
-            loading="eager"
-          />
-        </button>
-        {#if heroKind !== 'visible'}
-          <span
-            class="pointer-events-none absolute left-2 top-2 rounded-full bg-black/65 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white"
-            data-testid="hero-photo-kind-badge"
-            data-kind={heroKind}
-          >
-            {PHOTO_KIND_LABELS[heroKind]}
-          </span>
-        {/if}
-        {#if heroIsMain}
-          <span
-            class="pointer-events-none absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-amber-500/90 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow"
-            data-testid="hero-photo-main-badge"
-            aria-label="Main image"
-          >
-            ★ Main
-          </span>
-        {:else if $isAuthenticated}
-          <button
-            type="button"
-            onclick={() => setAsMain(heroPhoto.file_id)}
-            disabled={settingMain}
-            data-testid="hero-photo-set-main"
-            class="absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-amber-500 focus-visible:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            ★ Set as main
-          </button>
-        {/if}
-        {#if $isAuthenticated}
+    <!--
+      Two-column layout (mi-tjij): the DETAILS / INFORMATION column
+      leads; images follow. The images column is kept FIRST in source
+      so the DOM / tab order is unchanged from before this reorder, but
+      it is pushed to the second visual slot with `order-2` while the
+      info column gets `order-1`. On narrow viewports the single-column
+      grid stacks the children by `order` (info first, images below); on
+      wide viewports the two-column grid places info left, images right.
+    -->
+    <div class="grid gap-8 lg:grid-cols-[3fr_2fr]">
+      <div class="order-2 space-y-6 lg:self-start" data-testid="images-column">
+        {#if photos.length > 0}
           <div
-            class="absolute right-2 top-2 flex items-center gap-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
-            data-testid="hero-photo-actions"
+            class="flex flex-wrap items-center gap-2"
+            role="group"
+            aria-label="Filter photos by kind"
+            data-testid="photo-kind-filter"
           >
-            <button
-              type="button"
-              onclick={() => requestEditVisibility(heroPhoto.id)}
-              aria-label="Edit photo privacy"
-              data-testid="hero-photo-edit-visibility"
-              class="rounded-full bg-black/55 px-2 py-1 text-xs text-white hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)]"
-            >
-              Privacy
-            </button>
-            <button
-              type="button"
-              onclick={() => requestEditKind(heroPhoto.id)}
-              aria-label="Edit photo type"
-              data-testid="hero-photo-edit-kind"
-              class="rounded-full bg-black/55 px-2 py-1 text-xs text-white hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)]"
-            >
-              Edit type
-            </button>
-            <button
-              type="button"
-              onclick={() => requestCropPhoto(heroPhoto.id)}
-              aria-label="Crop / Rotate photo"
-              data-testid="hero-photo-crop"
-              class="rounded-full bg-black/55 px-2 py-1 text-xs text-white hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)]"
-            >
-              Crop / Rotate
-            </button>
-            <button
-              type="button"
-              onclick={() => requestDeletePhoto(heroPhoto.id)}
-              aria-label="Delete photo"
-              data-testid="hero-photo-delete"
-              class="rounded-full bg-black/55 px-2 py-1 text-xs text-white hover:bg-red-600"
-            >
-              ✕
-            </button>
-          </div>
-        {/if}
-      </div>
-
-      {#if restPhotos.length > 0}
-        <ul class="flex flex-wrap gap-3" data-testid="photo-gallery">
-          {#each restPhotos as photo (photo.id)}
-            {@const thumbKind: PhotoKind = (photo.kind as PhotoKind | undefined) ?? 'visible'}
-            {@const isMain =
-              specimen.main_image_id != null && photo.file_id === specimen.main_image_id}
-            <li class="contents">
-              <div class="group relative">
+            {#each kindFilterOptions as opt (opt.value)}
+              {#if opt.value === 'all' || opt.count > 0}
+                {@const active = kindFilter === opt.value}
                 <button
                   type="button"
-                  class="block h-20 w-20 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] transition hover:border-[var(--color-accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
-                  onclick={() => openLightboxForPhoto(photo)}
-                  aria-label="View photo"
-                  data-testid="gallery-thumb"
+                  onclick={() => (kindFilter = opt.value)}
+                  data-testid={`photo-kind-filter-${opt.value}`}
+                  data-active={active}
+                  aria-pressed={active}
+                  class="rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition {active
+                    ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-fg)]'
+                    : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]'}"
                 >
-                  <img
-                    src={`/api/v1/photos/${photo.id}/thumb`}
-                    alt=""
-                    class="h-full w-full object-cover"
-                    loading="lazy"
-                  />
+                  {opt.label}
+                  <span class="ml-1 font-mono text-[10px] opacity-70">{opt.count}</span>
                 </button>
-                {#if thumbKind !== 'visible'}
-                  <span
-                    class="pointer-events-none absolute bottom-1 left-1 rounded bg-black/70 px-1 text-[9px] font-semibold uppercase leading-3 tracking-wide text-white"
-                    data-testid="gallery-thumb-kind-badge"
-                    data-kind={thumbKind}
-                  >
-                    {PHOTO_KIND_LABELS[thumbKind]}
-                  </span>
-                {/if}
-                {#if isMain}
-                  <span
-                    class="pointer-events-none absolute right-1 bottom-1 rounded bg-amber-500/90 px-1 text-[9px] font-semibold uppercase leading-4 tracking-wide text-white shadow"
-                    data-testid="gallery-thumb-main-badge"
-                    aria-label="Main image"
-                  >
-                    ★ Main
-                  </span>
-                {:else if $isAuthenticated}
-                  <button
-                    type="button"
-                    onclick={() => setAsMain(photo.file_id)}
-                    disabled={settingMain}
-                    aria-label="Set as main image"
-                    data-testid="gallery-thumb-set-main"
-                    class="absolute right-1 bottom-1 rounded-full bg-black/65 px-1.5 text-[10px] leading-5 text-white opacity-0 transition-opacity hover:bg-amber-500 focus-visible:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    ★
-                  </button>
-                {/if}
-                {#if $isAuthenticated}
-                  <button
-                    type="button"
-                    onclick={() => requestEditVisibility(photo.id)}
-                    aria-label="Edit photo privacy"
-                    data-testid="gallery-thumb-edit-visibility"
-                    class="absolute left-1 top-1 rounded-full bg-black/65 px-1.5 text-[10px] leading-5 text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
-                  >
-                    Privacy
-                  </button>
-                  <button
-                    type="button"
-                    onclick={() => requestDeletePhoto(photo.id)}
-                    aria-label="Delete photo"
-                    data-testid="gallery-thumb-delete"
-                    class="absolute right-1 top-1 rounded-full bg-black/65 px-1.5 text-[11px] leading-5 text-white opacity-0 transition-opacity hover:bg-red-600 focus-visible:opacity-100 group-hover:opacity-100"
-                  >
-                    ✕
-                  </button>
-                {/if}
+              {/if}
+            {/each}
+          </div>
+        {/if}
+
+        {#if heroPhoto}
+          {@const heroKind: PhotoKind = (heroPhoto.kind as PhotoKind | undefined) ?? 'visible'}
+          {@const heroIsMain =
+            specimen.main_image_id != null && heroPhoto.file_id === specimen.main_image_id}
+          <div class="group relative">
+            <button
+              type="button"
+              class="block w-full overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+              onclick={() => openLightboxForPhoto(heroPhoto)}
+              aria-label="Open photo viewer"
+              data-testid="hero-photo"
+            >
+              <img
+                src={`/api/v1/photos/${heroPhoto.id}/display`}
+                alt={`Photo of ${specimen.name}`}
+                class="block h-auto w-full transition group-hover:opacity-95"
+                loading="eager"
+              />
+            </button>
+            {#if heroKind !== 'visible'}
+              <span
+                class="pointer-events-none absolute left-2 top-2 rounded-full bg-black/65 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white"
+                data-testid="hero-photo-kind-badge"
+                data-kind={heroKind}
+              >
+                {PHOTO_KIND_LABELS[heroKind]}
+              </span>
+            {/if}
+            {#if heroIsMain}
+              <span
+                class="pointer-events-none absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-full bg-amber-500/90 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow"
+                data-testid="hero-photo-main-badge"
+                aria-label="Main image"
+              >
+                ★ Main
+              </span>
+            {:else if $isAuthenticated}
+              <button
+                type="button"
+                onclick={() => setAsMain(heroPhoto.file_id)}
+                disabled={settingMain}
+                data-testid="hero-photo-set-main"
+                class="absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-1 text-xs text-white opacity-0 transition-opacity hover:bg-amber-500 focus-visible:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                ★ Set as main
+              </button>
+            {/if}
+            {#if $isAuthenticated}
+              <div
+                class="absolute right-2 top-2 flex items-center gap-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+                data-testid="hero-photo-actions"
+              >
+                <button
+                  type="button"
+                  onclick={() => requestEditVisibility(heroPhoto.id)}
+                  aria-label="Edit photo privacy"
+                  data-testid="hero-photo-edit-visibility"
+                  class="rounded-full bg-black/55 px-2 py-1 text-xs text-white hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)]"
+                >
+                  Privacy
+                </button>
+                <button
+                  type="button"
+                  onclick={() => requestEditKind(heroPhoto.id)}
+                  aria-label="Edit photo type"
+                  data-testid="hero-photo-edit-kind"
+                  class="rounded-full bg-black/55 px-2 py-1 text-xs text-white hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)]"
+                >
+                  Edit type
+                </button>
+                <button
+                  type="button"
+                  onclick={() => requestCropPhoto(heroPhoto.id)}
+                  aria-label="Crop / Rotate photo"
+                  data-testid="hero-photo-crop"
+                  class="rounded-full bg-black/55 px-2 py-1 text-xs text-white hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)]"
+                >
+                  Crop / Rotate
+                </button>
+                <button
+                  type="button"
+                  onclick={() => requestDeletePhoto(heroPhoto.id)}
+                  aria-label="Delete photo"
+                  data-testid="hero-photo-delete"
+                  class="rounded-full bg-black/55 px-2 py-1 text-xs text-white hover:bg-red-600"
+                >
+                  ✕
+                </button>
               </div>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    {/if}
+            {/if}
+          </div>
 
-    {#if $isAuthenticated}
-      <PhotoUploader {specimenId} onUploaded={() => refetchPhotos(specimenId)} />
-    {/if}
+          {#if restPhotos.length > 0}
+            <ul class="flex flex-wrap gap-3" data-testid="photo-gallery">
+              {#each restPhotos as photo (photo.id)}
+                {@const thumbKind: PhotoKind = (photo.kind as PhotoKind | undefined) ?? 'visible'}
+                {@const isMain =
+                  specimen.main_image_id != null && photo.file_id === specimen.main_image_id}
+                <li class="contents">
+                  <div class="group relative">
+                    <button
+                      type="button"
+                      class="block h-20 w-20 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] transition hover:border-[var(--color-accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                      onclick={() => openLightboxForPhoto(photo)}
+                      aria-label="View photo"
+                      data-testid="gallery-thumb"
+                    >
+                      <img
+                        src={`/api/v1/photos/${photo.id}/thumb`}
+                        alt=""
+                        class="h-full w-full object-cover"
+                        loading="lazy"
+                      />
+                    </button>
+                    {#if thumbKind !== 'visible'}
+                      <span
+                        class="pointer-events-none absolute bottom-1 left-1 rounded bg-black/70 px-1 text-[9px] font-semibold uppercase leading-3 tracking-wide text-white"
+                        data-testid="gallery-thumb-kind-badge"
+                        data-kind={thumbKind}
+                      >
+                        {PHOTO_KIND_LABELS[thumbKind]}
+                      </span>
+                    {/if}
+                    {#if isMain}
+                      <span
+                        class="pointer-events-none absolute right-1 bottom-1 rounded bg-amber-500/90 px-1 text-[9px] font-semibold uppercase leading-4 tracking-wide text-white shadow"
+                        data-testid="gallery-thumb-main-badge"
+                        aria-label="Main image"
+                      >
+                        ★ Main
+                      </span>
+                    {:else if $isAuthenticated}
+                      <button
+                        type="button"
+                        onclick={() => setAsMain(photo.file_id)}
+                        disabled={settingMain}
+                        aria-label="Set as main image"
+                        data-testid="gallery-thumb-set-main"
+                        class="absolute right-1 bottom-1 rounded-full bg-black/65 px-1.5 text-[10px] leading-5 text-white opacity-0 transition-opacity hover:bg-amber-500 focus-visible:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        ★
+                      </button>
+                    {/if}
+                    {#if $isAuthenticated}
+                      <button
+                        type="button"
+                        onclick={() => requestEditVisibility(photo.id)}
+                        aria-label="Edit photo privacy"
+                        data-testid="gallery-thumb-edit-visibility"
+                        class="absolute left-1 top-1 rounded-full bg-black/65 px-1.5 text-[10px] leading-5 text-white opacity-0 transition-opacity hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-fg)] focus-visible:opacity-100 group-hover:opacity-100"
+                      >
+                        Privacy
+                      </button>
+                      <button
+                        type="button"
+                        onclick={() => requestDeletePhoto(photo.id)}
+                        aria-label="Delete photo"
+                        data-testid="gallery-thumb-delete"
+                        class="absolute right-1 top-1 rounded-full bg-black/65 px-1.5 text-[11px] leading-5 text-white opacity-0 transition-opacity hover:bg-red-600 focus-visible:opacity-100 group-hover:opacity-100"
+                      >
+                        ✕
+                      </button>
+                    {/if}
+                  </div>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        {/if}
 
-    <div class="grid gap-8 lg:grid-cols-[2fr_1fr]">
-      <div class="space-y-8">
+        {#if $isAuthenticated}
+          <PhotoUploader {specimenId} onUploaded={() => refetchPhotos(specimenId)} />
+        {/if}
+      </div>
+
+      <div class="order-1 space-y-8" data-testid="info-column">
         {#if specimen.description.trim().length > 0}
           <section data-testid="description">
             <h2 class="mb-2 font-serif text-lg font-semibold text-[var(--color-text)]">
@@ -1140,9 +1151,7 @@
             </ol>
           {/if}
         </section>
-      </div>
 
-      <aside class="space-y-6">
         {#if phys.length > 0}
           <section data-testid="properties-section">
             <h2 class="mb-2 font-serif text-base font-semibold text-[var(--color-text)]">
@@ -1272,7 +1281,7 @@
             </p>
           </section>
         {/if}
-      </aside>
+      </div>
     </div>
   </article>
 

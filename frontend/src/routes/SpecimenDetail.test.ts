@@ -263,6 +263,34 @@ describe('SpecimenDetail route', () => {
     expect(props).toHaveTextContent('80 × 50 × 30 mm');
   });
 
+  // mi-tjij: the page is a two-column layout — a DETAILS/INFORMATION
+  // column and an images column. Info leads on every viewport (info
+  // first on narrow, left column on wide) via CSS `order`, while the
+  // images column stays first in source to preserve DOM/tab order.
+  it('groups details and images into separate columns with info ordered first', async () => {
+    setupFetch({
+      specimen: specimen({ description: 'A lovely cluster.' }),
+      photos: [photo({ id: 'pppppppp-0000-0000-0000-000000000001', position: 1 })],
+    });
+
+    render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+
+    await waitFor(() => expect(screen.getByTestId('specimen-detail')).toBeInTheDocument());
+
+    const info = screen.getByTestId('info-column');
+    const images = screen.getByTestId('images-column');
+
+    // The textual details live in the info column; the gallery lives
+    // in the images column.
+    expect(info).toContainElement(screen.getByTestId('description-body'));
+    expect(info).toContainElement(screen.getByTestId('journal-section'));
+    expect(images).toContainElement(screen.getByTestId('hero-photo'));
+
+    // Info renders ahead of images on every viewport via CSS `order`.
+    expect(info.className).toContain('order-1');
+    expect(images.className).toContain('order-2');
+  });
+
   it('hides the visibility chip for private specimens and the catalog tag when absent', async () => {
     setupFetch({
       specimen: specimen({ visibility: 'private', catalog_number: null }),
