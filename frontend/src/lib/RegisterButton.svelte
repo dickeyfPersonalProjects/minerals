@@ -20,9 +20,17 @@
   });
 </script>
 
+<!--
+  Consent surfacing (mi-97kr): the enforced consent gate is Keycloak's
+  Terms and Conditions required action, which fires inside the
+  registration flow this link starts. The `title` makes the
+  expectation explicit at the signup entry point; the ToS + Privacy
+  Policy pages themselves are linked globally from the footer.
+-->
 <a
   {href}
   data-testid="register-link"
+  title="By registering you agree to our Terms of Service and Privacy Policy"
   class="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
 >
   Register

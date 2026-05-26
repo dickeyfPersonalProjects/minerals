@@ -168,6 +168,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/legal/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Legal document (privacy policy / terms of service)
+         * @description Returns the operator-approved legal document for {slug} ("privacy" or "terms") as server-rendered, sanitized HTML (CONTRACT.md §17 pipeline). Public — no authentication required.
+         */
+        get: operations["legal-document"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mineral-species": {
         parameters: {
             query?: never;
@@ -901,6 +921,20 @@ export interface components {
              * @description RFC 3339 last-update timestamp.
              */
             updated_at: string;
+        };
+        LegalView: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/LegalView.json
+             */
+            readonly $schema?: string;
+            /** @description Server-rendered, sanitized HTML (CONTRACT.md §17 pipeline). */
+            html: string;
+            /** @description URL slug: "privacy" or "terms". */
+            slug: string;
+            /** @description Human-readable document title. */
+            title: string;
         };
         Locality: {
             country?: string;
@@ -2291,6 +2325,56 @@ export interface operations {
             };
             /** @description Unsupported Media Type */
             415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "legal-document": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Document slug. */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegalView"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
