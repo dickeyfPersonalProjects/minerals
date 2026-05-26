@@ -420,10 +420,11 @@ test('fresh user lands directly on /profile/setup with no error UI', async ({ pa
     await expect(loginButton).toBeVisible();
 
     // 2. Click Login → backend 302 → Keycloak realm auth → fill the
-    //    fresh user's credentials → submit. After submission the
-    //    chain is: Keycloak 302 → backend /auth/callback (sets
-    //    HttpOnly cookie, resolves-or-creates the users row in
-    //    pending state) → 302 to the SPA at '/'.
+    //    fresh user's credentials → submit → Keycloak consent screen
+    //    (TERMS_AND_CONDITIONS required action, mi-97kr) → accept →
+    //    Keycloak 302 → backend /auth/callback (sets HttpOnly cookie,
+    //    resolves-or-creates the users row in pending state) → 302 to
+    //    the SPA at '/'.
     await loginButton.click();
     await page.waitForURL(/\/realms\/minerals\/protocol\/openid-connect\/auth/, {
       timeout: 30_000,
@@ -431,6 +432,21 @@ test('fresh user lands directly on /profile/setup with no error UI', async ({ pa
     await page.locator('#username').fill(email);
     await page.locator('#password').fill(TEST_PASSWORD);
     await page.locator('#kc-login').click();
+
+    // 2b. Handle the TERMS_AND_CONDITIONS required action (mi-97kr:
+    //     registration consent). A freshly-registered user now hits the
+    //     Keycloak consent screen between credentials submit and the
+    //     redirect back to the app. This is the new, intended flow —
+    //     consent is wired at the Keycloak level via the
+    //     TERMS_AND_CONDITIONS required action (default_action=true),
+    //     which fires for every newly self-registered user.
+    //
+    //     The consent URL contains `execution=TERMS_AND_CONDITIONS`.
+    //     Accept via the Keycloak default theme's `#kc-accept` button.
+    //     After acceptance Keycloak redirects to the backend callback
+    //     which sets the cookie and then 302s to the SPA at '/'.
+    await page.waitForURL(/TERMS_AND_CONDITIONS/, { timeout: 30_000 });
+    await page.locator('#kc-accept').click();
 
     // 3. Race the three outcomes that can win after the SPA boots
     //    on '/':
@@ -527,6 +543,13 @@ async function kcAdminToken(): Promise<string> {
 // uses: firstName/lastName are mandatory for the realm's
 // "fully set up" check, and emailVerified avoids a verify-email
 // required-action that would block the login form.
+//
+// NOTE: unlike dev-seed.sh's create_user(), this function does NOT
+// call clear_required_actions() — the pending TERMS_AND_CONDITIONS
+// required action is intentionally left in place so the test can
+// drive through the real consent screen (mi-97kr). Seeded CI users
+// have it cleared because ROPC direct-grant auth (used by smoke
+// tests) cannot complete a pending required action.
 async function createFreshKcUser(token: string, email: string, password: string): Promise<string> {
   const kc = await playwrightRequest.newContext({ baseURL: KEYCLOAK_BASE_URL });
   try {
