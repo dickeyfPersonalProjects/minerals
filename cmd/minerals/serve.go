@@ -23,6 +23,7 @@ import (
 	"github.com/dickeyfPersonalProjects/minerals/internal/config"
 	"github.com/dickeyfPersonalProjects/minerals/internal/db"
 	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
+	"github.com/dickeyfPersonalProjects/minerals/internal/incidentregister"
 	"github.com/dickeyfPersonalProjects/minerals/internal/keycloak"
 	"github.com/dickeyfPersonalProjects/minerals/internal/mindat"
 	"github.com/dickeyfPersonalProjects/minerals/internal/oidc"
@@ -74,6 +75,20 @@ func runServe(_ []string) error {
 		return fmt.Errorf("serve: init db pool: %w", err)
 	}
 	defer pool.Close()
+
+	// Law 25 confidentiality-incident register (mi-2p6i). When
+	// INCIDENT_REGISTER_DATABASE_URL is set we open a SECOND pool to that
+	// separate database and bootstrap the register's own schema there
+	// (CREATE TABLE IF NOT EXISTS — deliberately not a migrations/ file,
+	// so the app migrate/erasure paths have no name for it). Unset =>
+	// nil store, endpoints unregistered, console section stays "planned".
+	incidentReg, incidentRegPool, err := buildIncidentRegister(rootCtx, cfg)
+	if err != nil {
+		return fmt.Errorf("serve: init incident register: %w", err)
+	}
+	if incidentRegPool != nil {
+		defer incidentRegPool.Close()
+	}
 
 	store, err := storage.New(rootCtx, storage.Options{
 		Endpoint:        cfg.S3Endpoint,
@@ -201,13 +216,14 @@ func runServe(_ []string) error {
 			Sessions: bff.NewPostgresResolver(pool),
 			Identity: buildIdentityDeleter(rootCtx, cfg),
 		},
-		Users:       users,
-		Verifier:    verifier,
-		Enforcer:    enforcer,
-		BFFAuth:     bffAuth,
-		SessionMW:   buildSessionMW(cfg, oauthClient, sessions, users),
-		CSRFMW:      buildCSRFMW(oauthClient),
-		RateLimitMW: buildRateLimitMW(cfg),
+		Users:            users,
+		Verifier:         verifier,
+		Enforcer:         enforcer,
+		IncidentRegister: incidentReg,
+		BFFAuth:          bffAuth,
+		SessionMW:        buildSessionMW(cfg, oauthClient, sessions, users),
+		CSRFMW:           buildCSRFMW(oauthClient),
+		RateLimitMW:      buildRateLimitMW(cfg),
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        db.NewJournalEntryPostgres(pool),
 			Attachments:    db.NewJournalEntryFilePostgres(pool),
@@ -483,6 +499,43 @@ func buildIdentityDeleter(ctx context.Context, cfg *config.Config) domain.Identi
 	slog.Info("keycloak admin configured for account erasure",
 		"base_url", cfg.KeycloakAdminBaseURL, "realm", cfg.KeycloakRealm)
 	return admin
+}
+
+// buildIncidentRegister wires the Law 25 confidentiality-incident
+// register (mi-2p6i) when INCIDENT_REGISTER_DATABASE_URL is set. It
+// returns the store (as the api.IncidentRegister interface) and the
+// owning pool so serve can close it on shutdown. When the URL is unset
+// it returns (nil, nil, nil) — the register stays unwired, which keeps a
+// single-database `docker compose up` working.
+//
+// The URL MUST differ from DATABASE_URL: pointing both at the same
+// database would defeat the Law 25 isolation guarantee (the register
+// must survive the app's erasure flow), so an identical value is a hard
+// config error rather than a silent foot-gun. The store bootstraps its
+// own schema on the separate pool via EnsureSchema.
+func buildIncidentRegister(
+	ctx context.Context, cfg *config.Config,
+) (api.IncidentRegister, *pgxpool.Pool, error) {
+	if cfg.IncidentRegisterDatabaseURL == "" {
+		slog.Info("incident register: disabled (INCIDENT_REGISTER_DATABASE_URL unset); console section stays \"planned\"")
+		return nil, nil, nil
+	}
+	if cfg.IncidentRegisterDatabaseURL == cfg.DatabaseURL {
+		return nil, nil, fmt.Errorf(
+			"INCIDENT_REGISTER_DATABASE_URL must point at a DIFFERENT database than DATABASE_URL " +
+				"(Law 25 requires the incident register be isolated from app data and the erasure flow)")
+	}
+	regPool, err := db.NewPool(ctx, cfg.IncidentRegisterDatabaseURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("incident register pool: %w", err)
+	}
+	store := incidentregister.NewStore(regPool)
+	if err := store.EnsureSchema(ctx); err != nil {
+		regPool.Close()
+		return nil, nil, fmt.Errorf("incident register schema: %w", err)
+	}
+	slog.Info("incident register: enabled (separate database)")
+	return store, regPool, nil
 }
 
 // buildCSRFMW returns the stored-synchronizer CSRF middleware only
