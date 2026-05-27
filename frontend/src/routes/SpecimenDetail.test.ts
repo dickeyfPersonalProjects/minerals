@@ -1110,5 +1110,66 @@ describe('SpecimenDetail route', () => {
       expect(screen.queryByTestId('journal-delete-button')).not.toBeInTheDocument();
       expect(screen.queryByTestId('edit-chain-button')).not.toBeInTheDocument();
     });
+
+    it('still offers the public report affordance (mi-b2q0)', async () => {
+      __resetAuthStore();
+      setupFetch({ specimen: specimen({ visibility: 'public' }) });
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await screen.findByTestId('specimen-detail');
+      // Report is internet-facing — present even for anonymous viewers.
+      expect(screen.getByTestId('report-specimen')).toBeInTheDocument();
+    });
+  });
+
+  describe('report flow (mi-b2q0)', () => {
+    it('opens the modal, POSTs the report, and closes on success', async () => {
+      setupFetch({ specimen: specimen({ visibility: 'public' }) });
+      mockPost.mockResolvedValue({
+        data: { report_id: 'rrrrrrrr-0000-0000-0000-000000000001', message: 'ok' },
+        error: undefined,
+        response: new Response(null, { status: 202 }),
+      });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await screen.findByTestId('specimen-detail');
+
+      await fireEvent.click(screen.getByTestId('report-specimen'));
+      const modal = await screen.findByTestId('report-modal');
+      expect(modal).toBeInTheDocument();
+
+      await fireEvent.change(screen.getByTestId('report-reason'), { target: { value: 'spam' } });
+      await fireEvent.input(screen.getByTestId('report-details'), {
+        target: { value: 'looks like spam' },
+      });
+      await fireEvent.click(screen.getByTestId('report-submit'));
+
+      await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+      expect(mockPost.mock.calls[0]?.[0]).toBe('/api/v1/specimens/{id}/report');
+      expect(mockPost.mock.calls[0]?.[1].body).toEqual({
+        reason: 'spam',
+        details: 'looks like spam',
+      });
+      await waitFor(() => expect(screen.queryByTestId('report-modal')).not.toBeInTheDocument());
+    });
+
+    it('keeps the modal open and surfaces the error when the report fails', async () => {
+      setupFetch({ specimen: specimen({ visibility: 'public' }) });
+      mockPost.mockResolvedValue({
+        data: undefined,
+        error: { error: { code: 'rate_limited', message: 'slow down' } },
+        response: new Response(null, { status: 429 }),
+      });
+
+      render(SpecimenDetail, { params: { id: SPECIMEN_ID } });
+      await screen.findByTestId('specimen-detail');
+
+      await fireEvent.click(screen.getByTestId('report-specimen'));
+      await screen.findByTestId('report-modal');
+      await fireEvent.click(screen.getByTestId('report-submit'));
+
+      await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+      // Modal stays open so the user can retry.
+      expect(screen.getByTestId('report-modal')).toBeInTheDocument();
+    });
   });
 });

@@ -197,6 +197,9 @@ func New(deps Deps) http.Handler {
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "legal", Description: "Public static legal documents — privacy policy + terms of service (mi-97kr). Server-rendered via the §17 markdown pipeline; no auth.",
 	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "moderation", Description: "Abuse handling for public user-generated content (mi-b2q0): public report affordance + operator force-private takedown. Post-moderation model; see docs/security/moderation.md.",
+	})
 
 	humaAPI := humago.New(mux, cfg)
 	authMW := newAuthMiddlewares(deps.Users, deps.Verifier)
@@ -214,6 +217,7 @@ func New(deps Deps) http.Handler {
 	registerAccountOperations(humaAPI, authMW, deps.Account)
 	registerAdminOperations(humaAPI, authMW, guard)
 	registerLegalOperations(humaAPI)
+	registerModerationOperations(humaAPI, authMW, guard, deps.Specimens)
 	registerSpecimenRedirect(mux)
 
 	// BFF V2 auth routes (mi-bm5b). The three routes attach to the
