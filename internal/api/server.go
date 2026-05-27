@@ -132,6 +132,14 @@ type Deps struct {
 	// path (bearer auth in an Authorization header is not subject to
 	// CSRF; cookies are).
 	CSRFMW func(http.Handler) http.Handler
+	// IncidentRegister wires the Law 25 confidentiality-incident register
+	// (mi-2p6i), backed by a store on a SEPARATE database
+	// (INCIDENT_REGISTER_DATABASE_URL). nil leaves the
+	// /api/v1/admin/incident-register routes unregistered and the admin
+	// overview reports the section as "planned" — the dev/test path that
+	// runs a single database. Production wiring in cmd/minerals sets it
+	// only when the second DB URL is configured.
+	IncidentRegister IncidentRegister
 	// RateLimitMW enforces the per-tier token-bucket limits (mi-tnru):
 	// strict per-IP on auth endpoints, per-account (or per-IP when
 	// anonymous) on reads/writes/file-serving. Composes BETWEEN
@@ -200,6 +208,9 @@ func New(deps Deps) http.Handler {
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "moderation", Description: "Abuse handling for public user-generated content (mi-b2q0): public report affordance + operator force-private takedown. Post-moderation model; see docs/security/moderation.md.",
 	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "incident-register", Description: "Law 25 confidentiality-incident register (mi-2p6i). Admin-only, append-only/tamper-evident, stored in a SEPARATE database; >=5yr retention. Gated on the §13 v2 `devops` resource.",
+	})
 
 	humaAPI := humago.New(mux, cfg)
 	authMW := newAuthMiddlewares(deps.Users, deps.Verifier)
@@ -215,9 +226,10 @@ func New(deps Deps) http.Handler {
 	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets, deps.Specimens)
 	registerProfileOperations(humaAPI, authMW, deps.Users)
 	registerAccountOperations(humaAPI, authMW, deps.Account)
-	registerAdminOperations(humaAPI, authMW, guard)
+	registerAdminOperations(humaAPI, authMW, guard, deps.IncidentRegister != nil)
 	registerLegalOperations(humaAPI)
 	registerModerationOperations(humaAPI, authMW, guard, deps.Specimens)
+	registerIncidentRegisterOperations(humaAPI, authMW, guard, deps.IncidentRegister)
 	registerSpecimenRedirect(mux)
 
 	// BFF V2 auth routes (mi-bm5b). The three routes attach to the

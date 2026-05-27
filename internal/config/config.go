@@ -22,16 +22,27 @@ type Config struct {
 	// scrape and probe traffic doesn't compete with API requests for
 	// handler capacity, and so the admin surface can stay off the
 	// public Ingress (see mi-2b1k / `kustomize/base/service.yaml`).
-	AdminPort         string
-	DatabaseURL       string
-	S3Endpoint        string
-	S3AccessKeyID     string
-	S3SecretAccessKey string
-	S3Bucket          string
-	S3Region          string
-	MaxUploadBytes    int64
-	LogLevel          string
-	Env               string
+	AdminPort   string
+	DatabaseURL string
+	// IncidentRegisterDatabaseURL is the DSN for the SEPARATE database
+	// that backs the Law 25 confidentiality-incident register (mi-2p6i).
+	// It MUST point at a different database than DATABASE_URL — that
+	// physical isolation is the legal requirement (the register survives
+	// independently of app data and the GDPR erasure flow mi-nwg5).
+	// Optional and has NO default: when unset, the register store is not
+	// wired, its admin endpoints are not registered, and the console's
+	// incident-register section stays "planned" — so a plain
+	// `docker compose up` (one database) keeps working without a second
+	// DB. Set it (prod, and dev that exercises the register) to enable.
+	IncidentRegisterDatabaseURL string
+	S3Endpoint                  string
+	S3AccessKeyID               string
+	S3SecretAccessKey           string
+	S3Bucket                    string
+	S3Region                    string
+	MaxUploadBytes              int64
+	LogLevel                    string
+	Env                         string
 	// MindatAPIKey is the credential for the Mindat REST API used by
 	// the mineral-species lookup pipeline (mi-dtg / F-1). Optional in
 	// every environment — when unset, the system falls back to
@@ -285,6 +296,9 @@ func loadFrom(get func(string) string) (*Config, error) {
 	cfg.LogLevel = orDefault(get("LOG_LEVEL"), defaultLogLevel)
 	cfg.S3Region = orDefault(get("S3_REGION"), defaultS3Region)
 	cfg.MindatAPIKey = strings.TrimSpace(get("MINDAT_API_KEY"))
+	// No default in any environment — unset means the register is
+	// unwired (section stays "planned"); see the field doc (mi-2p6i).
+	cfg.IncidentRegisterDatabaseURL = strings.TrimSpace(get("INCIDENT_REGISTER_DATABASE_URL"))
 	// OIDC_REDIRECT_URI is the canonical backend-only name (mi-kebf).
 	// For a migration window we still accept the legacy
 	// PUBLIC_OIDC_REDIRECT_URI when the new name is unset, flagging it

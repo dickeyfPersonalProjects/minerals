@@ -96,13 +96,20 @@ var adminConsoleSections = []adminConsoleSection{
 // same seam every other write/private-read handler uses.
 type adminService struct {
 	guard authzGuard
+	// incidentRegisterWired reports whether the Law 25 incident register
+	// store is configured (INCIDENT_REGISTER_DATABASE_URL set). It flips
+	// the overview's incident-register section from "planned" to
+	// "available" so the SPA shell knows the endpoints exist (mi-2p6i).
+	incidentRegisterWired bool
 }
 
 // registerAdminOperations wires the admin/devops console endpoints.
 // The console is always registered (it depends on no optional repo) —
 // the gate is what restricts access, not the route's presence.
-func registerAdminOperations(api huma.API, mws authMiddlewares, guard authzGuard) {
-	s := &adminService{guard: guard}
+// incidentRegisterWired toggles the incident-register section's status
+// in the overview manifest.
+func registerAdminOperations(api huma.API, mws authMiddlewares, guard authzGuard, incidentRegisterWired bool) {
+	s := &adminService{guard: guard, incidentRegisterWired: incidentRegisterWired}
 
 	huma.Register(api, huma.Operation{
 		OperationID: "admin-overview",
@@ -132,6 +139,24 @@ func (s *adminService) overview(ctx context.Context, _ *struct{}) (*adminOvervie
 		Console: "admin",
 		Message: "Admin/devops console shell is live. Data-bearing surfaces are pending " +
 			"(see mi-agff). This landing confirms your role cleared the devops gate.",
-		Sections: adminConsoleSections,
+		Sections: s.sections(),
 	}}, nil
+}
+
+// sections returns the console manifest with section statuses reflecting
+// what is actually wired. Only the incident-register section is dynamic
+// today: it reads "available" when its separate-DB store is configured
+// (mi-2p6i), "planned" otherwise. The rest stay "planned" until their
+// sub-beads land.
+func (s *adminService) sections() []adminConsoleSection {
+	out := make([]adminConsoleSection, len(adminConsoleSections))
+	copy(out, adminConsoleSections)
+	if s.incidentRegisterWired {
+		for i := range out {
+			if out[i].Key == "incident-register" {
+				out[i].Status = "available"
+			}
+		}
+	}
+	return out
 }
