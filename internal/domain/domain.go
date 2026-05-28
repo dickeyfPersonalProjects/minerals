@@ -763,6 +763,76 @@ type UserRepo interface {
 	UpdateDefaultSpecimenVisibility(ctx context.Context, tx Tx, id uuid.UUID, visibility *Visibility, updatedAt time.Time) error
 }
 
+// AdminUser is the admin/devops console's NON-PERSONAL view of a user
+// (mi-n5av). Per the mayor's 2026-05-24 operator decision the admin
+// user list exposes ONLY non-personal fields: the opaque id, display
+// name, content counts, account status, and creation time. It carries
+// NO email, NO IP, and NO auth identifiers beyond the opaque id — that
+// PII boundary is the load-bearing decision of the bead and is enforced
+// by this type's shape (there is simply no field to leak through). The
+// three counts are derived aggregates, not stored columns.
+type AdminUser struct {
+	ID            uuid.UUID
+	DisplayName   *string
+	Status        UserStatus
+	SpecimenCount int
+	PhotoCount    int
+	JournalCount  int
+	CreatedAt     time.Time
+}
+
+// AdminContentKind discriminates a row in the admin published-content
+// review feed (mi-gtkp). The vocabulary is closed: the three
+// publishable content types whose parent specimen is public/unlisted.
+type AdminContentKind string
+
+// Allowed AdminContentKind values.
+const (
+	AdminContentSpecimen AdminContentKind = "specimen"
+	AdminContentPhoto    AdminContentKind = "photo"
+	AdminContentJournal  AdminContentKind = "journal"
+)
+
+// AdminContent is one row of the admin published-content review feed
+// (mi-gtkp): every public/unlisted specimen, the photos on those
+// specimens (excluding per-photo private overrides), and the journal
+// entries under them, unified into a single owner-attributed,
+// chronologically-paginated stream so the operator can confirm
+// user-generated content meets the usage policy. Owner attribution is
+// display_name + opaque id ONLY — no email, consistent with the
+// mi-n5av PII decision.
+type AdminContent struct {
+	Kind             AdminContentKind
+	ID               uuid.UUID
+	SpecimenID       uuid.UUID
+	Title            string
+	Preview          string
+	Visibility       Visibility
+	OwnerID          uuid.UUID
+	OwnerDisplayName *string
+	CreatedAt        time.Time
+}
+
+// AdminRepo is the admin/devops console's see-all data source
+// (mi-n5av / mi-gtkp). It is deliberately SEPARATE from the per-user
+// repos: those apply the CONTRACT.md §13 v2 layer-1 owner/visibility
+// scoping that an operations view must bypass, so reusing them would
+// fight the admin's legitimate need to see across all users. Every
+// method returns rows spanning ALL users and is reachable only behind
+// the `devops` Casbin gate enforced at the API layer. Implementations
+// live in internal/db.
+type AdminRepo interface {
+	// ListUsers returns all users as their non-personal admin view
+	// (mi-n5av), cursor-paginated in (created_at DESC, id DESC) order.
+	// The query selects NO email or other PII.
+	ListUsers(ctx context.Context, page Page) ([]AdminUser, Cursor, error)
+	// ListPublishedContent returns every public/unlisted specimen, the
+	// photos on those specimens (minus per-photo private overrides),
+	// and their journal entries across all users (mi-gtkp), unified and
+	// cursor-paginated in (created_at DESC, id DESC) order.
+	ListPublishedContent(ctx context.Context, page Page) ([]AdminContent, Cursor, error)
+}
+
 // SpecimenCollectorRepo is the consumer-side interface for the
 // specimen↔collector join table (mi-zv3 / C-3). The chain is edited
 // atomically via ReplaceChain — there is no per-link API surface.

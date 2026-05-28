@@ -14,11 +14,17 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/google/uuid"
 
+	"github.com/dickeyfPersonalProjects/minerals/internal/auth"
 	"github.com/dickeyfPersonalProjects/minerals/internal/authz"
+	"github.com/dickeyfPersonalProjects/minerals/internal/domain"
 )
 
 // adminConsoleResource is the Casbin resource the console is gated on.
@@ -101,15 +107,22 @@ type adminService struct {
 	// the overview's incident-register section from "planned" to
 	// "available" so the SPA shell knows the endpoints exist (mi-2p6i).
 	incidentRegisterWired bool
+	// admin is the see-all data source backing the users +
+	// published-content surfaces (mi-n5av / mi-gtkp). nil leaves those
+	// two endpoints unregistered and their overview sections "planned"
+	// — the unit-test path that doesn't exercise them.
+	admin domain.AdminRepo
 }
 
 // registerAdminOperations wires the admin/devops console endpoints.
-// The console is always registered (it depends on no optional repo) —
-// the gate is what restricts access, not the route's presence.
+// The overview landing is always registered (it depends on no optional
+// repo) — the gate is what restricts access, not the route's presence.
 // incidentRegisterWired toggles the incident-register section's status
-// in the overview manifest.
-func registerAdminOperations(api huma.API, mws authMiddlewares, guard authzGuard, incidentRegisterWired bool) {
-	s := &adminService{guard: guard, incidentRegisterWired: incidentRegisterWired}
+// in the overview manifest. The users + published-content data surfaces
+// (mi-n5av / mi-gtkp) register only when admin is non-nil, matching the
+// optional-repo pattern every other content surface follows.
+func registerAdminOperations(api huma.API, mws authMiddlewares, guard authzGuard, incidentRegisterWired bool, admin domain.AdminRepo) {
+	s := &adminService{guard: guard, incidentRegisterWired: incidentRegisterWired, admin: admin}
 
 	huma.Register(api, huma.Operation{
 		OperationID: "admin-overview",
@@ -126,6 +139,41 @@ func registerAdminOperations(api huma.API, mws authMiddlewares, guard authzGuard
 		Errors:      []int{http.StatusUnauthorized, http.StatusForbidden},
 		Middlewares: mws.Protected(),
 	}, s.overview)
+
+	if admin == nil {
+		return
+	}
+
+	huma.Register(api, huma.Operation{
+		OperationID: "admin-list-users",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/admin/users",
+		Summary:     "List all users (non-personal fields)",
+		Description: "Cursor-paginated list of ALL users across the instance, exposing only " +
+			"NON-PERSONAL fields (mi-n5av): opaque id, display name, content counts, account " +
+			"status, and creation time. By the mayor's 2026-05-24 PII decision this view " +
+			"carries NO email, NO IP, and no auth identifiers beyond the opaque id. Gated on " +
+			"the CONTRACT §13 v2 `devops` resource (devops-viewer/devops-admin/admin); every " +
+			"access is audit-logged.",
+		Tags:        []string{"admin"},
+		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden},
+		Middlewares: mws.Protected(),
+	}, s.listUsers)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "admin-list-published-content",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/admin/published-content",
+		Summary:     "List all published content (usage-policy review)",
+		Description: "Cursor-paginated, owner-attributed feed of ALL public/unlisted content " +
+			"across users — specimens, their non-private photos, and their journal entries " +
+			"(mi-gtkp) — for usage-policy compliance review. Owner attribution is display " +
+			"name + opaque id only (NO email). Gated on the CONTRACT §13 v2 `devops` resource; " +
+			"every access is audit-logged.",
+		Tags:        []string{"admin"},
+		Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden},
+		Middlewares: mws.Protected(),
+	}, s.listPublishedContent)
 }
 
 func (s *adminService) overview(ctx context.Context, _ *struct{}) (*adminOverviewOutput, error) {
@@ -151,12 +199,162 @@ func (s *adminService) overview(ctx context.Context, _ *struct{}) (*adminOvervie
 func (s *adminService) sections() []adminConsoleSection {
 	out := make([]adminConsoleSection, len(adminConsoleSections))
 	copy(out, adminConsoleSections)
-	if s.incidentRegisterWired {
-		for i := range out {
-			if out[i].Key == "incident-register" {
+	for i := range out {
+		switch out[i].Key {
+		case "incident-register":
+			if s.incidentRegisterWired {
+				out[i].Status = "available"
+			}
+		case "users", "published-content":
+			// Both surfaces land together off the same AdminRepo
+			// (mi-n5av + mi-gtkp); flip them to "available" once it is
+			// wired so the SPA shell knows the endpoints exist.
+			if s.admin != nil {
 				out[i].Status = "available"
 			}
 		}
 	}
 	return out
+}
+
+// adminUserView is the wire shape of the non-personal user row
+// (mi-n5av). The struct has NO email/PII field by construction — the
+// PII boundary is enforced here, not just in the SQL.
+type adminUserView struct {
+	ID            uuid.UUID `json:"id" doc:"Opaque user id (UUIDv7) — the only identifier exposed; no email or auth subject."`
+	DisplayName   *string   `json:"display_name" doc:"User's chosen display name; null when never set."`
+	Status        string    `json:"status" doc:"Account status." enum:"pending,active,deleted"`
+	SpecimenCount int       `json:"specimen_count" doc:"Number of specimens authored by this user."`
+	PhotoCount    int       `json:"photo_count" doc:"Number of photos across this user's specimens."`
+	JournalCount  int       `json:"journal_count" doc:"Number of journal entries authored by this user."`
+	CreatedAt     time.Time `json:"created_at" doc:"Account creation timestamp (RFC 3339)."`
+}
+
+func toAdminUserView(u domain.AdminUser) adminUserView {
+	return adminUserView{
+		ID:            u.ID,
+		DisplayName:   u.DisplayName,
+		Status:        string(u.Status),
+		SpecimenCount: u.SpecimenCount,
+		PhotoCount:    u.PhotoCount,
+		JournalCount:  u.JournalCount,
+		CreatedAt:     u.CreatedAt,
+	}
+}
+
+type listAdminUsersInput struct {
+	Limit  int    `query:"limit" minimum:"1" maximum:"200" doc:"Page size (1-200; defaults to 50, values above 200 silently clamped)."`
+	Cursor string `query:"cursor" doc:"Opaque pagination cursor from the previous page (CONTRACT.md §10.3)."`
+}
+
+type listAdminUsersOutput struct {
+	Body adminUserListBody
+}
+
+type adminUserListBody struct {
+	Items      []adminUserView `json:"items" doc:"Page of users in (created_at DESC, id DESC) order — non-personal fields only."`
+	NextCursor *string         `json:"next_cursor" doc:"Cursor for the next page; null at end of results."`
+}
+
+func (s *adminService) listUsers(ctx context.Context, in *listAdminUsersInput) (*listAdminUsersOutput, error) {
+	if err := s.guard.check(ctx, &authz.Resource{Type: adminConsoleResource}, actView); err != nil {
+		return nil, err
+	}
+	rows, cursor, err := s.admin.ListUsers(ctx, domain.Page{Limit: in.Limit, Cursor: in.Cursor})
+	if err != nil {
+		return nil, mapListError(err)
+	}
+	items := make([]adminUserView, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, toAdminUserView(r))
+	}
+	body := adminUserListBody{Items: items}
+	if cursor != "" {
+		c := string(cursor)
+		body.NextCursor = &c
+	}
+	s.auditView(ctx, "users", len(items))
+	return &listAdminUsersOutput{Body: body}, nil
+}
+
+// adminContentView is the wire shape of one published-content row
+// (mi-gtkp). Owner attribution is display name + opaque id only.
+type adminContentView struct {
+	Kind             string    `json:"kind" doc:"Content type." enum:"specimen,photo,journal"`
+	ID               uuid.UUID `json:"id" doc:"Id of the content row (specimen, photo, or journal entry)."`
+	SpecimenID       uuid.UUID `json:"specimen_id" doc:"Id of the anchor specimen (equals id when kind=specimen)."`
+	Title            string    `json:"title" doc:"Anchor specimen name."`
+	Preview          string    `json:"preview" doc:"Short excerpt (journal body, first 200 chars); empty for specimens and photos."`
+	Visibility       string    `json:"visibility" doc:"Effective visibility of the row." enum:"public,unlisted"`
+	OwnerID          uuid.UUID `json:"owner_id" doc:"Opaque owner id — no email."`
+	OwnerDisplayName *string   `json:"owner_display_name" doc:"Owner display name; null when never set."`
+	CreatedAt        time.Time `json:"created_at" doc:"Row creation timestamp (RFC 3339)."`
+}
+
+func toAdminContentView(c domain.AdminContent) adminContentView {
+	return adminContentView{
+		Kind:             string(c.Kind),
+		ID:               c.ID,
+		SpecimenID:       c.SpecimenID,
+		Title:            c.Title,
+		Preview:          c.Preview,
+		Visibility:       string(c.Visibility),
+		OwnerID:          c.OwnerID,
+		OwnerDisplayName: c.OwnerDisplayName,
+		CreatedAt:        c.CreatedAt,
+	}
+}
+
+type listPublishedContentInput struct {
+	Limit  int    `query:"limit" minimum:"1" maximum:"200" doc:"Page size (1-200; defaults to 50, values above 200 silently clamped)."`
+	Cursor string `query:"cursor" doc:"Opaque pagination cursor from the previous page (CONTRACT.md §10.3)."`
+}
+
+type listPublishedContentOutput struct {
+	Body publishedContentListBody
+}
+
+type publishedContentListBody struct {
+	Items      []adminContentView `json:"items" doc:"Page of published content in (created_at DESC, id DESC) order."`
+	NextCursor *string            `json:"next_cursor" doc:"Cursor for the next page; null at end of results."`
+}
+
+func (s *adminService) listPublishedContent(ctx context.Context, in *listPublishedContentInput) (*listPublishedContentOutput, error) {
+	if err := s.guard.check(ctx, &authz.Resource{Type: adminConsoleResource}, actView); err != nil {
+		return nil, err
+	}
+	rows, cursor, err := s.admin.ListPublishedContent(ctx, domain.Page{Limit: in.Limit, Cursor: in.Cursor})
+	if err != nil {
+		return nil, mapListError(err)
+	}
+	items := make([]adminContentView, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, toAdminContentView(r))
+	}
+	body := publishedContentListBody{Items: items}
+	if cursor != "" {
+		c := string(cursor)
+		body.NextCursor = &c
+	}
+	s.auditView(ctx, "published-content", len(items))
+	return &listPublishedContentOutput{Body: body}, nil
+}
+
+// auditView emits the structured audit-trail event the bead requires:
+// who viewed which admin surface and how many rows they saw. It logs no
+// PII (the actor is the opaque caller id; roles come from the JWT) — the
+// breadcrumb is for the operator's own access log, not a data export.
+func (s *adminService) auditView(ctx context.Context, surface string, count int) {
+	u := auth.FromContext(ctx)
+	actor := "unknown"
+	if u.ID != uuid.Nil {
+		actor = u.ID.String()
+	}
+	slog.InfoContext(ctx, "admin console view",
+		"event", "admin.view",
+		"surface", surface,
+		"actor", actor,
+		"roles", strings.Join(u.Roles, ","),
+		"count", count,
+	)
 }
