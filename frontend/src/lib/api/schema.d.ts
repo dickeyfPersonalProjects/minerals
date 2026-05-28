@@ -44,6 +44,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/registration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the runtime registration toggle
+         * @description Returns whether self-signup is currently enabled and whether that value comes from the stored runtime toggle or the deploy-time default. Gated on the §13 v2 `devops` resource (devops-viewer, devops-admin, admin).
+         */
+        get: operations["admin-get-registration"];
+        /**
+         * Flip the runtime registration toggle
+         * @description Enables or disables self-signup at runtime, no redeploy required. Persists the value to the settings store (read per request by the /auth/register gate) and, when a Keycloak admin client is configured, syncs the realm's `registrationAllowed` flag so the app and IdP stay consistent. Gated on `devops:edit` — devops-admin and admin can flip; a view-only devops-viewer receives 403. The change is audit-logged.
+         */
+        put: operations["admin-set-registration"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/specimens/{id}/takedown": {
         parameters: {
             query?: never;
@@ -1373,6 +1397,21 @@ export interface components {
             /** Format: int64 */
             version?: number;
         };
+        RegistrationStateBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/RegistrationStateBody.json
+             */
+            readonly $schema?: string;
+            /** @description Whether self-signup is currently enabled. */
+            enabled: boolean;
+            /**
+             * @description Where the value comes from.
+             * @enum {string}
+             */
+            source: "stored" | "default";
+        };
         ReportAck: {
             /**
              * Format: uri
@@ -1404,6 +1443,28 @@ export interface components {
             composition?: string;
             formation_context?: string;
             rock_type?: string;
+        };
+        SetRegistrationBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/SetRegistrationBody.json
+             */
+            readonly $schema?: string;
+            /** @description Target state: true enables self-signup, false disables it. */
+            enabled: boolean;
+        };
+        SetRegistrationResultBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/SetRegistrationResultBody.json
+             */
+            readonly $schema?: string;
+            /** @description The newly persisted self-signup state. */
+            enabled: boolean;
+            /** @description Whether the Keycloak realm flag was synced (false when no admin client is configured). */
+            realm_synced: boolean;
         };
         SpecimenCollectorLinkView: {
             /** @description The collector at this position in the chain. */
@@ -1653,6 +1714,131 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "admin-get-registration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistrationStateBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "admin-set-registration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetRegistrationBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetRegistrationResultBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

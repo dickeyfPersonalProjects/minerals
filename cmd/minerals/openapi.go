@@ -246,6 +246,18 @@ func (specStubSpecimenCollectorRepo) ReplaceChain(context.Context, domain.Tx, uu
 	return nil
 }
 
+// specStubSettingsRepo is a never-called stand-in so the type-derived
+// OpenAPI spec advertises the GET/PUT /api/v1/admin/registration routes
+// during codegen (mi-pkn2).
+type specStubSettingsRepo struct{}
+
+func (specStubSettingsRepo) RegistrationEnabled(context.Context) (bool, bool, error) {
+	return false, false, nil
+}
+func (specStubSettingsRepo) SetRegistrationEnabled(context.Context, bool, uuid.UUID) error {
+	return nil
+}
+
 // runOpenAPI writes the type-derived OpenAPI spec served by the
 // running server at /api/v1/openapi.json to stdout. The frontend
 // codegen Makefile target consumes the output. Uses an in-process
@@ -281,6 +293,7 @@ func runOpenAPI(args []string) error {
 		QRSheets: specStubQRSheetRepo{},
 		Account:  &api.AccountServiceDeps{Eraser: specStubAccountEraser{}},
 		Users:    specStubUserRepo{},
+		Settings: specStubSettingsRepo{},
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        specStubJournalRepo{},
 			Attachments:    specStubJournalAttachmentRepo{},

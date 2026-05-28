@@ -165,6 +165,12 @@ func runServe(_ []string) error {
 	slog.Info("authz enforcer configured", "policies", len(authz.DefaultPolicies))
 
 	users := db.NewUserPostgres(pool)
+	settings := db.NewSettingsPostgres(pool)
+
+	// Shared Keycloak admin client (mi-nwg5 + mi-pkn2). Built once and
+	// reused for GDPR IdP erasure and the registration realm sync; nil
+	// when admin credentials are unconfigured.
+	kcAdmin := buildKeycloakAdmin(rootCtx, cfg)
 
 	// BFF auth handlers (mi-bm5b). The bundle is built only when
 	// every required input is present — OIDC discovery URL, client
@@ -173,7 +179,7 @@ func runServe(_ []string) error {
 	// the handlers stay unregistered and the SPA falls back to the
 	// (deprecated) PKCE path; the same /auth/login link 404s, which
 	// is the right signal that BFF auth is off in this environment.
-	bffAuth, oauthClient, sessions, err := buildBFFAuth(rootCtx, cfg, pool, users)
+	bffAuth, oauthClient, sessions, err := buildBFFAuth(rootCtx, cfg, pool, users, settings)
 	if err != nil {
 		return fmt.Errorf("serve: init bff auth: %w", err)
 	}
@@ -214,17 +220,20 @@ func runServe(_ []string) error {
 			Eraser:   db.NewAccountErasePostgres(pool),
 			Storage:  store,
 			Sessions: bff.NewPostgresResolver(pool),
-			Identity: buildIdentityDeleter(rootCtx, cfg),
+			Identity: identityDeleterFrom(kcAdmin),
 		},
-		Users:            users,
-		Verifier:         verifier,
-		Enforcer:         enforcer,
-		Admin:            db.NewAdminPostgres(pool),
-		IncidentRegister: incidentReg,
-		BFFAuth:          bffAuth,
-		SessionMW:        buildSessionMW(cfg, oauthClient, sessions, users),
-		CSRFMW:           buildCSRFMW(oauthClient),
-		RateLimitMW:      buildRateLimitMW(cfg),
+		Users:               users,
+		Verifier:            verifier,
+		Enforcer:            enforcer,
+		Admin:               db.NewAdminPostgres(pool),
+		IncidentRegister:    incidentReg,
+		Settings:            settings,
+		RegistrationSync:    registrationSyncFrom(kcAdmin),
+		RegistrationDefault: cfg.RegistrationEnabled,
+		BFFAuth:             bffAuth,
+		SessionMW:           buildSessionMW(cfg, oauthClient, sessions, users),
+		CSRFMW:              buildCSRFMW(oauthClient),
+		RateLimitMW:         buildRateLimitMW(cfg),
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        db.NewJournalEntryPostgres(pool),
 			Attachments:    db.NewJournalEntryFilePostgres(pool),
@@ -366,7 +375,7 @@ func configureLogger(level string) {
 // login. The session cleanup goroutine (mi-twql) already runs
 // regardless, so cleanup is decoupled from this gate.
 func buildBFFAuth(
-	ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, users domain.UserRepo,
+	ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, users domain.UserRepo, settings domain.SettingsRepo,
 ) (*bff.Handlers, bff.OAuthClient, bff.SessionResolver, error) {
 	if cfg.OIDCRedirectURIFromLegacyEnv {
 		slog.Warn("config: PUBLIC_OIDC_REDIRECT_URI is deprecated — rename it to OIDC_REDIRECT_URI (backend-consumed, not SPA-facing); the legacy name will stop being read in a future release",
@@ -428,10 +437,11 @@ func buildBFFAuth(
 				SameSite: http.SameSiteLaxMode,
 				MaxAge:   time.Duration(cfg.CookieMaxAgeSeconds) * time.Second,
 			},
-			StateCookieSecure:   cfg.CookieSecure,
-			RegistrationEnabled: cfg.RegistrationEnabled,
-			EnforceCSRFOnLogout: cfg.BFFEnforceCSRFOnLogout,
-			TrustForwardedFor:   cfg.TrustForwardedFor,
+			StateCookieSecure:     cfg.CookieSecure,
+			RegistrationEnabled:   cfg.RegistrationEnabled,
+			RegistrationEnabledFn: registrationGate(settings, cfg.RegistrationEnabled),
+			EnforceCSRFOnLogout:   cfg.BFFEnforceCSRFOnLogout,
+			TrustForwardedFor:     cfg.TrustForwardedFor,
 		},
 		bff.HandlerDeps{
 			OAuth:    oauthClient,
@@ -449,6 +459,26 @@ func buildBFFAuth(
 		"session_absolute_max_hours", cfg.SessionAbsoluteExpiresHours,
 		"session_idle_timeout_minutes", cfg.SessionIdleTimeoutMinutes)
 	return handlers, oauthClient, sessions, nil
+}
+
+// registrationGate returns the per-request self-signup resolver the BFF
+// /auth/register handler consults (mi-pkn2). It reads the DB-backed
+// runtime toggle; an unset row (never flipped) or a read error falls
+// back to the deploy-time default so a transient DB hiccup can't
+// silently flip the policy.
+func registrationGate(settings domain.SettingsRepo, def bool) func(context.Context) bool {
+	return func(ctx context.Context) bool {
+		enabled, found, err := settings.RegistrationEnabled(ctx)
+		if err != nil {
+			slog.ErrorContext(ctx, "bff: registration toggle read failed; using configured default",
+				"default", def, "err", err)
+			return def
+		}
+		if !found {
+			return def
+		}
+		return enabled
+	}
 }
 
 // buildSessionMW wraps SessionMiddleware with the runtime config so
@@ -478,14 +508,16 @@ func buildSessionMW(
 	})
 }
 
-// buildIdentityDeleter wires the GDPR account-erasure IdP deleter
-// (mi-nwg5). When all four Keycloak admin credentials are present it
-// returns a live admin-REST client; otherwise it returns the no-op
-// deleter so account deletion still succeeds (the app row + sessions
-// are gone; the orphaned IdP user can only re-register). Construction
-// is lazy on the token fetch, so a misconfigured base URL surfaces at
-// first deletion, not at boot.
-func buildIdentityDeleter(ctx context.Context, cfg *config.Config) domain.IdentityDeleter {
+// buildKeycloakAdmin constructs the shared Keycloak admin-REST client
+// from the four KEYCLOAK_ADMIN_* credentials. It is reused by two
+// privileged surfaces: GDPR account erasure (mi-nwg5, deleting the IdP
+// user) and the runtime registration toggle (mi-pkn2, syncing the
+// realm's `registrationAllowed` flag). Returns nil when the credentials
+// are absent — callers then fall back to the no-op deleter and an
+// application-only registration toggle. Construction is lazy on the
+// token fetch, so a misconfigured base URL surfaces at first use, not at
+// boot.
+func buildKeycloakAdmin(ctx context.Context, cfg *config.Config) *keycloak.AdminClient {
 	admin, err := keycloak.NewAdminClient(ctx, keycloak.AdminConfig{
 		BaseURL:      cfg.KeycloakAdminBaseURL,
 		Realm:        cfg.KeycloakRealm,
@@ -493,12 +525,36 @@ func buildIdentityDeleter(ctx context.Context, cfg *config.Config) domain.Identi
 		ClientSecret: cfg.KeycloakAdminClientSecret,
 	})
 	if err != nil {
-		slog.Info("keycloak admin not configured; account deletion will not remove the IdP user",
+		slog.Info("keycloak admin not configured; account deletion will not remove the IdP user "+
+			"and the registration toggle will be application-only",
 			"reason", err)
+		return nil
+	}
+	slog.Info("keycloak admin configured",
+		"base_url", cfg.KeycloakAdminBaseURL, "realm", cfg.KeycloakRealm)
+	return admin
+}
+
+// identityDeleterFrom adapts the shared admin client into the GDPR
+// IdP-deleter. A nil client (unconfigured) yields the no-op deleter so
+// account deletion still succeeds (the app row + sessions are gone; the
+// orphaned IdP user can only re-register).
+func identityDeleterFrom(admin *keycloak.AdminClient) domain.IdentityDeleter {
+	if admin == nil {
 		return keycloak.NoopDeleter{}
 	}
-	slog.Info("keycloak admin configured for account erasure",
-		"base_url", cfg.KeycloakAdminBaseURL, "realm", cfg.KeycloakRealm)
+	return admin
+}
+
+// registrationSyncFrom adapts the shared admin client into the
+// registration realm-syncer. A nil client (unconfigured) returns an
+// untyped nil so the toggle stays application-only — returning the typed
+// nil pointer would wrap a non-nil interface around a nil value and
+// defeat the api layer's nil check.
+func registrationSyncFrom(admin *keycloak.AdminClient) api.RegistrationRealmSyncer {
+	if admin == nil {
+		return nil
+	}
 	return admin
 }
 

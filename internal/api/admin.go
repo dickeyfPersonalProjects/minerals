@@ -112,6 +112,10 @@ type adminService struct {
 	// two endpoints unregistered and their overview sections "planned"
 	// — the unit-test path that doesn't exercise them.
 	admin domain.AdminRepo
+	// registrationToggleWired reports whether the runtime registration
+	// toggle (mi-pkn2) is available — i.e. a settings store is wired. It
+	// flips the site-management section from "planned" to "available".
+	registrationToggleWired bool
 }
 
 // registerAdminOperations wires the admin/devops console endpoints.
@@ -121,8 +125,8 @@ type adminService struct {
 // in the overview manifest. The users + published-content data surfaces
 // (mi-n5av / mi-gtkp) register only when admin is non-nil, matching the
 // optional-repo pattern every other content surface follows.
-func registerAdminOperations(api huma.API, mws authMiddlewares, guard authzGuard, incidentRegisterWired bool, admin domain.AdminRepo) {
-	s := &adminService{guard: guard, incidentRegisterWired: incidentRegisterWired, admin: admin}
+func registerAdminOperations(api huma.API, mws authMiddlewares, guard authzGuard, incidentRegisterWired bool, admin domain.AdminRepo, registrationToggleWired bool) {
+	s := &adminService{guard: guard, incidentRegisterWired: incidentRegisterWired, admin: admin, registrationToggleWired: registrationToggleWired}
 
 	huma.Register(api, huma.Operation{
 		OperationID: "admin-overview",
@@ -210,6 +214,13 @@ func (s *adminService) sections() []adminConsoleSection {
 			// (mi-n5av + mi-gtkp); flip them to "available" once it is
 			// wired so the SPA shell knows the endpoints exist.
 			if s.admin != nil {
+				out[i].Status = "available"
+			}
+		case "site-management":
+			// Hosts the runtime registration toggle (mi-pkn2); available
+			// once the settings store is wired so the SPA renders the
+			// control rather than a placeholder.
+			if s.registrationToggleWired {
 				out[i].Status = "available"
 			}
 		}

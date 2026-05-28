@@ -429,6 +429,41 @@ func TestRegister_DisabledReturns404(t *testing.T) {
 	}
 }
 
+// TestRegister_RuntimeGateOverridesStatic locks the mi-pkn2 runtime
+// toggle: when RegistrationEnabledFn is wired it is the authority for
+// /auth/register, overriding the static RegistrationEnabled field. A
+// false-returning gate 404s even though the static flag is true; a
+// true-returning gate serves the redirect even though the static flag
+// is false.
+func TestRegister_RuntimeGateOverridesStatic(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		static     bool
+		gate       bool
+		wantStatus int
+	}{
+		{"gate false beats static true", true, false, http.StatusNotFound},
+		{"gate true beats static false", false, true, http.StatusFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h, _, _ := newHandlers(t, func(cfg *bff.HandlerConfig) {
+				cfg.RegistrationEnabled = tc.static
+				cfg.RegistrationEnabledFn = func(context.Context) bool { return tc.gate }
+			})
+			req := httptest.NewRequest(http.MethodGet, "/auth/register", nil)
+			rec := httptest.NewRecorder()
+			h.Register(rec, req)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.wantStatus)
+			}
+		})
+	}
+}
+
 // TestCallback_HappyPath drives a full /auth/callback: valid state
 // cookie + matching query state + good token exchange ends in a
 // session row + session cookie + 302 to the return_to.
