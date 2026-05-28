@@ -132,6 +132,14 @@ type Deps struct {
 	// path (bearer auth in an Authorization header is not subject to
 	// CSRF; cookies are).
 	CSRFMW func(http.Handler) http.Handler
+	// Admin is the see-all data source backing the admin/devops console's
+	// users + published-content surfaces (mi-n5av / mi-gtkp). It bypasses
+	// the §13 v2 per-user scoping by design — access is gated entirely on
+	// the `devops` Casbin resource at the handler. nil leaves the
+	// /api/v1/admin/users and /api/v1/admin/published-content routes
+	// unregistered and their overview sections "planned" (the unit-test
+	// path); production wiring in cmd/minerals always sets it.
+	Admin domain.AdminRepo
 	// IncidentRegister wires the Law 25 confidentiality-incident register
 	// (mi-2p6i), backed by a store on a SEPARATE database
 	// (INCIDENT_REGISTER_DATABASE_URL). nil leaves the
@@ -226,7 +234,7 @@ func New(deps Deps) http.Handler {
 	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets, deps.Specimens)
 	registerProfileOperations(humaAPI, authMW, deps.Users)
 	registerAccountOperations(humaAPI, authMW, deps.Account)
-	registerAdminOperations(humaAPI, authMW, guard, deps.IncidentRegister != nil)
+	registerAdminOperations(humaAPI, authMW, guard, deps.IncidentRegister != nil, deps.Admin)
 	registerLegalOperations(humaAPI)
 	registerModerationOperations(humaAPI, authMW, guard, deps.Specimens)
 	registerIncidentRegisterOperations(humaAPI, authMW, guard, deps.IncidentRegister)

@@ -219,6 +219,7 @@ func runServe(_ []string) error {
 		Users:            users,
 		Verifier:         verifier,
 		Enforcer:         enforcer,
+		Admin:            db.NewAdminPostgres(pool),
 		IncidentRegister: incidentReg,
 		BFFAuth:          bffAuth,
 		SessionMW:        buildSessionMW(cfg, oauthClient, sessions, users),
