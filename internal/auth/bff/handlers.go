@@ -88,6 +88,16 @@ type HandlerConfig struct {
 	// gate; this field is the application's belt-and-braces).
 	RegistrationEnabled bool
 
+	// RegistrationEnabledFn, when non-nil, is consulted on every
+	// /auth/register request to decide whether self-signup is live —
+	// the runtime toggle (mi-pkn2) the admin console flips and persists
+	// to the settings store. It supersedes the static RegistrationEnabled
+	// field; the wiring in cmd/minerals has it read the DB-backed value
+	// and fall back to RegistrationEnabled on a store error or an unset
+	// row. Left nil in deployments (and tests) that want the env-only
+	// behavior.
+	RegistrationEnabledFn func(ctx context.Context) bool
+
 	// EnforceCSRFOnLogout gates the logout-handler CSRF check. The
 	// generic CSRF middleware lands in mi-gbzs (#5); until that
 	// ships and the SPA (mi-3vc4) wires the X-CSRF-Token header,
@@ -227,7 +237,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 // no-self-signup policy. The frontend Register link is still
 // rendered — the 404 is the authoritative gate.
 func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
-	if !h.cfg.RegistrationEnabled {
+	if !h.registrationEnabled(r.Context()) {
 		http.NotFound(w, r)
 		return
 	}
@@ -253,6 +263,16 @@ func (h *Handlers) Register(w http.ResponseWriter, r *http.Request) {
 	SetStateCookie(w, signed, h.cfg.StateCookieSecure)
 
 	http.Redirect(w, r, h.deps.OAuth.RegisterURL(state, h.cfg.RedirectURI), http.StatusFound)
+}
+
+// registrationEnabled resolves the effective self-signup state for this
+// request. The runtime toggle (RegistrationEnabledFn) wins when wired;
+// otherwise the static, deploy-time RegistrationEnabled flag applies.
+func (h *Handlers) registrationEnabled(ctx context.Context) bool {
+	if h.cfg.RegistrationEnabledFn != nil {
+		return h.cfg.RegistrationEnabledFn(ctx)
+	}
+	return h.cfg.RegistrationEnabled
 }
 
 // Callback completes the OAuth code flow. Validates the state

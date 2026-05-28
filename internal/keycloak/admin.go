@@ -11,7 +11,9 @@
 package keycloak
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -45,6 +47,8 @@ type AdminConfig struct {
 type AdminClient struct {
 	httpClient *http.Client
 	usersURL   string // {BaseURL}/admin/realms/{realm}/users
+	realmURL   string // {BaseURL}/admin/realms/{realm}
+	realm      string // the realm name, echoed in update bodies
 }
 
 // NewAdminClient builds an AdminClient from cfg. It validates that all
@@ -70,6 +74,8 @@ func NewAdminClient(ctx context.Context, cfg AdminConfig) (*AdminClient, error) 
 	return &AdminClient{
 		httpClient: httpClient,
 		usersURL:   base + "/admin/realms/" + realm + "/users",
+		realmURL:   base + "/admin/realms/" + realm,
+		realm:      cfg.Realm,
 	}, nil
 }
 
@@ -101,6 +107,41 @@ func (c *AdminClient) DeleteIdentity(ctx context.Context, sub string) error {
 	default:
 		return fmt.Errorf("keycloak: delete user: unexpected status %d", resp.StatusCode)
 	}
+}
+
+// SetRegistrationAllowed flips the realm's `registrationAllowed` flag
+// via the admin REST API (PUT /admin/realms/{realm}) so the IdP's
+// self-signup gate stays consistent with the application-level toggle
+// (mi-pkn2). The service account behind ClientID/ClientSecret must hold
+// the realm-management `manage-realm` role for the update to succeed.
+//
+// The body is a partial RealmRepresentation — Keycloak merges the two
+// fields onto the existing realm config, so unrelated realm settings are
+// untouched. (`realm` is included because some Keycloak versions reject a
+// realm-update body that omits it.)
+func (c *AdminClient) SetRegistrationAllowed(ctx context.Context, enabled bool) error {
+	payload, err := json.Marshal(struct {
+		Realm               string `json:"realm"`
+		RegistrationAllowed bool   `json:"registrationAllowed"`
+	}{Realm: c.realm, RegistrationAllowed: enabled})
+	if err != nil {
+		return fmt.Errorf("keycloak: marshal realm update: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.realmURL, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("keycloak: build realm update request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("keycloak: update realm: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	return fmt.Errorf("keycloak: update realm: unexpected status %d", resp.StatusCode)
 }
 
 // NoopDeleter is the domain.IdentityDeleter used when admin credentials

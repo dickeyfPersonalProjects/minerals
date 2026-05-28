@@ -26,6 +26,13 @@
   let denied = $state(false);
   let overview: Overview | null = $state(null);
 
+  // Runtime registration toggle (mi-pkn2). Loaded only when the
+  // site-management section reports "available" (a settings store is
+  // wired). regEnabled is null until the GET resolves.
+  let regEnabled: boolean | null = $state(null);
+  let regBusy = $state(false);
+  let regError: string | null = $state(null);
+
   // Only probe the backend when the client-side role hint says the
   // user might have access — an anonymous/normal user gets the inline
   // access-denied panel without a guaranteed-403 round-trip.
@@ -46,8 +53,37 @@
     }
     if (data) {
       overview = data;
+      const siteMgmt = data.sections?.find((s) => s.key === 'site-management');
+      if (siteMgmt?.status === 'available') {
+        await loadRegistration();
+      }
     }
   });
+
+  async function loadRegistration() {
+    const { data } = await client.GET('/api/v1/admin/registration', {
+      headers: { 'x-suppress-toast': '1' },
+    });
+    if (data) {
+      regEnabled = data.enabled;
+    }
+  }
+
+  async function toggleRegistration() {
+    if (regEnabled === null || regBusy) return;
+    regBusy = true;
+    regError = null;
+    const target = !regEnabled;
+    const { data, error } = await client.PUT('/api/v1/admin/registration', {
+      body: { enabled: target },
+    });
+    regBusy = false;
+    if (error || !data) {
+      regError = 'Failed to update — the identity provider may be unreachable. Try again.';
+      return;
+    }
+    regEnabled = data.enabled;
+  }
 </script>
 
 <section class="mx-auto max-w-4xl py-12" data-testid="admin-console">
@@ -90,6 +126,31 @@
             </span>
           </div>
           <p class="mt-2 text-sm text-[var(--color-text-muted)]">{section.description}</p>
+          {#if section.key === 'site-management' && section.status === 'available' && regEnabled !== null}
+            <div
+              class="mt-3 border-t border-[var(--color-border)] pt-3"
+              data-testid="registration-toggle"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-sm text-[var(--color-text)]">
+                  Self-registration is
+                  <strong>{regEnabled ? 'enabled' : 'disabled'}</strong>
+                </span>
+                <button
+                  type="button"
+                  class="rounded-md border border-[var(--color-border)] px-3 py-1 text-xs font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+                  disabled={regBusy}
+                  onclick={toggleRegistration}
+                  data-testid="registration-toggle-button"
+                >
+                  {regBusy ? 'Saving…' : regEnabled ? 'Disable' : 'Enable'}
+                </button>
+              </div>
+              {#if regError}
+                <p class="mt-2 text-xs text-[var(--color-danger)]" role="alert">{regError}</p>
+              {/if}
+            </div>
+          {/if}
         </li>
       {/each}
     </ul>

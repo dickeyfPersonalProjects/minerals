@@ -148,6 +148,22 @@ type Deps struct {
 	// runs a single database. Production wiring in cmd/minerals sets it
 	// only when the second DB URL is configured.
 	IncidentRegister IncidentRegister
+	// Settings is the DB-backed mutable-settings store backing the
+	// runtime registration toggle (mi-pkn2): the admin console writes it
+	// and the BFF /auth/register gate reads it per request. nil leaves
+	// the /api/v1/admin/registration routes unregistered and the admin
+	// overview's site-management section "planned" (the unit-test path);
+	// production wiring in cmd/minerals always sets it.
+	Settings domain.SettingsRepo
+	// RegistrationSync syncs the Keycloak realm's `registrationAllowed`
+	// flag when the toggle is flipped, keeping the IdP consistent with
+	// the application (mi-pkn2). nil (no Keycloak admin client configured)
+	// makes the toggle application-only — the realm is left untouched.
+	RegistrationSync RegistrationRealmSyncer
+	// RegistrationDefault is the deploy-time REGISTRATION_ENABLED value,
+	// reported as the effective registration state until an operator
+	// first flips the runtime toggle (mi-pkn2).
+	RegistrationDefault bool
 	// RateLimitMW enforces the per-tier token-bucket limits (mi-tnru):
 	// strict per-IP on auth endpoints, per-account (or per-IP when
 	// anonymous) on reads/writes/file-serving. Composes BETWEEN
@@ -234,10 +250,11 @@ func New(deps Deps) http.Handler {
 	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets, deps.Specimens)
 	registerProfileOperations(humaAPI, authMW, deps.Users)
 	registerAccountOperations(humaAPI, authMW, deps.Account)
-	registerAdminOperations(humaAPI, authMW, guard, deps.IncidentRegister != nil, deps.Admin)
+	registerAdminOperations(humaAPI, authMW, guard, deps.IncidentRegister != nil, deps.Admin, registrationToggleWired(deps.Settings))
 	registerLegalOperations(humaAPI)
 	registerModerationOperations(humaAPI, authMW, guard, deps.Specimens)
 	registerIncidentRegisterOperations(humaAPI, authMW, guard, deps.IncidentRegister)
+	registerRegistrationOperations(humaAPI, authMW, guard, deps.Settings, deps.RegistrationSync, deps.RegistrationDefault)
 	registerSpecimenRedirect(mux)
 
 	// BFF V2 auth routes (mi-bm5b). The three routes attach to the

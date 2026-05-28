@@ -833,6 +833,23 @@ type AdminRepo interface {
 	ListPublishedContent(ctx context.Context, page Page) ([]AdminContent, Cursor, error)
 }
 
+// SettingsRepo is the DB-backed store for runtime-mutable application
+// settings (mi-pkn2). Today it carries a single flag — the registration
+// on/off toggle — read per request by the BFF /auth/register gate and
+// flipped from the admin console. Implementations live in internal/db
+// (backed by the app_settings key-value table, migration 0018).
+type SettingsRepo interface {
+	// RegistrationEnabled reports the stored runtime toggle. found is
+	// false when no row has been written yet, so the caller falls back
+	// to the deploy-time default (REGISTRATION_ENABLED). An absent row is
+	// NOT an error — it is the untouched-default state.
+	RegistrationEnabled(ctx context.Context) (enabled, found bool, err error)
+	// SetRegistrationEnabled persists the toggle and records the opaque
+	// id of the operator who set it (uuid.Nil when unknown). It is an
+	// upsert: the single registration_enabled row is created or updated.
+	SetRegistrationEnabled(ctx context.Context, enabled bool, actor uuid.UUID) error
+}
+
 // SpecimenCollectorRepo is the consumer-side interface for the
 // specimen↔collector join table (mi-zv3 / C-3). The chain is edited
 // atomically via ReplaceChain — there is no per-link API surface.
