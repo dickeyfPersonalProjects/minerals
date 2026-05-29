@@ -71,7 +71,19 @@ spec:
     minio: false
     console: false
 
-  # Bucket auto-create on first reconcile. Matches S3_BUCKET in configmap.yaml.
+  # Bucket auto-create on first reconcile.
+  #   - minerals:     app object storage (photos/files). Matches S3_BUCKET
+  #                   in configmap.yaml.
+  #   - minerals-web: the decoupled SPA bundle (mi-zomq). The frontend is
+  #                   published here as a versioned static artifact (index.html
+  #                   + /assets/*) so every client gets ONE consistent build
+  #                   regardless of which backend replica handles API calls.
+  #                   Served at the static/ingress layer (NOT by the backend);
+  #                   see docs/design/spa-decoupling.md. The publish path is an
+  #                   in-cluster step (MinIO stays ClusterIP-only — exposeServices
+  #                   below is unchanged), so CI does not push here directly.
   buckets:
     - name: minerals
+      region: us-east-1
+    - name: minerals-web
       region: us-east-1

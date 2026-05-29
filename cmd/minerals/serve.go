@@ -53,6 +53,20 @@ type dbPinger struct{ pool *pgxpool.Pool }
 
 func (d dbPinger) Ping(ctx context.Context) error { return d.pool.Ping(ctx) }
 
+// webHandler returns the embedded-SPA fallback handler, or nil when the
+// deployment runs API-only (WEB_SERVE_MODE=disabled, mi-zomq). A nil
+// handler tells api.New to skip the "/" catch-all so the backend serves
+// API/docs/health only — the SPA is then served from a single shared
+// source (MinIO/CDN) at the static/ingress layer, which removes the
+// multi-replica per-pod asset skew that motivated the decoupling.
+func webHandler(cfg *config.Config) http.Handler {
+	if !cfg.ServeFrontend() {
+		slog.Info("web: SPA serving disabled (WEB_SERVE_MODE=disabled); backend serves API/docs/health only")
+		return nil
+	}
+	return web.Handler()
+}
+
 func runServe(_ []string) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -203,7 +217,7 @@ func runServe(_ []string) error {
 		Storage:         store,
 		SchemaVersion:   newSchemaVersionProbe(cfg.DatabaseURL),
 		ExpectedVersion: expected,
-		WebHandler:      web.Handler(),
+		WebHandler:      webHandler(cfg),
 		Collectors:      db.NewCollectorPostgres(pool),
 		Photos:          photoDeps,
 		Specimens:       db.NewSpecimenPostgres(pool),
