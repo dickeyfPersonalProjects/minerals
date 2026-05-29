@@ -1,0 +1,38 @@
+# minerals-web — the decoupled SPA, served by a minimal nginx-only image
+# (mi-gpyc / mi-zomq serve half; see docs/design/spa-decoupling.md).
+#
+# Two stages: Node builds the SPA; the FINAL stage is nginx:alpine + the built
+# dist/ ONLY. No node, no build tooling, no app binary in the final image —
+# it is intentionally tiny and serves nothing but static files. This is the
+# "single shared source" that kills the multi-replica per-pod asset-hash skew
+# that blanked cabinet.rocks: every client gets ONE consistent build.
+#
+# The Go backend image (Dockerfile) still embeds the SPA for local/default
+# mode; this image is what prod serves once WEB_SERVE_MODE=disabled flips the
+# backend to API/docs/health only.
+
+# Stage 1: build the SPA (mirrors Dockerfile's frontend stage so the bundle is
+# byte-identical to the embedded build — same Node, same deploy markers).
+FROM docker.io/library/node:26-alpine AS frontend
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ .
+# Deploy markers baked into the SPA at build time (mi-c0sv): CI passes the
+# short commit SHA and an ISO 8601 timestamp; Vite's `define` inlines them
+# into the footer. Default to 'dev' / build-time now when unset.
+ARG GIT_SHA=dev
+ARG BUILD_DATE
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_DATE=${BUILD_DATE}
+RUN npm run build
+
+# Stage 2: nginx:alpine serving the built dist/ ONLY.
+FROM docker.io/library/nginx:alpine
+# Minimal SPA config: history fallback, correct MIME (js -> text/javascript),
+# cache headers, gzip, strict CSP. See web/nginx.conf for the rationale.
+COPY web/nginx.conf /etc/nginx/nginx.conf
+COPY --from=frontend /app/frontend/dist /usr/share/nginx/html
+EXPOSE 8080
+# Runs unprivileged on 8080; pid + temp paths live under /tmp (see nginx.conf)
+# so the container can run read-only-root / non-root in Kubernetes.

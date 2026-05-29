@@ -1,0 +1,89 @@
+# PROPOSED prod Ingress for the decoupled SPA (mi-gpyc). This supersedes
+# ingress.yaml once WEB_SERVE_MODE=disabled is set on the backend (see
+# mineral.yaml). The operator applies the real Ingress in the fleet-infra
+# GitOps repo — this file is the reference shape; this repo does NOT apply it
+# (it is not listed in kustomization.yaml).
+#
+# Split routing, all on ONE origin (so the backend's strict `connect-src
+# 'self'` CSP holds with no relaxation):
+#
+#   /            -> minerals-web  (SPA index.html + history fallback)
+#   /assets/*    -> minerals-web  (immutable hashed bundle)
+#   /api/*       -> minerals      (REST API)
+#   /auth/*      -> minerals      (BFF login/callback/logout — mi-1d5i)
+#   /docs        -> minerals      (Redoc)
+#   /healthz     -> minerals      (liveness; /readyz too)
+#
+# pathType: Prefix + longest-match means the specific backend prefixes win
+# over the `/` catch-all, which falls through to minerals-web. The admin port
+# (9090: /metrics, /readyz probes) is NEVER routed here — it stays in-cluster
+# only (see kustomize/base/service.yaml).
+#
+# Cloudflare (later, NOT now): front this Ingress as origin to offload the
+# homelab. It is a drop-in — the origin routing above is unchanged; only DNS
+# and an origin cert move. See docs/design/spa-decoupling.md.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mineral
+  namespace: mineral-prod
+spec:
+  rules:
+    - host: www.example.com
+      http:
+        paths:
+          # Backend API surfaces — most-specific prefixes first.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: minerals
+                port:
+                  number: 8080
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: minerals
+                port:
+                  number: 8080
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: minerals
+                port:
+                  number: 8080
+          - path: /healthz
+            pathType: Prefix
+            backend:
+              service:
+                name: minerals
+                port:
+                  number: 8080
+          - path: /readyz
+            pathType: Prefix
+            backend:
+              service:
+                name: minerals
+                port:
+                  number: 8080
+          # SPA bundle — explicit /assets/* plus the `/` catch-all.
+          - path: /assets
+            pathType: Prefix
+            backend:
+              service:
+                name: minerals-web
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minerals-web
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - www.example.com
+      secretName: web-crt
