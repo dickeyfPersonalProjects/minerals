@@ -1,0 +1,109 @@
+# minerals-web — the decoupled SPA served by a minimal nginx-only sidecar
+# (mi-gpyc / mi-zomq serve half). See docs/design/spa-decoupling.md.
+#
+# This Deployment serves ONLY the static SPA bundle from the `minerals-web`
+# image (built by .github/workflows/main.yml). It is the "single shared
+# source" that fixes the multi-replica per-pod asset-hash skew: every client
+# fetches index.html + /assets/* from ONE consistent build, regardless of
+# which backend replica answers /api. The backend (with WEB_SERVE_MODE=disabled
+# in the prod overlay) serves API/docs/health only.
+#
+# SINGLE REPLICA + Recreate: the bundle is static and cheap, and one replica
+# fully eliminates the cross-version asset skew while the backend stays free to
+# scale to N. Recreate (vs RollingUpdate) means a deploy never runs two image
+# versions at once — so even with replicas momentarily >1 there is no skew
+# window. A CDN (Cloudflare) can later front this as origin without changing
+# any of this (see design doc); not implemented here.
+#
+# selector label: the base kustomization stamps `app: minerals` onto every
+# resource's labels AND selectors (labels.includeSelectors: true). That alone
+# would make the backend `minerals` Service select these nginx pods too, so
+# each workload carries a distinct `app.kubernetes.io/component` to keep the
+# two Services' selectors disjoint (backend=backend, web=web).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minerals-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: web
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: web
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # nginx:alpine's unprivileged 'nginx' user (uid/gid 101). Listens on
+        # 8080 (>1024) so no NET_BIND_SERVICE capability is needed.
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          image: ghcr.io/dickeyfpersonalprojects/minerals-web:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Static file serving is trivially cheap; tiny requests/limits.
+          resources:
+            requests:
+              memory: 16Mi
+              cpu: 10m
+            limits:
+              memory: 64Mi
+              cpu: 200m
+          livenessProbe:
+            httpGet:
+              path: /index.html
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /index.html
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          volumeMounts:
+            # nginx writes its pid and request temp files here; the container
+            # root FS is read-only (securityContext above). nginx.conf points
+            # pid + all *_temp_path under /tmp.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+---
+# ClusterIP Service for the SPA. Named `minerals-web` so the GitOps overlay's
+# Ingress can route `/` and `/assets/*` here by stable name while `/api`,
+# `/auth`, `/docs`, `/healthz` go to the `minerals` backend Service. See
+# docs/deploy/example/*/ingress-split.yaml for the proposed split.
+apiVersion: v1
+kind: Service
+metadata:
+  name: minerals-web
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

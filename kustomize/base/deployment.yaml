@@ -31,13 +31,19 @@ spec:
   replicas: 1
   selector:
     matchLabels:
+      # `component: backend` distinguishes these pods from the minerals-web
+      # nginx pods, which also carry the base's `app: minerals` label. Without
+      # it the `minerals` and `minerals-web` Services would select each
+      # other's pods (see kustomize/base/web.yaml).
       app: minerals
+      app.kubernetes.io/component: backend
   strategy:
     type: Recreate
   template:
     metadata:
       labels:
         app: minerals
+        app.kubernetes.io/component: backend
     spec:
       securityContext:
         runAsNonRoot: true

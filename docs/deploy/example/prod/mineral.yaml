@@ -39,8 +39,16 @@ spec:
   # Bootstrap: set it to the current `:prod` digest once
   #   (`crane digest ghcr.io/dickeyfpersonalprojects/minerals:prod`),
   # then the workflow maintains it. The value below is a placeholder.
+  # Both images are digest-pinned by the `Promote to prod` workflow in
+  # lockstep (mi-gpyc): the backend AND the decoupled-SPA nginx image
+  # (minerals-web) move together so a release can never ship a backend/
+  # frontend version mismatch. Values below are placeholders the workflow
+  # overwrites; bootstrap each once with
+  #   crane digest ghcr.io/dickeyfpersonalprojects/<image>:prod
   images:
     - name: ghcr.io/dickeyfpersonalprojects/minerals
+      digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    - name: ghcr.io/dickeyfpersonalprojects/minerals-web
       digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   patches:
     - target:
@@ -53,6 +61,12 @@ spec:
           name: minerals-config
         data:
           ENV: prod
+          # Backend serves API/docs/health only; the SPA is served by the
+          # minerals-web nginx container (mi-gpyc). This is the flip that
+          # makes the decoupling live — it kills the multi-replica per-pod
+          # asset-hash skew (mi-zomq) at the source. Requires the ingress
+          # split (ingress-split.yaml) routing `/` to minerals-web.
+          WEB_SERVE_MODE: disabled
     # OIDC config. Hostname-dependent, so it lives in the overlay
     # rather than the base. Backend is a pure resource server and
     # validates JWTs via Keycloak's JWKS endpoint — no client_secret

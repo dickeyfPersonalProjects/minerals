@@ -72,18 +72,14 @@ spec:
     console: false
 
   # Bucket auto-create on first reconcile.
-  #   - minerals:     app object storage (photos/files). Matches S3_BUCKET
-  #                   in configmap.yaml.
-  #   - minerals-web: the decoupled SPA bundle (mi-zomq). The frontend is
-  #                   published here as a versioned static artifact (index.html
-  #                   + /assets/*) so every client gets ONE consistent build
-  #                   regardless of which backend replica handles API calls.
-  #                   Served at the static/ingress layer (NOT by the backend);
-  #                   see docs/design/spa-decoupling.md. The publish path is an
-  #                   in-cluster step (MinIO stays ClusterIP-only — exposeServices
-  #                   below is unchanged), so CI does not push here directly.
+  #   - minerals: app object storage (photos/files). Matches S3_BUCKET
+  #               in configmap.yaml.
+  #
+  # The decoupled SPA is NOT served from MinIO. mi-zomq's foundation added a
+  # `minerals-web` bucket for a MinIO-serving path, but the serve half (mi-gpyc)
+  # chose a minimal nginx-only container instead (kustomize/base/web.yaml) —
+  # simpler, keeps MinIO ClusterIP-only, and is a clean Cloudflare-origin later.
+  # The bucket is therefore dropped; see docs/design/spa-decoupling.md.
   buckets:
     - name: minerals
-      region: us-east-1
-    - name: minerals-web
       region: us-east-1
