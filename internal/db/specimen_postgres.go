@@ -92,6 +92,33 @@ func (r *SpecimenPostgres) Create(ctx context.Context, tx domain.Tx, s domain.Sp
 	return nil
 }
 
+// CatalogNumbersByAuthor returns the set of non-null catalog_numbers
+// already in use by authorID. The import engine (mi-dkuu.2) calls this
+// to detect catalog-number collisions before its commit so it can
+// suffix-and-import rather than trip the UNIQUE(author_id,
+// catalog_number) constraint mid-transaction.
+func (r *SpecimenPostgres) CatalogNumbersByAuthor(ctx context.Context, authorID uuid.UUID) (map[string]struct{}, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT catalog_number FROM specimens WHERE author_id = $1 AND catalog_number IS NOT NULL`,
+		authorID)
+	if err != nil {
+		return nil, fmt.Errorf("specimen repo: catalog numbers by author: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]struct{}{}
+	for rows.Next() {
+		var cn string
+		if err := rows.Scan(&cn); err != nil {
+			return nil, fmt.Errorf("specimen repo: scan catalog number: %w", err)
+		}
+		out[cn] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("specimen repo: iterate catalog numbers: %w", err)
+	}
+	return out, nil
+}
+
 // GetByID returns the specimen or domain.ErrSpecimenNotFound.
 func (r *SpecimenPostgres) GetByID(ctx context.Context, id uuid.UUID) (domain.Specimen, error) {
 	q := `SELECT ` + specimenColumns + ` FROM specimens WHERE id = $1`

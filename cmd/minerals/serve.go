@@ -198,11 +198,15 @@ func runServe(_ []string) error {
 		return fmt.Errorf("serve: init bff auth: %w", err)
 	}
 
+	// Concrete specimen repo, shared where the import engine needs the
+	// CatalogNumbersByAuthor lookup (not part of the domain interface).
+	specimenRepo := db.NewSpecimenPostgres(pool)
+
 	photoDeps := &api.PhotoServiceDeps{
 		Photos:         db.NewPhotoPostgres(pool),
 		Files:          db.NewFilePostgres(pool),
 		Storage:        store,
-		Specimens:      db.NewSpecimenPostgres(pool),
+		Specimens:      specimenRepo,
 		Users:          db.NewUserPostgres(pool),
 		MaxUploadBytes: cfg.MaxUploadBytes,
 		RunInTx: func(ctx context.Context, fn func(tx domain.Tx) error) error {
@@ -220,7 +224,7 @@ func runServe(_ []string) error {
 		WebHandler:      webHandler(cfg),
 		Collectors:      db.NewCollectorPostgres(pool),
 		Photos:          photoDeps,
-		Specimens:       db.NewSpecimenPostgres(pool),
+		Specimens:       specimenRepo,
 		Journal: &api.JournalServiceDeps{
 			Entries: db.NewJournalEntryPostgres(pool),
 		},
@@ -259,6 +263,24 @@ func runServe(_ []string) error {
 			Files:          db.NewFilePostgres(pool),
 			Storage:        store,
 			MaxUploadBytes: cfg.MaxUploadBytes,
+			RunInTx: func(ctx context.Context, fn func(tx domain.Tx) error) error {
+				return db.RunInTx(ctx, pool, func(pgxTx pgx.Tx) error {
+					return fn(pgxTx)
+				})
+			},
+		},
+		Import: &api.ImportServiceDeps{
+			Collectors:         db.NewCollectorPostgres(pool),
+			Files:              db.NewFilePostgres(pool),
+			Specimens:          specimenRepo,
+			Photos:             db.NewPhotoPostgres(pool),
+			Journal:            db.NewJournalEntryPostgres(pool),
+			JournalFiles:       db.NewJournalEntryFilePostgres(pool),
+			SpecimenCollectors: db.NewSpecimenCollectorPostgres(pool),
+			QRSheets:           db.NewQRSheetPostgres(pool),
+			Storage:            store,
+			MaxUploadBytes:     cfg.MaxUploadBytes,
+			CatalogNumbers:     specimenRepo.CatalogNumbersByAuthor,
 			RunInTx: func(ctx context.Context, fn func(tx domain.Tx) error) error {
 				return db.RunInTx(ctx, pool, func(pgxTx pgx.Tx) error {
 					return fn(pgxTx)
