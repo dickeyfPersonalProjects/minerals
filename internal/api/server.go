@@ -86,6 +86,11 @@ type Deps struct {
 	// QRSheets is wired in production (mi-c78.1) to expose the
 	// /api/v1/qr-sheet surface backing the printable label workflow.
 	QRSheets domain.QRSheetRepo
+	// Export wires GET /api/v1/export, the streaming-ZIP data export
+	// (mi-dkuu.1). nil — or any missing collaborator inside — leaves the
+	// route unregistered (the unit-test path); production wiring in
+	// cmd/minerals always sets it with the full repo + storage set.
+	Export *ExportServiceDeps
 	// Account wires DELETE /api/v1/account, the GDPR right-to-erasure
 	// endpoint (mi-nwg5). nil leaves the route unregistered (tests that
 	// don't exercise account deletion). The Eraser field inside is the
@@ -226,6 +231,9 @@ func New(deps Deps) http.Handler {
 		Name: "profile", Description: "First-login profile completion (mi-2hf). Pending users complete setup here before any other protected endpoint becomes reachable.",
 	})
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
+		Name: "export", Description: "User data export: streaming-ZIP archive of the caller's full collection + images, author-scoped (mi-dkuu.1).",
+	})
+	cfg.Tags = append(cfg.Tags, &huma.Tag{
 		Name: "account", Description: "Account lifecycle: GDPR right-to-erasure self-service deletion (mi-nwg5).",
 	})
 	cfg.Tags = append(cfg.Tags, &huma.Tag{
@@ -254,6 +262,7 @@ func New(deps Deps) http.Handler {
 	registerMineralSpeciesOperations(humaAPI, authMW, deps.MineralSpecies)
 	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets, deps.Specimens)
 	registerProfileOperations(humaAPI, authMW, deps.Users)
+	registerExportOperations(humaAPI, authMW, deps.Export)
 	registerAccountOperations(humaAPI, authMW, deps.Account)
 	// Moderation actions land in the console's moderation surface; it is
 	// "available" once content can be listed (Admin) AND at least the
