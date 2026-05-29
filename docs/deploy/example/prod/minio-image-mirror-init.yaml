@@ -1,0 +1,126 @@
+# One-shot bootstrap Job: mirror the app's image bucket to a SECOND
+# local MinIO bucket via server-side replication, so an accidental
+# bucket deletion or object corruption on the source does not lose the
+# images outright (mi-a3pt).
+#
+# Why a local mirror (not external storage):
+#   Images are large; an off-cluster copy (e.g. B2, the way the PG
+#   backup goes — see external-b2/README.md) would cost real money. A
+#   second bucket on the same MinIO is zero extra storage cost beyond
+#   the duplicated objects and protects against the most likely
+#   failure: a fat-fingered `mc rb` / bucket wipe or a bad object
+#   overwrite. It does NOT survive total cluster/MinIO loss (same
+#   fate-sharing domain) — external image backup is deferred until
+#   budget justifies it.
+#
+# Why a Job, not a controller:
+#   MinIO replication is configured once with `mc` and then runs
+#   continuously server-side. There is no CRD for it. This mirrors the
+#   postgres-backup-bucket-init.yaml approach: a small idempotent `mc`
+#   Job that Flux applies on reconcile.
+#
+# Replication semantics (the important part):
+#   - Versioning is enabled on BOTH source and mirror — MinIO
+#     replication requires it on both ends.
+#   - `--replicate "existing-objects"` backfills images already in the
+#     source bucket AND replicates all new uploads (new-object PUTs are
+#     always replicated; the flag list controls the *extra* behaviours).
+#   - Delete-marker and version-delete replication are deliberately
+#     OFF (they are simply omitted from `--replicate`). This is the
+#     whole point: if someone deletes an image from the source bucket,
+#     the delete marker does NOT propagate, so the mirror keeps the
+#     object as its current version. The mirror is a safety net, not a
+#     faithful clone — it intentionally diverges on deletes.
+#
+# Recovery:
+#   See docs/deploy/restore.md → "Recovering images from the local
+#   mirror" for how to copy objects back from the mirror after a source
+#   loss.
+#
+# Idempotency / lifecycle:
+#   - `mc version enable` and `mc mb --ignore-existing` no-op when
+#     already applied.
+#   - `mc replicate add` is NOT idempotent, so it is guarded by a check
+#     of the existing replication config; the Job skips it if a rule
+#     targeting the mirror already exists.
+#   - The Job's spec is immutable once Succeeded, so Flux sees no diff
+#     on subsequent reconciles. To rerun (e.g. after recreating the
+#     tenant), delete it: `kubectl -n mineral-prod delete job
+#     minerals-image-mirror-init`.
+#
+# Credentials:
+#   Mounts `minerals-minio-config` (MinIO root creds) and sources its
+#   config.env — same Secret the MinIO Operator and the PG bucket-init
+#   Job use. Root creds are required: creating buckets, toggling
+#   versioning, and configuring replication are admin operations. The
+#   replication target URL embeds the same root creds because source
+#   and mirror live on the same MinIO server.
+#
+#   NOTE: if MINIO_ROOT_PASSWORD contains URL-reserved characters
+#   (@ : / ?), they must be percent-encoded in the --remote-bucket URL.
+#   The default operator-generated password is URL-safe; this Job does
+#   not encode, matching that assumption. Encode here if you rotate to
+#   a password with reserved characters.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minerals-image-mirror-init
+  namespace: mineral-prod
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: minerals
+        component: image-mirror-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              # config.env exports MINIO_ROOT_USER + MINIO_ROOT_PASSWORD
+              # (shell-style; same format the MinIO Operator consumes).
+              . /etc/minio-config/config.env
+
+              mc alias set local http://minerals-hl:9000 \
+                "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+
+              # Versioning on BOTH ends — required for replication.
+              # Source ('minerals' = S3_BUCKET in configmap.yaml).
+              mc version enable local/minerals
+
+              # Mirror bucket.
+              mc mb --ignore-existing local/minerals-images-mirror
+              mc version enable local/minerals-images-mirror
+
+              # Configure replication source 'minerals' -> mirror, but
+              # only if it isn't configured yet (mc replicate add is not
+              # idempotent). The exported config names the destination
+              # bucket in its target ARN, so grep for it.
+              if mc replicate export local/minerals 2>/dev/null \
+                   | grep -q "minerals-images-mirror"; then
+                echo "replication rule to minerals-images-mirror already present; skipping add"
+              else
+                mc replicate add local/minerals \
+                  --remote-bucket "http://$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD@minerals-hl:9000/minerals-images-mirror" \
+                  --replicate "existing-objects" \
+                  --priority 1
+              fi
+
+              # Print the resulting config so the Job log doubles as
+              # evidence the rule landed and delete/delete-marker are off.
+              mc replicate ls local/minerals
+              mc version info local/minerals-images-mirror
+          volumeMounts:
+            - name: minio-config
+              mountPath: /etc/minio-config
+              readOnly: true
+      volumes:
+        - name: minio-config
+          secret:
+            secretName: minerals-minio-config

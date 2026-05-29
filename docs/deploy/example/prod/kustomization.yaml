@@ -23,3 +23,10 @@ resources:
   #     is reachable).
   - postgres-backup-bucket-init.yaml
   - scheduledbackup.yaml
+  # Image bucket → local mirror (prod-only, mi-a3pt). One-shot Job
+  # configures MinIO server-side replication from the app's image
+  # bucket to a second local bucket, with delete-marker replication off
+  # so an accidental source delete leaves the mirror intact. Zero-cost
+  # local safety net; external image backup is deferred (see
+  # external-b2/README.md cost model).
+  - minio-image-mirror-init.yaml

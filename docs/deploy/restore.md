@@ -464,16 +464,105 @@ gate for adopting B2 — run it before decommissioning the MinIO bucket
 
 ---
 
+## Recovering images from the local mirror
+
+Scope note: everything above is the **Postgres** runbook. This section
+covers the **image objects** — a different asset with a different
+safety net. Images live in the app's MinIO bucket (`minerals`, =
+`S3_BUCKET`) and are protected by a **second local bucket**,
+`minerals-images-mirror`, kept in sync by MinIO server-side replication
+(**mi-a3pt**; the manifest is
+[`example/prod/minio-image-mirror-init.yaml`](./example/prod/minio-image-mirror-init.yaml)).
+
+What the mirror does and does not protect against:
+
+- **Protects**: an accidental wipe of the source bucket, or
+  corruption/overwrite of source objects. Replication has
+  **delete-marker and version-delete replication OFF**, so deleting an
+  object from the source does **not** propagate — the mirror keeps it.
+  The mirror is a safety net, not a faithful clone; it diverges on
+  deletes on purpose.
+- **Does NOT protect**: total cluster / MinIO loss (the mirror is on
+  the same MinIO server — same fate-sharing domain). External image
+  backup is deferred (see the cost note below).
+
+### Verify the mirror is healthy
+
+```bash
+kubectl -n mineral-prod run --rm -it mc-check --image=minio/mc:latest \
+  --restart=Never -- sh -c '
+    . /etc/minio-config/config.env
+    mc alias set local http://minerals-hl:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+    # Replication rule present, and delete/delete-marker columns OFF:
+    mc replicate ls local/minerals
+    # Mirror is versioned and holds objects:
+    mc version info local/minerals-images-mirror
+    mc ls -r local/minerals-images-mirror/ | head
+' --overrides='{"spec":{"volumes":[{"name":"mc","secret":{"secretName":"minerals-minio-config"}}],"containers":[{"name":"mc-check","image":"minio/mc:latest","volumeMounts":[{"name":"mc","mountPath":"/etc/minio-config","readOnly":true}]}]}}'
+```
+
+### Recover a single deleted/corrupted object
+
+Because delete markers are not replicated, an object deleted on the
+source is still the current version on the mirror. Copy it back:
+
+```bash
+# inside the same mc pod context as above
+mc cp local/minerals-images-mirror/<key> local/minerals/<key>
+```
+
+For a corrupted (overwritten) object where the mirror also took the bad
+copy before you noticed, recover from a prior version instead — the
+mirror is versioned:
+
+```bash
+mc ls --versions local/minerals-images-mirror/<key>
+mc cp --version-id <good-version-id> \
+  local/minerals-images-mirror/<key> local/minerals/<key>
+```
+
+### Recover the whole bucket (source wiped)
+
+```bash
+# Recreate the source bucket if it was deleted, then pull everything
+# back from the mirror. --overwrite makes it safe to re-run.
+mc mb --ignore-existing local/minerals
+mc mirror --overwrite local/minerals-images-mirror local/minerals
+```
+
+Replication keeps running source → mirror throughout; copying objects
+back into the source simply replicates forward again (a no-op once the
+mirror already has them). After a bulk restore, re-run the verify block
+to confirm the rule is still in place.
+
+### Cost note
+
+- **Local mirror: free.** A second bucket on the same MinIO costs only
+  the duplicated object storage (20Gi PVC headroom in v1; revisit with
+  telemetry). No egress, no external account.
+- **External image backup: deferred.** Images are large, so an
+  off-cluster copy (the way the DB goes to B2 — see
+  [`example/prod/external-b2/README.md`](./example/prod/external-b2/README.md))
+  would cost real money. Deferred until budget justifies it; the local
+  mirror is the V3-launch stopgap. Total cluster loss therefore still
+  loses images — see ["Out of scope"](#out-of-scope) below.
+
+---
+
 ## Out of scope
 
 These failures need work beyond what mi-jgzi shipped:
 
 - **Total cluster loss** (node + MinIO PVC + cluster all destroyed).
-  In-cluster MinIO is on the same fate-sharing domain as Postgres. Fix:
-  off-cluster backup destination — the worked example is ["Backblaze B2
+  In-cluster MinIO is on the same fate-sharing domain as Postgres *and*
+  the image mirror. Fix for the DB: off-cluster backup destination —
+  the worked example is ["Backblaze B2
   setup"](#backblaze-b2-setup-worked-external-example) (recommended for
   V3 public prod); the generic recipe is ["Migrating to external
-  storage"](#migrating-to-external-storage).
+  storage"](#migrating-to-external-storage). Fix for images: an
+  off-cluster image backup, **deferred** on cost grounds (mi-a3pt) —
+  the local mirror only survives in-cluster object/bucket loss, not
+  loss of the MinIO server itself.
 - **Backup-bucket integrity attack**. Versioning gives object-level
   rollback but the bucket itself can still be wiped by an attacker
   with bucket-admin creds. The dedicated `minerals-pg-backup-creds`
@@ -495,6 +584,12 @@ These failures need work beyond what mi-jgzi shipped:
 - External-B2 backup variant (the documented alternative):
   [`example/prod/external-b2/`](./example/prod/external-b2/)
   (`mineral-cluster-patch.b2.yaml`, `minerals-pg-b2-creds.yaml`, `README.md`).
+- Image-objects local mirror (mi-a3pt): the replication-init Job
+  [`example/prod/minio-image-mirror-init.yaml`](./example/prod/minio-image-mirror-init.yaml)
+  and its recovery runbook ["Recovering images from the local
+  mirror"](#recovering-images-from-the-local-mirror).
+- MinIO bucket replication API (mc replicate):
+  <https://min.io/docs/minio/linux/administration/bucket-replication.html>.
 - Secret inventory (key contract, provisioning steps):
   [`secrets.md`](./secrets.md).
 - kubeseal mechanics:
