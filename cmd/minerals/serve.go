@@ -234,6 +234,17 @@ func runServe(_ []string) error {
 			Mindat: newMindatClient(cfg.MindatAPIKey),
 		},
 		QRSheets: db.NewQRSheetPostgres(pool),
+		Export: &api.ExportServiceDeps{
+			Specimens:          db.NewSpecimenPostgres(pool),
+			Photos:             db.NewPhotoPostgres(pool),
+			JournalEntries:     db.NewJournalEntryPostgres(pool),
+			JournalFiles:       db.NewJournalEntryFilePostgres(pool),
+			Collectors:         db.NewCollectorPostgres(pool),
+			SpecimenCollectors: db.NewSpecimenCollectorPostgres(pool),
+			QRSheets:           db.NewQRSheetPostgres(pool),
+			Files:              db.NewFilePostgres(pool),
+			Storage:            store,
+		},
 		Account: &api.AccountServiceDeps{
 			Eraser:   db.NewAccountErasePostgres(pool),
 			Storage:  store,
