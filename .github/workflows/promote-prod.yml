@@ -45,6 +45,12 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ghcr.io/dickeyfpersonalprojects/minerals
+  # The decoupled SPA image (mi-gpyc). Promotion versions this in LOCKSTEP
+  # with the backend image: both retag to :prod + :version at the same source
+  # commit and both get digest-pinned in fleet-infra, so a release can never
+  # ship a backend/frontend version mismatch (a new skew class the decoupling
+  # would otherwise introduce).
+  IMAGE_NAME_WEB: ghcr.io/dickeyfpersonalprojects/minerals-web
   # GitOps repo + the prod Flux Kustomization file inside it that this
   # workflow digest-pins after a promote. A moved `:prod` tag does NOT
   # roll a running pod (the pod-spec string is unchanged even though the
@@ -145,25 +151,35 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Verify source image exists
+      - name: Verify source images exist
         id: source_image
         env:
           SHORT: ${{ steps.commit.outputs.short }}
         run: |
           src_tag="sha-${SHORT}"
-          # The main-branch CI pushes ${IMAGE_NAME}:sha-<short> for every
-          # merge (see main.yml). If this lookup fails, the source commit
-          # has no published image — promotion would create a `prod` git
-          # tag pointing at a commit no image exists for.
+          # The main-branch CI pushes ${IMAGE_NAME}:sha-<short> AND
+          # ${IMAGE_NAME_WEB}:sha-<short> for every merge (see main.yml). If
+          # either lookup fails, the source commit is missing a published
+          # image — promotion would create a `prod` git tag pointing at a
+          # commit one of the images doesn't exist for. Both must be present
+          # so the pair is promoted in lockstep.
           if ! digest=$(docker buildx imagetools inspect \
               "${IMAGE_NAME}:${src_tag}" \
               --format '{{.Manifest.Digest}}' 2>/dev/null); then
             echo "::error::Source image ${IMAGE_NAME}:${src_tag} does not exist. Ensure the merge-to-main CI built and pushed an image for this commit."
             exit 1
           fi
+          if ! web_digest=$(docker buildx imagetools inspect \
+              "${IMAGE_NAME_WEB}:${src_tag}" \
+              --format '{{.Manifest.Digest}}' 2>/dev/null); then
+            echo "::error::Source image ${IMAGE_NAME_WEB}:${src_tag} does not exist. Ensure the merge-to-main CI built and pushed the minerals-web image for this commit."
+            exit 1
+          fi
           echo "tag=${src_tag}" >> "$GITHUB_OUTPUT"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
-          echo "Source image: ${IMAGE_NAME}:${src_tag} @ ${digest}"
+          echo "web_digest=${web_digest}" >> "$GITHUB_OUTPUT"
+          echo "Source backend image: ${IMAGE_NAME}:${src_tag} @ ${digest}"
+          echo "Source web image:     ${IMAGE_NAME_WEB}:${src_tag} @ ${web_digest}"
 
       - name: Configure git identity
         if: ${{ !inputs.dry_run }}
@@ -195,7 +211,7 @@ jobs:
             "refs/tags/${VERSION}" \
             "refs/tags/prod"
 
-      - name: Retag image as :prod and :version
+      - name: Retag images as :prod and :version
         if: ${{ !inputs.dry_run }}
         env:
           VERSION: ${{ inputs.version }}
@@ -203,11 +219,15 @@ jobs:
         run: |
           # Manifest-only retag: the multi-arch manifest list at the
           # source tag is published under :prod and :${VERSION} with no
-          # rebuild and no architecture-skew risk.
+          # rebuild and no architecture-skew risk. Both images move together.
           docker buildx imagetools create \
             -t "${IMAGE_NAME}:prod" \
             -t "${IMAGE_NAME}:${VERSION}" \
             "${IMAGE_NAME}:${SRC_TAG}"
+          docker buildx imagetools create \
+            -t "${IMAGE_NAME_WEB}:prod" \
+            -t "${IMAGE_NAME_WEB}:${VERSION}" \
+            "${IMAGE_NAME_WEB}:${SRC_TAG}"
 
       - name: Verify post-retag digests match source
         if: ${{ !inputs.dry_run }}
@@ -215,6 +235,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           SRC_DIGEST: ${{ steps.source_image.outputs.digest }}
+          SRC_WEB_DIGEST: ${{ steps.source_image.outputs.web_digest }}
         run: |
           prod_digest=$(docker buildx imagetools inspect \
             "${IMAGE_NAME}:prod" --format '{{.Manifest.Digest}}')
@@ -223,10 +244,18 @@ jobs:
           echo "prod_digest=${prod_digest}" >> "$GITHUB_OUTPUT"
           echo "ver_digest=${ver_digest}" >> "$GITHUB_OUTPUT"
           if [ "${prod_digest}" != "${SRC_DIGEST}" ] || [ "${ver_digest}" != "${SRC_DIGEST}" ]; then
-            echo "::error::Digest mismatch after retag (src=${SRC_DIGEST}, prod=${prod_digest}, version=${ver_digest})"
+            echo "::error::Backend digest mismatch after retag (src=${SRC_DIGEST}, prod=${prod_digest}, version=${ver_digest})"
             exit 1
           fi
-          echo "All three tags point at ${SRC_DIGEST}."
+          web_prod_digest=$(docker buildx imagetools inspect \
+            "${IMAGE_NAME_WEB}:prod" --format '{{.Manifest.Digest}}')
+          web_ver_digest=$(docker buildx imagetools inspect \
+            "${IMAGE_NAME_WEB}:${VERSION}" --format '{{.Manifest.Digest}}')
+          if [ "${web_prod_digest}" != "${SRC_WEB_DIGEST}" ] || [ "${web_ver_digest}" != "${SRC_WEB_DIGEST}" ]; then
+            echo "::error::Web digest mismatch after retag (src=${SRC_WEB_DIGEST}, prod=${web_prod_digest}, version=${web_ver_digest})"
+            exit 1
+          fi
+          echo "Backend tags point at ${SRC_DIGEST}; web tags point at ${SRC_WEB_DIGEST}."
 
       - name: Checkout fleet-infra (gitops)
         # Second checkout into a subdir; leaves the minerals checkout
@@ -240,10 +269,11 @@ jobs:
           path: fleet-infra
           fetch-depth: 1
 
-      - name: Digest-pin minerals image in fleet-infra prod Kustomization
+      - name: Digest-pin minerals images in fleet-infra prod Kustomization
         if: ${{ !inputs.dry_run }}
         env:
           DIGEST: ${{ steps.source_image.outputs.digest }}
+          WEB_DIGEST: ${{ steps.source_image.outputs.web_digest }}
           KFILE: ${{ env.FLEET_INFRA_PROD_KUSTOMIZATION }}
         run: |
           set -euo pipefail
@@ -252,21 +282,28 @@ jobs:
             echo "::error::Prod Kustomization not found at '${KFILE}' in ${FLEET_INFRA_REPO}. Set FLEET_INFRA_PROD_KUSTOMIZATION to its path within the gitops repo."
             exit 1
           fi
-          # There must be exactly one images[] override for our image.
-          match=$(IMG="${IMAGE_NAME}" yq '[.spec.images[] | select(.name == env(IMG))] | length' "${file}")
-          if [ "${match}" != "1" ]; then
-            echo "::error::Expected exactly one spec.images[] entry named ${IMAGE_NAME} in ${KFILE}, found ${match}."
-            exit 1
-          fi
-          # Set the `digest:` field and remove `newTag:`. kustomize renders
-          # `digest: sha256:...` as `image@sha256:...` (the correct pinned
-          # reference); a `newTag:` holding a digest would instead produce a
-          # broken `:sha256:...` tag. A digest change IS a pod-spec change,
-          # so Flux's next reconcile rolls the deployment.
-          IMG="${IMAGE_NAME}" DIG="${DIGEST}" yq -i \
-            '(.spec.images[] | select(.name == env(IMG))) |= (.digest = env(DIG) | del(.newTag))' \
-            "${file}"
-          echo "Pinned ${IMAGE_NAME} to ${DIGEST} in ${KFILE}:"
+          # Pin BOTH images in lockstep. There must be exactly one images[]
+          # override for each (backend + web). Set the `digest:` field and
+          # remove `newTag:`: kustomize renders `digest: sha256:...` as
+          # `image@sha256:...` (the correct pinned reference); a `newTag:`
+          # holding a digest would instead produce a broken `:sha256:...`
+          # tag. A digest change IS a pod-spec change, so Flux's next
+          # reconcile rolls the deployment.
+          pin_image() {
+            img="$1"; dig="$2"
+            match=$(IMG="${img}" yq '[.spec.images[] | select(.name == env(IMG))] | length' "${file}")
+            if [ "${match}" != "1" ]; then
+              echo "::error::Expected exactly one spec.images[] entry named ${img} in ${KFILE}, found ${match}."
+              exit 1
+            fi
+            IMG="${img}" DIG="${dig}" yq -i \
+              '(.spec.images[] | select(.name == env(IMG))) |= (.digest = env(DIG) | del(.newTag))' \
+              "${file}"
+            echo "Pinned ${img} to ${dig}."
+          }
+          pin_image "${IMAGE_NAME}" "${DIGEST}"
+          pin_image "${IMAGE_NAME_WEB}" "${WEB_DIGEST}"
+          echo "spec.images now:"
           yq '.spec.images' "${file}"
 
       - name: Commit and push fleet-infra digest pin
@@ -274,6 +311,7 @@ jobs:
         working-directory: fleet-infra
         env:
           DIGEST: ${{ steps.source_image.outputs.digest }}
+          WEB_DIGEST: ${{ steps.source_image.outputs.web_digest }}
           VERSION: ${{ inputs.version }}
           KFILE: ${{ env.FLEET_INFRA_PROD_KUSTOMIZATION }}
         run: |
@@ -281,11 +319,11 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           if git diff --quiet -- "${KFILE}"; then
-            echo "fleet-infra already pinned to ${DIGEST}; nothing to commit."
+            echo "fleet-infra already pinned to backend=${DIGEST} web=${WEB_DIGEST}; nothing to commit."
             exit 0
           fi
           git add "${KFILE}"
-          git commit -m "chore(prod): pin minerals to ${DIGEST} (promoted ${VERSION})"
+          git commit -m "chore(prod): pin minerals=${DIGEST} minerals-web=${WEB_DIGEST} (promoted ${VERSION})"
           git push
           echo "Pushed digest pin to ${FLEET_INFRA_REPO}."
 
@@ -296,6 +334,7 @@ jobs:
           SHORT: ${{ steps.commit.outputs.short }}
           SRC_TAG: ${{ steps.source_image.outputs.tag }}
           SRC_DIGEST: ${{ steps.source_image.outputs.digest }}
+          SRC_WEB_DIGEST: ${{ steps.source_image.outputs.web_digest }}
           DRY_RUN: ${{ inputs.dry_run }}
           FORCE: ${{ inputs.force }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
@@ -307,8 +346,10 @@ jobs:
             echo "|---|---|"
             echo "| Version | \`${VERSION}\` |"
             echo "| Commit | [\`${SHORT}\`](${REPO_URL}/commit/${SHA}) |"
-            echo "| Source image | \`${IMAGE_NAME}:${SRC_TAG}\` |"
-            echo "| Source digest | \`${SRC_DIGEST}\` |"
+            echo "| Source backend image | \`${IMAGE_NAME}:${SRC_TAG}\` |"
+            echo "| Source backend digest | \`${SRC_DIGEST}\` |"
+            echo "| Source web image | \`${IMAGE_NAME_WEB}:${SRC_TAG}\` |"
+            echo "| Source web digest | \`${SRC_WEB_DIGEST}\` |"
             echo "| Force | \`${FORCE}\` |"
             echo "| Dry run | \`${DRY_RUN}\` |"
             echo ""
@@ -318,14 +359,15 @@ jobs:
               echo ":white_check_mark: Promoted commit \`${SHORT}\` to prod."
               echo ""
               echo "- Git: \`refs/tags/${VERSION}\` and \`refs/tags/prod\` both at \`${SHA}\`."
-              echo "- Image: \`${IMAGE_NAME}:${VERSION}\` and \`${IMAGE_NAME}:prod\` both at \`${SRC_DIGEST}\`."
-              echo "- GitOps: digest-pinned \`${FLEET_INFRA_REPO}\` \`${FLEET_INFRA_PROD_KUSTOMIZATION}\` to \`${SRC_DIGEST}\`."
+              echo "- Backend image: \`${IMAGE_NAME}:${VERSION}\` and \`:prod\` at \`${SRC_DIGEST}\`."
+              echo "- Web image: \`${IMAGE_NAME_WEB}:${VERSION}\` and \`:prod\` at \`${SRC_WEB_DIGEST}\`."
+              echo "- GitOps: digest-pinned both images in \`${FLEET_INFRA_REPO}\` \`${FLEET_INFRA_PROD_KUSTOMIZATION}\`."
               echo ""
               echo "### Two pins, both maintained automatically"
               echo ""
               echo "- **Manifests** follow the \`prod\` git tag via Flux \`spec.ref.tag: prod\` (moved above)."
-              echo "- **Image** is pinned by immutable digest in the prod Flux \`Kustomization\` (\`spec.images[0].digest\`, just written to fleet-infra)."
+              echo "- **Images** are pinned by immutable digest in the prod Flux \`Kustomization\` (\`spec.images[].digest\`, both written to fleet-infra in lockstep)."
               echo ""
-              echo "The digest write is what makes the pod roll: a moved \`:prod\` tag is an unchanged pod-spec string, but a new \`@sha256:...\` digest is a spec change. No manual gitops edit is needed — this workflow committed it."
+              echo "The digest write is what makes the pod roll: a moved \`:prod\` tag is an unchanged pod-spec string, but a new \`@sha256:...\` digest is a spec change. Backend and web roll together, so a release never ships a version mismatch. No manual gitops edit is needed."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

@@ -61,3 +61,8 @@ resources:
   - configmap.yaml
   - deployment.yaml
   - service.yaml
+  # Decoupled SPA served by a minimal nginx-only sidecar (mi-gpyc). Its own
+  # Deployment + Service (minerals-web); the prod overlay flips the backend
+  # to WEB_SERVE_MODE=disabled so the two no longer overlap. See
+  # docs/design/spa-decoupling.md.
+  - web.yaml

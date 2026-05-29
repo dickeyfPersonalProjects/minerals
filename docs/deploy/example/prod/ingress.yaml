@@ -1,5 +1,12 @@
 # Vanilla Ingress for prod. Identical shape to staging — only host and
 # namespace differ.
+#
+# NOTE (mi-gpyc): this routes everything to the backend, which is correct
+# only while the backend serves the embedded SPA (WEB_SERVE_MODE=embedded).
+# Once prod flips to WEB_SERVE_MODE=disabled (see mineral.yaml) the SPA is
+# served by the minerals-web nginx container and routing must split `/` to
+# minerals-web and `/api|/auth|/docs|/healthz` to the backend — see the
+# PROPOSED ingress-split.yaml in this directory.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
