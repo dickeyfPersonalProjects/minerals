@@ -92,6 +92,11 @@ type Deps struct {
 	// only hard requirement; Storage/Sessions/Identity are best-effort
 	// cleanup collaborators.
 	Account *AccountServiceDeps
+	// Import wires POST /api/v1/import (mi-dkuu.2), the re-homing inverse
+	// of the export endpoint. nil (or any missing required collaborator)
+	// leaves the route unregistered — the unit-test path. Production
+	// wiring in cmd/minerals sets it with the full repo set + storage.
+	Import *ImportServiceDeps
 	// Users powers the first-login gate (mi-2hf): the auth chain
 	// resolves the JWT `sub` to a row here, auto-creates a pending
 	// row on first-login, and gates protected endpoints with a 403
@@ -255,6 +260,7 @@ func New(deps Deps) http.Handler {
 	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets, deps.Specimens)
 	registerProfileOperations(humaAPI, authMW, deps.Users)
 	registerAccountOperations(humaAPI, authMW, deps.Account)
+	registerImportOperations(humaAPI, authMW, deps.Import)
 	// Moderation actions land in the console's moderation surface; it is
 	// "available" once content can be listed (Admin) AND at least the
 	// takedown action is wired (Specimens). Photo/journal removal layer

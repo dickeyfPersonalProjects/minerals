@@ -327,6 +327,21 @@ func runOpenAPI(args []string) error {
 				return fn(nil)
 			},
 		},
+		Import: &api.ImportServiceDeps{
+			Collectors:         specStubCollectorRepo{},
+			Files:              specStubFileRepo{},
+			Specimens:          specStubSpecimenRepo{},
+			Photos:             specStubPhotoRepo{},
+			Journal:            specStubJournalRepo{},
+			JournalFiles:       specStubJournalAttachmentRepo{},
+			SpecimenCollectors: specStubSpecimenCollectorRepo{},
+			QRSheets:           specStubQRSheetRepo{},
+			Storage:            specStubStorage{},
+			MaxUploadBytes:     100 * 1024 * 1024,
+			RunInTx: func(_ context.Context, fn func(tx domain.Tx) error) error {
+				return fn(nil)
+			},
+		},
 	})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/openapi.json", nil)
