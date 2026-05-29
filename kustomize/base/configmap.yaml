@@ -21,6 +21,13 @@ data:
   S3_REGION: "us-east-1"
   MAX_UPLOAD_BYTES: "104857600"
   LOG_LEVEL: "info"
+  # SPA serving mode (mi-zomq). "embedded" = the backend serves the SPA
+  # from its embedded dist/ (v1 single-replica behavior). Flip to
+  # "disabled" in the prod overlay ONLY after the decoupled SPA bundle is
+  # published to the minerals-web bucket and the ingress routes "/" to it
+  # — then the backend serves API/docs/health only and multi-replica
+  # asset skew is gone. See docs/design/spa-decoupling.md.
+  WEB_SERVE_MODE: "embedded"
   # In-cluster MinIO endpoint. The MinIO operator creates a headless service
   # named <tenant>-hl exposing port 9000 directly. Same-namespace short DNS
   # resolves without the .svc.cluster.local suffix; the GitOps overlay can
