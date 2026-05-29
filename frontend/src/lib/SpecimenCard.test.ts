@@ -320,6 +320,37 @@ describe('SpecimenCard', () => {
     });
   });
 
+  it('does not refetch when handed a new specimen object with identical id/main_image_id (mi-zak0)', async () => {
+    // A keyed list reuses the card instance but reassigns the
+    // `specimen` prop to a fresh object on every list reassignment
+    // (scope-switch re-fetch, optimistic visibility update, store
+    // cascade). The thumbnail effect must depend on the field values,
+    // not the object reference, or it aborts + refetches needlessly.
+    mockGet.mockResolvedValue(listOk([{ id: 'aaaa-photo-1' }]));
+
+    const { rerender } = render(SpecimenCard, { specimen: specimen({ name: 'Quartz' }) });
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1));
+
+    // New object, same id + main_image_id (a brand-new reference).
+    await rerender({ specimen: specimen({ name: 'Quartz' }) });
+    await rerender({ specimen: specimen({ name: 'Quartz' }) });
+
+    // No additional fetch — reference churn alone must not retrigger.
+    expect(mockGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('refetches when main_image_id actually changes (mi-zak0)', async () => {
+    mockGet.mockResolvedValue(listOk([{ id: 'aaaa-photo-1' }]));
+
+    const base = specimen();
+    const { rerender } = render(SpecimenCard, { specimen: base });
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1));
+
+    // A genuine value change to a tracked field must re-run the effect.
+    await rerender({ specimen: { ...base, main_image_id: 'cccc-main-1' } });
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(2));
+  });
+
   it('aborts the in-flight GET on unmount', async () => {
     let capturedSignal: AbortSignal | undefined;
     mockGet.mockImplementation(async (_path: string, opts: { signal?: AbortSignal }) => {

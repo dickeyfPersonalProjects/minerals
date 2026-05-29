@@ -32,10 +32,27 @@
   let thumbUrl: string | null = $state(null);
   let thumbFailed = $state(false);
 
+  // The thumbnail fetch depends only on these two fields, but a prop
+  // is a single signal in Svelte 5 — reading `specimen.id` inside the
+  // effect tracks the *whole* `specimen` reference, so any parent that
+  // hands us a fresh object (scope-switch re-fetch, inline visibility
+  // optimistic update reassigning rows, auth/store cascade) re-runs the
+  // effect even when id/main_image_id are unchanged. Each re-run aborts
+  // the in-flight GET and refetches — that abort volume is what mi-zak0
+  // tracks. Funnelling through $derived collapses the dependency to the
+  // field values: Svelte short-circuits derived propagation on ===-equal
+  // results, so the effect only re-runs when these primitives actually
+  // change, not on every object-reference churn.
+  const specimenId = $derived(specimen.id);
+  const mainImageID = $derived(specimen.main_image_id);
+
   $effect(() => {
     const ctrl = new AbortController();
     let alive = true;
-    const mainImageID = specimen.main_image_id;
+    // Read the derived primitives (not specimen.*) so reference-only
+    // churn on the prop doesn't retrigger the fetch.
+    const id = specimenId;
+    const mainID = mainImageID;
     // Pulling 100 keeps the request count at one per card while
     // letting us find the main image (which may not be position 1)
     // without a second round-trip. v1 caps photos per specimen well
@@ -44,8 +61,8 @@
     client
       .GET('/api/v1/specimens/{id}/photos', {
         params: {
-          path: { id: specimen.id },
-          query: { limit: mainImageID ? 100 : 1 },
+          path: { id },
+          query: { limit: mainID ? 100 : 1 },
         },
         signal: ctrl.signal,
       })
@@ -56,7 +73,7 @@
           return;
         }
         const items = data.items;
-        const main = mainImageID ? items.find((p) => p.file_id === mainImageID) : undefined;
+        const main = mainID ? items.find((p) => p.file_id === mainID) : undefined;
         const chosen = main ?? items[0];
         if (!chosen) {
           thumbFailed = true;
