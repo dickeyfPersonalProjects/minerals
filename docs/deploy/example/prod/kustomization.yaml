@@ -13,7 +13,16 @@ resources:
   - minerals-s3-creds.yaml
   - minerals-oidc-secret.yaml
   - minerals-pg-backup-creds.yaml
+  # SMTP password for Alertmanager email routing (mi-vp0w). Before the
+  # AlertmanagerConfig that references it.
+  - minerals-alertmanager-smtp.yaml
   - servicemonitor.yaml
+  # Observability: alerting rules, alert routing, and the Grafana dashboard
+  # (mi-vp0w). Independent of the app pods; order relative to mineral.yaml
+  # does not matter (same as servicemonitor.yaml).
+  - prometheusrule.yaml
+  - alertmanagerconfig.yaml
+  - grafana-dashboard.yaml
   - mineral.yaml
   # Postgres backup → MinIO (prod-only). Order:
   #   - bucket-init Job runs first reconcile; creates the bucket and

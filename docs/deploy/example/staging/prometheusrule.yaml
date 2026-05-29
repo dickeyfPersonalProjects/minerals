@@ -1,0 +1,179 @@
+# PrometheusRule — minerals STAGING alerting (mi-vp0w).
+#
+# Same failure-mode coverage as prod (docs/deploy/example/prod/prometheusrule.yaml)
+# with two deliberate differences:
+#
+#   1. Every alert is severity=warning (never critical). Staging exists to
+#      catch regressions before prod; it should NOT page. The
+#      AlertmanagerConfig routes mineral-staging warnings to a low-priority
+#      / notify-only receiver. Keeping the rules here means a broken
+#      readiness/restart/latency change shows up on staging first.
+#
+#   2. No backups group. Staging takes no backups by design (restore
+#      exercises run against prod artifacts in a throwaway namespace — see
+#      docs/deploy/restore.md), so MineralsBackupTooOld / BackupMissing
+#      would always fire. They live in the prod overlay only.
+#
+# See the prod file's header for the full metric-source notes (thin app
+# metric set → cluster metrics from kube-state-metrics / cAdvisor /
+# ingress-nginx / cert-manager). This env uses ingressClassName: nginx.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: minerals
+  namespace: mineral-staging
+  labels:
+    app: minerals
+    # kube-prometheus-stack's default ruleSelector. Verify before relying on it:
+    #   kubectl get prometheus -A -o jsonpath='{.items[*].spec.ruleSelector}'
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: minerals.availability
+      interval: 30s
+      rules:
+        - alert: MineralsTargetDown
+          expr: up{job="minerals", namespace="mineral-staging"} == 0
+          for: 5m
+          labels: { severity: warning, app: minerals }
+          annotations:
+            summary: "minerals /metrics target is down (staging)"
+            description: >-
+              Prometheus cannot scrape minerals on
+              {{ $labels.namespace }}/{{ $labels.pod }} for 5m. Pod is down
+              or crash-looping.
+
+        - alert: MineralsPodNotReady
+          expr: |
+            max by (namespace, pod) (
+              kube_pod_status_ready{condition="true", namespace="mineral-staging"}
+              * on (namespace, pod) group_left()
+                kube_pod_labels{namespace="mineral-staging", label_app="minerals"}
+            ) == 0
+          for: 5m
+          labels: { severity: warning, app: minerals }
+          annotations:
+            summary: "minerals pod NotReady > 5m (staging)"
+            description: >-
+              {{ $labels.namespace }}/{{ $labels.pod }} NotReady for 5m —
+              readyz failing (Postgres/MinIO/schema). mi-hkh6 class.
+
+        - alert: MineralsReadinessFlapping
+          expr: |
+            sum by (namespace, pod) (
+              changes(kube_pod_status_ready{condition="true", namespace="mineral-staging"}[15m])
+              * on (namespace, pod) group_left()
+                kube_pod_labels{namespace="mineral-staging", label_app="minerals"}
+            ) > 4
+          for: 5m
+          labels: { severity: warning, app: minerals }
+          annotations:
+            summary: "minerals readiness is flapping (staging)"
+            description: >-
+              {{ $labels.pod }} readiness changed >4 times in 15m — a
+              dependency is intermittently failing readyz.
+
+    - name: minerals.requests
+      interval: 30s
+      rules:
+        - alert: MineralsHighErrorRate
+          expr: |
+            sum(rate(nginx_ingress_controller_requests{exported_namespace="mineral-staging", status=~"5.."}[5m]))
+            /
+            sum(rate(nginx_ingress_controller_requests{exported_namespace="mineral-staging"}[5m]))
+            > 0.05
+          for: 10m
+          labels: { severity: warning, app: minerals }
+          annotations:
+            summary: "minerals 5xx rate > 5% (staging)"
+            description: "More than 5% of requests returned 5xx over 5m (sustained 10m)."
+
+        - alert: MineralsHigh429Rate
+          expr: |
+            sum(rate(nginx_ingress_controller_requests{exported_namespace="mineral-staging", status="429"}[5m])) > 0.5
+          for: 10m
+          labels: { severity: warning, app: minerals }
+          annotations:
+            summary: "minerals 429 (rate-limit) rate elevated (staging)"
+            description: "Sustained 429s — possible abuse or rate-limit misconfig. See docs/deploy/rate-limiting.md."
+
+        - alert: MineralsHighLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(nginx_ingress_controller_request_duration_seconds_bucket{exported_namespace="mineral-staging"}[5m]))
+            ) > 1
+          for: 10m
+          labels: { severity: warning, app: minerals }
+          annotations:
+            summary: "minerals p95 request latency > 1s (staging)"
+            description: "p95 ingress latency > 1s for 10m — often the leading edge of DB-pool contention."
+
+    - name: minerals.database
+      interval: 30s
+      rules:
+        - alert: MineralsSessionLookupSlow
+          expr: |
+            histogram_quantile(0.99,
+              sum by (le) (rate(minerals_session_lookup_duration_seconds_bucket{namespace="mineral-staging"}[5m]))
+            ) > 0.5
+          for: 10m
+          labels: { severity: warning, app: minerals }
+          annotations:
+            summary: "minerals session-lookup p99 > 500ms (staging)"
+            description: "p99 session-lookup latency > 500ms for 10m — DB-pool contention proxy (mi-hkh6 class)."
+
+    - name: minerals.pods
+      interval: 30s
+      rules:
+        - alert: MineralsContainerRestarting
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="mineral-staging", container="minerals"}[15m]) > 2
+          for: 5m
+          labels: { severity: warning, app: minerals }
+          annotations:
+            summary: "minerals container restarting repeatedly (staging)"
+            description: "{{ $labels.container }} in {{ $labels.pod }} restarted >2 times in 15m."
+
+        - alert: MineralsCrashLooping
+          expr: |
+            kube_pod_container_status_waiting_reason{namespace="mineral-staging", container=~"minerals|migrate", reason="CrashLoopBackOff"} > 0
+          for: 5m
+          labels: { severity: warning, app: minerals }
+          annotations:
+            summary: "minerals container in CrashLoopBackOff (staging)"
+            description: "{{ $labels.container }} in {{ $labels.pod }} CrashLoopBackOff. container=migrate ⇒ a migration is failing."
+
+        - alert: MineralsOOMKilled
+          expr: |
+            kube_pod_container_status_last_terminated_reason{namespace="mineral-staging", container="minerals", reason="OOMKilled"} == 1
+          for: 1m
+          labels: { severity: warning, app: minerals }
+          annotations:
+            summary: "minerals container was OOMKilled (staging)"
+            description: "{{ $labels.pod }} OOMKilled (1Gi limit). Large upload or leak."
+
+        - alert: MineralsMemoryNearLimit
+          expr: |
+            max by (namespace, pod) (container_memory_working_set_bytes{namespace="mineral-staging", container="minerals"})
+            /
+            max by (namespace, pod) (kube_pod_container_resource_limits{namespace="mineral-staging", container="minerals", resource="memory"})
+            > 0.9
+          for: 10m
+          labels: { severity: warning, app: minerals }
+          annotations:
+            summary: "minerals memory > 90% of limit (staging)"
+            description: "{{ $labels.pod }} working-set > 90% of its 1Gi limit for 10m."
+
+    # Certificates apply to staging too (it has its own public hostname +
+    # cert). Backups do not — see header.
+    - name: minerals.certs
+      interval: 1m
+      rules:
+        - alert: MineralsCertExpiringSoon
+          expr: |
+            (certmanager_certificate_expiration_timestamp_seconds{namespace="mineral-staging"} - time()) / 86400 < 14
+          for: 1h
+          labels: { severity: warning, app: minerals }
+          annotations:
+            summary: "minerals TLS cert expires in < 14 days (staging)"
+            description: "Certificate {{ $labels.name }} expires in <14 days and has not renewed."
