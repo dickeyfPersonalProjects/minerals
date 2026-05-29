@@ -1,0 +1,86 @@
+# AlertmanagerConfig — where minerals alerts GO (mi-vp0w).
+#
+# This is the answer to "an alert fired — who finds out?". The
+# PrometheusRule decides WHAT is wrong; this CRD decides WHO is told and
+# HOW. Without it, alerts fire into Alertmanager and route to the cluster's
+# default receiver (often /dev/null for a solo setup) — the metrics-scraped-
+# but-nobody-watching gap mi-vp0w closes.
+#
+# ---------------------------------------------------------------------------
+# How the Operator picks this up
+# ---------------------------------------------------------------------------
+# The Prometheus Operator merges namespaced AlertmanagerConfig CRDs into the
+# main Alertmanager config IF the Alertmanager CR selects them. Confirm:
+#
+#   kubectl get alertmanager -A \
+#     -o jsonpath='{range .items[*]}{.metadata.name}: cfgSel={.spec.alertmanagerConfigSelector} nsSel={.spec.alertmanagerConfigNamespaceSelector}{"\n"}{end}'
+#
+# kube-prometheus-stack defaults to selecting AlertmanagerConfigs with the
+# label `release: <stack-release>` AND requires
+# `alertmanagerConfigMatcherStrategy.type: OnNamespace` (the default), which
+# auto-scopes every route below to namespace="mineral-prod" so these rules
+# can only match minerals-prod alerts. Adjust the label to your stack's
+# selector — a mismatch means the CRD applies but Alertmanager ignores it
+# (silent, like the ServiceMonitor/PrometheusRule selectors).
+#
+# ---------------------------------------------------------------------------
+# Destination (solo-ops minimum: ONE email + a webhook)
+# ---------------------------------------------------------------------------
+# Two receivers, routed by the severity label the PrometheusRule sets:
+#   - critical → email (operator inbox) AND webhook (ntfy/Discord/Slack).
+#   - warning  → webhook only (no inbox noise for non-paging issues).
+#
+# The webhook URL points at whatever the operator runs. The example uses an
+# ntfy topic (self-hostable, dead simple) — swap the URL for a Slack/Discord
+# incoming webhook or a Cloudflare Worker if preferred. The SMTP password is
+# the only secret; it is referenced from `minerals-alertmanager-smtp`
+# (SealedSecret stub: minerals-alertmanager-smtp.yaml).
+#
+# Test it end-to-end after applying — see
+# docs/deploy/observability.md § Testing an alert end-to-end.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: minerals
+  namespace: mineral-prod
+  labels:
+    app: minerals
+    # kube-prometheus-stack's default alertmanagerConfigSelector. Verify.
+    release: kube-prometheus-stack
+spec:
+  route:
+    receiver: minerals-warning        # default for this config's alerts
+    groupBy: ["alertname", "namespace"]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    routes:
+      - receiver: minerals-critical
+        matchers:
+          - name: severity
+            value: critical
+            matchType: "="
+        # Critical pages immediately and nags more often than warnings.
+        groupWait: 10s
+        repeatInterval: 1h
+        continue: false
+  receivers:
+    - name: minerals-critical
+      emailConfigs:
+        - to: "ops@example.com"           # CHANGE: operator inbox
+          from: "alertmanager@example.com"
+          smarthost: "smtp.example.com:587"
+          authUsername: "alertmanager@example.com"
+          authPassword:
+            name: minerals-alertmanager-smtp
+            key: smtp-password
+          requireTLS: true
+          sendResolved: true
+      webhookConfigs:
+        # CHANGE: ntfy topic / Slack / Discord incoming webhook.
+        - url: "https://ntfy.sh/REPLACE_WITH_YOUR_PRIVATE_TOPIC"
+          sendResolved: true
+    - name: minerals-warning
+      webhookConfigs:
+        - url: "https://ntfy.sh/REPLACE_WITH_YOUR_PRIVATE_TOPIC"
+          sendResolved: true

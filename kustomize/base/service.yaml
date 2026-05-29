@@ -18,7 +18,12 @@ metadata:
 spec:
   type: ClusterIP
   selector:
+    # `app: minerals` alone would also select the minerals-web nginx pods
+    # (the base kustomization stamps that label onto every pod). The
+    # `component` label keeps this Service scoped to the backend pods only —
+    # see kustomize/base/web.yaml for the matching `component: web`.
     app: minerals
+    app.kubernetes.io/component: backend
   ports:
     - name: http
       port: 8080

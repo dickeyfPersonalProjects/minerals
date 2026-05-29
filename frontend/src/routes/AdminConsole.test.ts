@@ -12,16 +12,18 @@ vi.mock('../lib/api', () => ({
   client: { GET: mockGET, POST: mockPOST, PUT: mockPUT },
 }));
 
-// The component gates the backend probe behind the client-side role
-// hint; make it truthy so the authoritative GET runs in tests.
+// Both role hints true: the console renders, the moderation panel shows,
+// and the suspend buttons are shown. The backend is the real gate; these
+// are cosmetic.
 vi.mock('../lib/auth', () => ({
   canAccessAdminConsole: readable(true),
+  canEditDevops: readable(true),
 }));
 
 import AdminConsole from './AdminConsole.svelte';
 
 // overviewBody builds the manifest the landing endpoint returns. The
-// moderation section drives whether the panel renders.
+// moderation section drives whether the moderation panel renders.
 function overviewBody(moderationStatus: 'planned' | 'available') {
   return {
     console: 'admin',
@@ -46,6 +48,45 @@ function contentItem(over: Partial<Record<string, unknown>> = {}) {
     created_at: '2026-01-01T00:00:00Z',
     ...over,
   };
+}
+
+// overviewWithUsers returns a manifest whose "users" section is
+// available, so the component loads the user list on mount.
+function overviewWithUsers() {
+  return {
+    console: 'admin',
+    message: 'live',
+    sections: [
+      { key: 'users', title: 'Users', status: 'available', description: 'd' },
+      { key: 'site-management', title: 'Site', status: 'planned', description: 'd' },
+    ],
+  };
+}
+
+function user(id: string, status: string, name = 'Ada') {
+  return {
+    id,
+    display_name: name,
+    status,
+    specimen_count: 0,
+    photo_count: 0,
+    journal_count: 0,
+    created_at: '2026-01-01T00:00:00Z',
+  };
+}
+
+// routeGET dispatches the mocked GET by path so overview and users each
+// return their own fixture.
+function routeGET(users: ReturnType<typeof user>[]) {
+  mockGET.mockImplementation((path: string) => {
+    if (path === '/api/v1/admin/overview') {
+      return Promise.resolve({ data: overviewWithUsers(), response: { status: 200 } });
+    }
+    if (path === '/api/v1/admin/users') {
+      return Promise.resolve({ data: { items: users, next_cursor: null } });
+    }
+    return Promise.resolve({ data: undefined, response: { status: 404 } });
+  });
 }
 
 beforeEach(() => {
@@ -205,5 +246,77 @@ describe('AdminConsole — moderation panel (mi-jjzc)', () => {
 
     await waitFor(() => expect(screen.getByTestId('moderation-error')).toBeTruthy());
     expect(screen.getByTestId('moderation-item-journal-1')).toBeTruthy();
+  });
+});
+
+describe('AdminConsole — account suspension panel (mi-3gxz)', () => {
+  it('lists users and shows a Suspend button for an active account', async () => {
+    routeGET([user('u-1', 'active')]);
+    render(AdminConsole);
+
+    const btn = await screen.findByTestId('admin-user-suspend-button');
+    expect(btn.textContent?.trim()).toBe('Suspend');
+    expect(screen.getByTestId('admin-user-status').textContent?.trim()).toBe('active');
+  });
+
+  it('suspends an active account and flips its status to suspended in place', async () => {
+    routeGET([user('u-1', 'active')]);
+    mockPOST.mockResolvedValue({
+      data: { id: 'u-1', status: 'suspended', identity_synced: true },
+      error: undefined,
+    });
+    render(AdminConsole);
+
+    const btn = await screen.findByTestId('admin-user-suspend-button');
+    await fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-user-status').textContent?.trim()).toBe('suspended');
+    });
+    // Hit the suspend endpoint, not unsuspend.
+    expect(mockPOST).toHaveBeenCalledWith(
+      '/api/v1/admin/users/{id}/suspend',
+      expect.objectContaining({ params: { path: { id: 'u-1' } } }),
+    );
+    // The row now offers the inverse action.
+    expect(screen.getByTestId('admin-user-suspend-button').textContent?.trim()).toBe('Unsuspend');
+  });
+
+  it('unsuspends a suspended account back to active', async () => {
+    routeGET([user('u-1', 'suspended')]);
+    mockPOST.mockResolvedValue({
+      data: { id: 'u-1', status: 'active', identity_synced: true },
+      error: undefined,
+    });
+    render(AdminConsole);
+
+    const btn = await screen.findByTestId('admin-user-suspend-button');
+    expect(btn.textContent?.trim()).toBe('Unsuspend');
+    await fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-user-status').textContent?.trim()).toBe('active');
+    });
+    expect(mockPOST).toHaveBeenCalledWith(
+      '/api/v1/admin/users/{id}/unsuspend',
+      expect.objectContaining({ params: { path: { id: 'u-1' } } }),
+    );
+  });
+
+  it('surfaces an error when the suspend call fails and leaves the status unchanged', async () => {
+    routeGET([user('u-1', 'active')]);
+    mockPOST.mockResolvedValue({
+      data: undefined,
+      error: { error: { code: 'identity_sync_failed' } },
+    });
+    render(AdminConsole);
+
+    const btn = await screen.findByTestId('admin-user-suspend-button');
+    await fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toMatch(/failed to suspend/i);
+    });
+    expect(screen.getByTestId('admin-user-status').textContent?.trim()).toBe('active');
   });
 });

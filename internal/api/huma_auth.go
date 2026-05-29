@@ -251,6 +251,23 @@ func makeResolveUserMiddleware(repo domain.UserRepo) func(huma.Context, func(hum
 			return
 		}
 
+		// Suspension fail-close (mi-3gxz): a suspended account is locked
+		// out of every authenticated surface — including profile setup —
+		// regardless of whether a token or session still validates. The
+		// IdP-side disable + session revoke applied at suspend time make
+		// this rare, but the app gate is the load-bearing enforcement: it
+		// does not depend on the IdP or on session state having already
+		// been cleared. Anonymous callers never reach here (no sub), so
+		// public reads of still-visible content are unaffected.
+		if resolved.Status == domain.UserStatusSuspended {
+			slog.WarnContext(ctx.Context(), "auth: suspended account blocked",
+				"event", "auth.suspended_blocked",
+				"user_id", resolved.ID)
+			writeHumaError(ctx, http.StatusForbidden,
+				"account_suspended", "this account has been suspended")
+			return
+		}
+
 		merged := u
 		merged.ID = resolved.ID
 		merged.Email = resolved.Email

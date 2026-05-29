@@ -41,6 +41,42 @@ func TestLoad_DevDefaults(t *testing.T) {
 	}
 }
 
+func TestLoad_WebServeModeDefault(t *testing.T) {
+	t.Parallel()
+	cfg, err := loadFrom(envFunc(nil))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.WebServeMode != webModeEmbedded {
+		t.Errorf("WebServeMode = %q, want %q", cfg.WebServeMode, webModeEmbedded)
+	}
+	if !cfg.ServeFrontend() {
+		t.Error("ServeFrontend() = false, want true on default (embedded)")
+	}
+}
+
+func TestLoad_WebServeModeDisabled(t *testing.T) {
+	t.Parallel()
+	cfg, err := loadFrom(envFunc(map[string]string{"WEB_SERVE_MODE": "disabled"}))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.ServeFrontend() {
+		t.Error("ServeFrontend() = true, want false when WEB_SERVE_MODE=disabled")
+	}
+}
+
+func TestLoad_WebServeModeInvalid(t *testing.T) {
+	t.Parallel()
+	_, err := loadFrom(envFunc(map[string]string{"WEB_SERVE_MODE": "bogus"}))
+	if err == nil {
+		t.Fatal("loadFrom: want error on invalid WEB_SERVE_MODE, got nil")
+	}
+	if !strings.Contains(err.Error(), "WEB_SERVE_MODE") {
+		t.Errorf("error = %q, want it to mention WEB_SERVE_MODE", err)
+	}
+}
+
 func TestLoad_OIDCRedirectURI(t *testing.T) {
 	t.Parallel()
 	cfg, err := loadFrom(envFunc(map[string]string{

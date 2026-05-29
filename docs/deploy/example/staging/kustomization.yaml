@@ -15,4 +15,8 @@ resources:
   - minerals-s3-creds.yaml
   - minerals-oidc-secret.yaml
   - servicemonitor.yaml
+  # Alerting rules (mi-vp0w). Staging rules are warning-only and route to a
+  # non-paging receiver; no backup/alertmanager-secret resources here
+  # (staging takes no backups, and routing config lives in the prod overlay).
+  - prometheusrule.yaml
   - mineral.yaml

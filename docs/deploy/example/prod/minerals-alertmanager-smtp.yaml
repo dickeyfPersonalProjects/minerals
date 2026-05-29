@@ -1,0 +1,31 @@
+# SealedSecret (REDACTED STUB) — SMTP password for Alertmanager email
+# routing (mi-vp0w). Consumed by alertmanagerconfig.yaml's
+# `minerals-critical` receiver via authPassword.{name,key}.
+#
+# This is a stub: the ciphertext below is a placeholder. Generate the real
+# value for the mineral-prod namespace — the ciphertext is namespace-scoped,
+# so it cannot be reused across envs (see docs/deploy/encrypt.md):
+#
+#   echo -n '<smtp-app-password>' \
+#     | kubectl create secret generic minerals-alertmanager-smtp \
+#         --namespace mineral-prod --dry-run=client \
+#         --from-file=smtp-password=/dev/stdin -o yaml \
+#     | kubeseal --format yaml --controller-namespace sealed-secrets \
+#     > docs/deploy/example/prod/minerals-alertmanager-smtp.yaml
+#
+# Use a provider APP PASSWORD, not the account password (Gmail/Fastmail/etc).
+# If you route alerts to a webhook ONLY (no email), this Secret and the
+# emailConfigs block in alertmanagerconfig.yaml are not needed — drop both.
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: minerals-alertmanager-smtp
+  namespace: mineral-prod
+spec:
+  encryptedData:
+    smtp-password: REPLACE_WITH_KUBESEAL_OUTPUT
+  template:
+    metadata:
+      name: minerals-alertmanager-smtp
+      namespace: mineral-prod
+    type: Opaque

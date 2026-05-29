@@ -71,7 +71,15 @@ spec:
     minio: false
     console: false
 
-  # Bucket auto-create on first reconcile. Matches S3_BUCKET in configmap.yaml.
+  # Bucket auto-create on first reconcile.
+  #   - minerals: app object storage (photos/files). Matches S3_BUCKET
+  #               in configmap.yaml.
+  #
+  # The decoupled SPA is NOT served from MinIO. mi-zomq's foundation added a
+  # `minerals-web` bucket for a MinIO-serving path, but the serve half (mi-gpyc)
+  # chose a minimal nginx-only container instead (kustomize/base/web.yaml) —
+  # simpler, keeps MinIO ClusterIP-only, and is a clean Cloudflare-origin later.
+  # The bucket is therefore dropped; see docs/design/spa-decoupling.md.
   buckets:
     - name: minerals
       region: us-east-1

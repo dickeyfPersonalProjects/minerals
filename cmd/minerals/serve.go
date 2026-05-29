@@ -53,6 +53,20 @@ type dbPinger struct{ pool *pgxpool.Pool }
 
 func (d dbPinger) Ping(ctx context.Context) error { return d.pool.Ping(ctx) }
 
+// webHandler returns the embedded-SPA fallback handler, or nil when the
+// deployment runs API-only (WEB_SERVE_MODE=disabled, mi-zomq). A nil
+// handler tells api.New to skip the "/" catch-all so the backend serves
+// API/docs/health only — the SPA is then served from a single shared
+// source (MinIO/CDN) at the static/ingress layer, which removes the
+// multi-replica per-pod asset skew that motivated the decoupling.
+func webHandler(cfg *config.Config) http.Handler {
+	if !cfg.ServeFrontend() {
+		slog.Info("web: SPA serving disabled (WEB_SERVE_MODE=disabled); backend serves API/docs/health only")
+		return nil
+	}
+	return web.Handler()
+}
+
 func runServe(_ []string) error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -203,7 +217,7 @@ func runServe(_ []string) error {
 		Storage:         store,
 		SchemaVersion:   newSchemaVersionProbe(cfg.DatabaseURL),
 		ExpectedVersion: expected,
-		WebHandler:      web.Handler(),
+		WebHandler:      webHandler(cfg),
 		Collectors:      db.NewCollectorPostgres(pool),
 		Photos:          photoDeps,
 		Specimens:       db.NewSpecimenPostgres(pool),
@@ -230,10 +244,15 @@ func runServe(_ []string) error {
 		Settings:            settings,
 		RegistrationSync:    registrationSyncFrom(kcAdmin),
 		RegistrationDefault: cfg.RegistrationEnabled,
-		BFFAuth:             bffAuth,
-		SessionMW:           buildSessionMW(cfg, oauthClient, sessions, users),
-		CSRFMW:              buildCSRFMW(oauthClient),
-		RateLimitMW:         buildRateLimitMW(cfg),
+		AdminSuspend: &api.AdminSuspendDeps{
+			Users:    users,
+			Identity: identitySuspenderFrom(kcAdmin),
+			Sessions: bff.NewPostgresResolver(pool),
+		},
+		BFFAuth:     bffAuth,
+		SessionMW:   buildSessionMW(cfg, oauthClient, sessions, users),
+		CSRFMW:      buildCSRFMW(oauthClient),
+		RateLimitMW: buildRateLimitMW(cfg),
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        db.NewJournalEntryPostgres(pool),
 			Attachments:    db.NewJournalEntryFilePostgres(pool),
@@ -552,6 +571,19 @@ func identityDeleterFrom(admin *keycloak.AdminClient) domain.IdentityDeleter {
 // nil pointer would wrap a non-nil interface around a nil value and
 // defeat the api layer's nil check.
 func registrationSyncFrom(admin *keycloak.AdminClient) api.RegistrationRealmSyncer {
+	if admin == nil {
+		return nil
+	}
+	return admin
+}
+
+// identitySuspenderFrom adapts the shared admin client into the
+// account-suspension IdP-syncer (mi-3gxz). A nil client (unconfigured)
+// returns an untyped nil so suspension is application-only (status flip
+// + session revoke + auth-gate fail-close), reporting identity_synced=
+// false — the same untyped-nil care as registrationSyncFrom so the api
+// layer's nil check works.
+func identitySuspenderFrom(admin *keycloak.AdminClient) domain.IdentitySuspender {
 	if admin == nil {
 		return nil
 	}

@@ -89,3 +89,22 @@ type AccountEraser interface {
 type IdentityDeleter interface {
 	DeleteIdentity(ctx context.Context, sub string) error
 }
+
+// IdentitySuspender enables/disables the external identity-provider
+// record behind an account (mi-3gxz). Disabling blocks new logins and
+// token issuance at the IdP; enabling reverses it. The single
+// implementation talks to the Keycloak admin REST API (partial user
+// update with `enabled`). It is wired only when admin credentials are
+// configured; when absent the suspend handler skips the IdP step
+// (reporting identity_synced=false) and the app-level suspension still
+// applies (status flip + session revoke + the auth-gate fail-close),
+// with the operator disabling the user in the Keycloak console directly.
+//
+// sub is the Keycloak `sub` claim, which equals the user's admin-API
+// id, so the implementation updates the user directly without a
+// lookup. Errors are surfaced to the caller, which aborts the
+// suspension (leaving app and IdP consistent at their prior state)
+// rather than diverging.
+type IdentitySuspender interface {
+	SetIdentityEnabled(ctx context.Context, sub string, enabled bool) error
+}

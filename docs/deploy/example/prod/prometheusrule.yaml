@@ -1,0 +1,375 @@
+# PrometheusRule — minerals production alerting (mi-vp0w).
+#
+# Builds on the /metrics + ServiceMonitor foundation (mi-2b1k). The
+# ServiceMonitor makes Prometheus *scrape* the app; this PrometheusRule
+# makes Prometheus *watch* it — so a prod problem (e.g. the DB-pool/readyz
+# incident, mi-hkh6) pages an operator instead of waiting for a human to
+# notice.
+#
+# ---------------------------------------------------------------------------
+# Metric sources (READ THIS before editing expressions)
+# ---------------------------------------------------------------------------
+# The app exposes a deliberately THIN metric set on /metrics:
+#   - minerals_session_active (gauge)
+#   - minerals_session_lookup_duration_seconds  (histogram)
+#   - minerals_session_refresh_duration_seconds (histogram)
+#   - default Go runtime + process collectors (go_*, process_*)
+# It does NOT yet expose per-endpoint HTTP request/status counters or a
+# DB-pool connection gauge (follow-up: mi-vp0w adds a bead for app-native
+# HTTP + pool metrics). So most failure-mode alerts below are built on
+# CLUSTER metrics, which a kube-prometheus-stack cluster already collects:
+#   - kube-state-metrics: kube_pod_status_ready, kube_pod_container_status_*,
+#     kube_pod_container_resource_limits, kube_pod_labels
+#   - cAdvisor:           container_memory_working_set_bytes
+#   - ingress-nginx:      nginx_ingress_controller_requests / _request_duration_seconds
+#                         (this env uses ingressClassName: nginx)
+#   - CloudNativePG:      cnpg_collector_last_available_backup_timestamp
+#   - cert-manager:       certmanager_certificate_expiration_timestamp_seconds
+#
+# Each rule's comment names which exporter must be scraped for it to fire.
+# An alert whose source metric is NOT scraped fails SILENTLY (no series →
+# no alert) — the same trap as a mis-labelled ServiceMonitor. After
+# applying, confirm each rule has data in Prometheus (see
+# docs/deploy/observability.md § Verifying alerts have data).
+#
+# ---------------------------------------------------------------------------
+# Selector / routing
+# ---------------------------------------------------------------------------
+# The `release: kube-prometheus-stack` label matches the Prometheus CR's
+# default `ruleSelector` (same convention as the ServiceMonitor). Verify
+# against this cluster — a mismatch means the CR applies but Prometheus
+# never loads the rules:
+#   kubectl get prometheus -A -o jsonpath='{.items[*].spec.ruleSelector}'
+#
+# Alerts carry severity={critical,warning} and app=minerals so the
+# AlertmanagerConfig (alertmanagerconfig.yaml) can route them to a
+# destination. critical = page; warning = notify.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: minerals
+  namespace: mineral-prod
+  labels:
+    app: minerals
+    # kube-prometheus-stack's default ruleSelector. Verify before relying on it.
+    release: kube-prometheus-stack
+spec:
+  groups:
+    # =====================================================================
+    # Availability — is the app up and serving?
+    # =====================================================================
+    - name: minerals.availability
+      interval: 30s
+      rules:
+        # Source: Prometheus scrape health (the ServiceMonitor target).
+        # `up == 0` means Prometheus cannot scrape /metrics on the admin
+        # port — the pod is down, crash-looping, or the Service/endpoint
+        # is broken. This is the broadest "something is very wrong" signal.
+        - alert: MineralsTargetDown
+          expr: up{job="minerals", namespace="mineral-prod"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            app: minerals
+          annotations:
+            summary: "minerals /metrics target is down (prod)"
+            description: >-
+              Prometheus has been unable to scrape the minerals admin
+              endpoint ({{ $labels.namespace }}/{{ $labels.pod }}) for 5m.
+              The pod is likely down or crash-looping. Check
+              `kubectl -n mineral-prod get pods -l app=minerals` and recent
+              logs.
+
+        # Source: kube-state-metrics. The mi-hkh6 incident: a pod that
+        # went NotReady (readyz failing on DB/MinIO/schema) was only caught
+        # by a human. The label join restricts to minerals pods without a
+        # brittle pod-name regex.
+        - alert: MineralsPodNotReady
+          expr: |
+            max by (namespace, pod) (
+              kube_pod_status_ready{condition="true", namespace="mineral-prod"}
+              * on (namespace, pod) group_left()
+                kube_pod_labels{namespace="mineral-prod", label_app="minerals"}
+            ) == 0
+          for: 5m
+          labels:
+            severity: critical
+            app: minerals
+          annotations:
+            summary: "minerals pod NotReady > 5m (prod)"
+            description: >-
+              Pod {{ $labels.namespace }}/{{ $labels.pod }} has been
+              NotReady for 5m — readyz is failing (Postgres, MinIO, or
+              schema check). This is the mi-hkh6 failure class. Check
+              `kubectl -n mineral-prod exec deploy/minerals -- wget -qO- localhost:9090/readyz`
+              and Postgres/MinIO health.
+
+        # Source: kube-state-metrics. Readiness oscillating (ready→notready
+        # repeatedly) without staying down long enough to trip the 5m
+        # MineralsPodNotReady alert — e.g. a dependency flapping.
+        - alert: MineralsReadinessFlapping
+          expr: |
+            sum by (namespace, pod) (
+              changes(kube_pod_status_ready{condition="true", namespace="mineral-prod"}[15m])
+              * on (namespace, pod) group_left()
+                kube_pod_labels{namespace="mineral-prod", label_app="minerals"}
+            ) > 4
+          for: 5m
+          labels:
+            severity: warning
+            app: minerals
+          annotations:
+            summary: "minerals readiness is flapping (prod)"
+            description: >-
+              Pod {{ $labels.namespace }}/{{ $labels.pod }} readiness has
+              changed more than 4 times in 15m. A dependency (DB pool,
+              MinIO) is likely intermittently failing readyz.
+
+    # =====================================================================
+    # Request health — error & rate-limit rates (source: ingress-nginx)
+    # =====================================================================
+    # These derive 5xx/429/latency from the ingress controller because the
+    # app does not yet emit HTTP status counters (follow-up: mi-vp0w files a
+    # bead for app-native HTTP request/status/latency metrics — once those
+    # land, rewrite this group against them so it is controller-agnostic).
+    #
+    # ⚠ CONTROLLER ASSUMPTION: the expressions below use ingress-nginx
+    # metric names (nginx_ingress_controller_*). The example Ingress
+    # deliberately leaves ingressClassName unset — stock k3s ships Traefik,
+    # not ingress-nginx. If this cluster runs Traefik (or any non-nginx
+    # controller), these three alerts SILENTLY NEVER FIRE. Either:
+    #   (a) switch to ingress-nginx and ensure its ServiceMonitor is scraped, or
+    #   (b) replace the exprs with the Traefik equivalents documented in
+    #       docs/deploy/observability.md § Request-rate alerts and the ingress
+    #       controller.
+    # After applying, CONFIRM these have data (Prometheus → the metric name
+    # returns series). A no-data alert is indistinguishable from "healthy".
+    - name: minerals.requests
+      interval: 30s
+      rules:
+        - alert: MineralsHighErrorRate
+          expr: |
+            sum(rate(nginx_ingress_controller_requests{exported_namespace="mineral-prod", status=~"5.."}[5m]))
+            /
+            sum(rate(nginx_ingress_controller_requests{exported_namespace="mineral-prod"}[5m]))
+            > 0.05
+          for: 10m
+          labels:
+            severity: critical
+            app: minerals
+          annotations:
+            summary: "minerals 5xx rate > 5% (prod)"
+            description: >-
+              More than 5% of requests to minerals returned 5xx over the
+              last 5m (sustained 10m). Check app logs and downstream
+              (Postgres/MinIO) health.
+
+        # The app's rate limiter returns 429 (see docs/deploy/rate-limiting.md).
+        # A sustained 429 stream is abnormal for a personal-scale app and
+        # signals either abuse OR a misconfigured limit. Tune the threshold
+        # to your expected traffic.
+        - alert: MineralsHigh429Rate
+          expr: |
+            sum(rate(nginx_ingress_controller_requests{exported_namespace="mineral-prod", status="429"}[5m])) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+            app: minerals
+          annotations:
+            summary: "minerals 429 (rate-limit) rate elevated (prod)"
+            description: >-
+              minerals has been returning >0.5 req/s of 429 for 10m. Could
+              be abuse (a client hammering the API) or a rate-limit
+              misconfig. See docs/deploy/rate-limiting.md.
+
+        - alert: MineralsHighLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(nginx_ingress_controller_request_duration_seconds_bucket{exported_namespace="mineral-prod"}[5m]))
+            ) > 1
+          for: 10m
+          labels:
+            severity: warning
+            app: minerals
+          annotations:
+            summary: "minerals p95 request latency > 1s (prod)"
+            description: >-
+              95th-percentile request latency at the ingress has exceeded
+              1s for 10m. Often the leading edge of DB-pool contention.
+
+    # =====================================================================
+    # Database / session health
+    # =====================================================================
+    - name: minerals.database
+      interval: 30s
+      rules:
+        # Source: app /metrics. The app has no direct pool-connection gauge
+        # yet, so DB-pool saturation (the mi-hkh6 class) is proxied by
+        # session-lookup latency: every authenticated request does a
+        # session lookup against Postgres, so when the pool saturates or
+        # Postgres slows, this p99 spikes before readyz fully fails.
+        # Follow-up bead adds a real pgxpool AcquiredConns gauge for a
+        # direct saturation signal.
+        - alert: MineralsSessionLookupSlow
+          expr: |
+            histogram_quantile(0.99,
+              sum by (le) (rate(minerals_session_lookup_duration_seconds_bucket{namespace="mineral-prod"}[5m]))
+            ) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+            app: minerals
+          annotations:
+            summary: "minerals session-lookup p99 > 500ms (prod)"
+            description: >-
+              p99 session-lookup latency has exceeded 500ms for 10m,
+              indicating DB-pool contention or Postgres slowness (proxy for
+              pool saturation — the mi-hkh6 class). Check Postgres load and
+              pool sizing.
+
+    # =====================================================================
+    # Pod lifecycle — restarts, crashloops, OOM, memory pressure
+    # =====================================================================
+    - name: minerals.pods
+      interval: 30s
+      rules:
+        # Source: kube-state-metrics. Repeated restarts short of a full
+        # CrashLoopBackOff.
+        - alert: MineralsContainerRestarting
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="mineral-prod", container="minerals"}[15m]) > 2
+          for: 5m
+          labels:
+            severity: warning
+            app: minerals
+          annotations:
+            summary: "minerals container restarting repeatedly (prod)"
+            description: >-
+              Container {{ $labels.container }} in {{ $labels.pod }} has
+              restarted more than twice in 15m.
+
+        # Source: kube-state-metrics. Covers both the app and the migrate
+        # initContainer (a failing migration crash-loops the init).
+        - alert: MineralsCrashLooping
+          expr: |
+            kube_pod_container_status_waiting_reason{namespace="mineral-prod", container=~"minerals|migrate", reason="CrashLoopBackOff"} > 0
+          for: 5m
+          labels:
+            severity: critical
+            app: minerals
+          annotations:
+            summary: "minerals container in CrashLoopBackOff (prod)"
+            description: >-
+              Container {{ $labels.container }} in {{ $labels.pod }} is
+              CrashLoopBackOff. If container=migrate, a migration is
+              failing and the app will never start. Check logs.
+
+        # Source: kube-state-metrics. The memory limit is 1Gi and photo
+        # decoding is the memory-heavy path (mi sizing rationale in
+        # kustomize/base/deployment.yaml). An OOMKill means an upload (or a
+        # leak) breached the limit.
+        - alert: MineralsOOMKilled
+          expr: |
+            kube_pod_container_status_last_terminated_reason{namespace="mineral-prod", container="minerals", reason="OOMKilled"} == 1
+          for: 1m
+          labels:
+            severity: warning
+            app: minerals
+          annotations:
+            summary: "minerals container was OOMKilled (prod)"
+            description: >-
+              Container {{ $labels.container }} in {{ $labels.pod }} was
+              OOMKilled. Memory limit is 1Gi; a large photo upload or a leak
+              breached it. Consider raising the limit or capping
+              MAX_UPLOAD_BYTES.
+
+        # Source: cAdvisor + kube-state-metrics. Early warning before the
+        # OOMKill above — working set approaching the limit.
+        - alert: MineralsMemoryNearLimit
+          expr: |
+            max by (namespace, pod) (container_memory_working_set_bytes{namespace="mineral-prod", container="minerals"})
+            /
+            max by (namespace, pod) (kube_pod_container_resource_limits{namespace="mineral-prod", container="minerals", resource="memory"})
+            > 0.9
+          for: 10m
+          labels:
+            severity: warning
+            app: minerals
+          annotations:
+            summary: "minerals memory > 90% of limit (prod)"
+            description: >-
+              {{ $labels.pod }} working-set memory has been above 90% of its
+              1Gi limit for 10m. An OOMKill is likely if it continues.
+
+    # =====================================================================
+    # Backups & certificates (ties to mi-lhsu backup freshness)
+    # =====================================================================
+    - name: minerals.backups
+      interval: 1m
+      rules:
+        # Source: CloudNativePG operator metrics. Prod takes a weekly
+        # ScheduledBackup (docs/deploy/example/prod/scheduledbackup.yaml).
+        # Alert if the newest successful backup is older than 8 days (one
+        # weekly cycle + a day of slack).
+        - alert: MineralsBackupTooOld
+          expr: |
+            (time() - cnpg_collector_last_available_backup_timestamp{cluster="minerals-pg"}) > 60 * 60 * 24 * 8
+          for: 1h
+          labels:
+            severity: critical
+            app: minerals
+          annotations:
+            summary: "minerals Postgres backup is stale (prod)"
+            description: >-
+              The newest successful CNPG backup for cluster minerals-pg is
+              older than 8 days. The weekly ScheduledBackup is failing or
+              the backup destination (MinIO/B2) is unreachable. See
+              docs/deploy/restore.md.
+
+        # Distinct from "too old": the metric is entirely absent, meaning
+        # CNPG has never recorded a successful backup (or the operator
+        # metrics aren't scraped). `for: 6h` tolerates first-bootstrap.
+        - alert: MineralsBackupMissing
+          expr: |
+            absent(cnpg_collector_last_available_backup_timestamp{cluster="minerals-pg"})
+          for: 6h
+          labels:
+            severity: warning
+            app: minerals
+          annotations:
+            summary: "minerals has no recorded Postgres backup (prod)"
+            description: >-
+              No cnpg_collector_last_available_backup_timestamp series for
+              cluster minerals-pg. Either no successful backup has ever run,
+              or CNPG operator metrics are not scraped. Verify the
+              ScheduledBackup and the CNPG PodMonitor.
+
+        # Source: cert-manager metrics. The public TLS cert is issued by
+        # cert-manager (certificate.yaml). Warn 14 days out, page at 3.
+        - alert: MineralsCertExpiringSoon
+          expr: |
+            (certmanager_certificate_expiration_timestamp_seconds{namespace="mineral-prod"} - time()) / 86400 < 14
+          for: 1h
+          labels:
+            severity: warning
+            app: minerals
+          annotations:
+            summary: "minerals TLS cert expires in < 14 days (prod)"
+            description: >-
+              Certificate {{ $labels.name }} in {{ $labels.namespace }}
+              expires in less than 14 days and has not renewed. Check
+              cert-manager and the ACME issuer.
+
+        - alert: MineralsCertExpiringCritical
+          expr: |
+            (certmanager_certificate_expiration_timestamp_seconds{namespace="mineral-prod"} - time()) / 86400 < 3
+          for: 1h
+          labels:
+            severity: critical
+            app: minerals
+          annotations:
+            summary: "minerals TLS cert expires in < 3 days (prod)"
+            description: >-
+              Certificate {{ $labels.name }} in {{ $labels.namespace }}
+              expires in less than 3 days. Renewal has failed — the site
+              will start serving an expired cert. Investigate now.

@@ -175,6 +175,27 @@ func (r *UserPostgres) UpdateFieldDefaults(
 	return nil
 }
 
+// SetStatus overwrites the row's status (mi-3gxz). Used by the admin
+// suspend/unsuspend action — the caller validates the transition, this
+// is a plain status write. Returns ErrUserNotFound when no row matched.
+func (r *UserPostgres) SetStatus(
+	ctx context.Context, tx domain.Tx, id uuid.UUID, status domain.UserStatus, updatedAt time.Time,
+) error {
+	exec := r.execer(tx)
+	const q = `
+		UPDATE users
+		   SET status = $2, updated_at = $3
+		 WHERE id = $1`
+	tag, err := exec.Exec(ctx, q, id, string(status), updatedAt)
+	if err != nil {
+		return fmt.Errorf("user repo: set status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrUserNotFound
+	}
+	return nil
+}
+
 func (r *UserPostgres) execer(tx domain.Tx) domain.Tx {
 	if tx != nil {
 		return tx

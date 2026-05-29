@@ -677,6 +677,14 @@ const (
 	// UserStatusActive is the post-setup steady state — every
 	// protected API endpoint is reachable.
 	UserStatusActive UserStatus = "active"
+	// UserStatusSuspended is the operator-imposed account suspension
+	// (mi-3gxz / migration 0019). It is reached only from 'active' via
+	// the admin console; the user's Keycloak identity is disabled and
+	// their sessions are revoked, and the auth resolver fail-closes
+	// every protected request while the row carries this status.
+	// Reversible: unsuspend returns the row to 'active'. Distinct from
+	// 'deleted' — suspension preserves the user's data.
+	UserStatusSuspended UserStatus = "suspended"
 	// UserStatusDeleted is the GDPR-erasure tombstone — the row
 	// stays so foreign keys don't orphan, but PII is scrubbed.
 	UserStatusDeleted UserStatus = "deleted"
@@ -761,6 +769,12 @@ type UserRepo interface {
 	// back to the system default. Returns ErrUserNotFound when no row
 	// matched.
 	UpdateDefaultSpecimenVisibility(ctx context.Context, tx Tx, id uuid.UUID, visibility *Visibility, updatedAt time.Time) error
+	// SetStatus overwrites the row's status (mi-3gxz). Used by the
+	// admin suspend/unsuspend action to flip active↔suspended; it does
+	// not touch any other column. Returns ErrUserNotFound when no row
+	// matched. The caller validates the transition — this is a plain
+	// write.
+	SetStatus(ctx context.Context, tx Tx, id uuid.UUID, status UserStatus, updatedAt time.Time) error
 }
 
 // AdminUser is the admin/devops console's NON-PERSONAL view of a user
