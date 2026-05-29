@@ -164,6 +164,11 @@ type Deps struct {
 	// reported as the effective registration state until an operator
 	// first flips the runtime toggle (mi-pkn2).
 	RegistrationDefault bool
+	// AdminSuspend wires the operator account-suspension action
+	// (mi-3gxz): POST /api/v1/admin/users/{id}/suspend + unsuspend. nil
+	// (or a nil .Users) leaves both endpoints unregistered — the
+	// unit-test path; production wiring in cmd/minerals always sets it.
+	AdminSuspend *AdminSuspendDeps
 	// RateLimitMW enforces the per-tier token-bucket limits (mi-tnru):
 	// strict per-IP on auth endpoints, per-account (or per-IP when
 	// anonymous) on reads/writes/file-serving. Composes BETWEEN
@@ -255,7 +260,7 @@ func New(deps Deps) http.Handler {
 	// takedown action is wired (Specimens). Photo/journal removal layer
 	// on when their repos are present.
 	moderationWired := deps.Admin != nil && deps.Specimens != nil
-	registerAdminOperations(humaAPI, authMW, guard, deps.IncidentRegister != nil, deps.Admin, registrationToggleWired(deps.Settings), moderationWired)
+	registerAdminOperations(humaAPI, authMW, guard, deps.IncidentRegister != nil, deps.Admin, registrationToggleWired(deps.Settings), moderationWired, deps.AdminSuspend)
 	registerLegalOperations(humaAPI)
 	registerModerationOperations(humaAPI, authMW, guard, deps.Specimens, deps.Photos, deps.Journal)
 	registerIncidentRegisterOperations(humaAPI, authMW, guard, deps.IncidentRegister)

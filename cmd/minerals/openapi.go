@@ -225,6 +225,10 @@ func (specStubUserRepo) UpdateDefaultSpecimenVisibility(context.Context, domain.
 	return domain.ErrUserNotFound
 }
 
+func (specStubUserRepo) SetStatus(context.Context, domain.Tx, uuid.UUID, domain.UserStatus, time.Time) error {
+	return domain.ErrUserNotFound
+}
+
 // specStubAccountEraser is a never-called stand-in so the type-derived
 // OpenAPI spec advertises DELETE /api/v1/account during codegen
 // (mi-nwg5).
@@ -308,8 +312,11 @@ func runOpenAPI(args []string) error {
 		QRSheets: specStubQRSheetRepo{},
 		Account:  &api.AccountServiceDeps{Eraser: specStubAccountEraser{}},
 		Users:    specStubUserRepo{},
-		Settings: specStubSettingsRepo{},
 		Admin:    specStubAdminRepo{},
+		Settings: specStubSettingsRepo{},
+		AdminSuspend: &api.AdminSuspendDeps{
+			Users: specStubUserRepo{},
+		},
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        specStubJournalRepo{},
 			Attachments:    specStubJournalAttachmentRepo{},

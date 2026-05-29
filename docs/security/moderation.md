@@ -2,7 +2,7 @@
 
 > Operator runbook + policy for publicly visible user-generated content.
 > Bead: `mi-b2q0` (V3 launch prerequisite). Related: `mi-jjzc` (console
-> takedown hooks), `mi-3gxz` (Keycloak account disable), `mi-tnru` (rate
+> takedown hooks), `mi-3gxz` (account suspension), `mi-tnru` (rate
 > limiting), CONTRACT.md §13 (visibility model).
 
 ## Why this exists
@@ -80,10 +80,6 @@ backends — `status: "available"` on the `moderation` section of
 
 ### Deferred (tracked as follow-up beads)
 
-- **Account disable / suspension** — `mi-3gxz`. Disabling a Keycloak
-  account requires a Keycloak **admin** REST client, which is not yet
-  wired. Until then, disable accounts directly in the Keycloak admin
-  console (see [Disable an account](#disable-an-account)).
 - **Automated content scanning** (image classification, text toxicity)
   — out of scope for launch; revisit if report volume warrants it.
 
@@ -141,21 +137,43 @@ lookup.
 All admin actions are authenticated and authz-gated; takedowns and
 reports are logged, giving you an audit trail in the log stream.
 
-### Disable an account
+### Suspend an account
 
-Until `mi-3gxz` wires a Keycloak admin client into the app:
+`mi-3gxz` wired account suspension into the admin console. From the
+**Users** section of the admin console, the **Suspend** button on a
+user's row (devops-admin / admin only) does all of the following in one
+audited action:
 
-1. Open the **Keycloak admin console** (see `docs/deploy/keycloak.md`).
-2. Realm → **Users** → find the user (match on email/username) →
-   **Enabled: Off**. This blocks new logins and token issuance.
-3. The user's existing `public`/`unlisted` content stays visible until
-   you take it down — Keycloak disable does not cascade to app content.
-   Force-private their specimens (step 2 above) for each piece of
-   offending content. (App-side "hide all content on ban" is a possible
-   future enhancement, tracked with `mi-3gxz`.)
-4. For a GDPR/Law 25 **erasure** request (distinct from a ban), use the
-   account deletion path (`UserStatusDeleted` tombstone), not a Keycloak
-   disable.
+1. Disables the user's **Keycloak** identity (`enabled=false`) so they
+   cannot log in or obtain fresh tokens. (Skipped, with
+   `identity_synced=false` in the response, only when the deployment has
+   no Keycloak admin client configured — then disable the user in the
+   Keycloak console manually as below.)
+2. Flips the app account `status` to `suspended`. The auth gate
+   **fail-closes every authenticated request** for a suspended account
+   (403 `account_suspended`), so enforcement does not depend on the IdP
+   alone.
+3. Revokes the user's live sessions for immediate logout.
+
+**Unsuspend** reverses it (re-enables Keycloak, status back to
+`active`). The action is logged as `event=admin.account.suspended` /
+`admin.account.unsuspended`.
+
+Notes:
+
+- The user's existing `public`/`unlisted` content stays visible until
+  you take it down — suspension does not cascade to app content.
+  Force-private their specimens (step 2 above) for each piece of
+  offending content. (App-side "hide all content on ban" remains a
+  possible future enhancement.)
+- For a GDPR/Law 25 **erasure** request (distinct from a ban), use the
+  account deletion path (`UserStatusDeleted` tombstone), not suspension.
+
+If the console action is unavailable (no Keycloak admin client, or you
+prefer the IdP directly): open the **Keycloak admin console**
+(`docs/deploy/keycloak.md`) → Realm → **Users** → find the user →
+**Enabled: Off**. This blocks new logins but does NOT revoke live app
+sessions or set the app `suspended` status on its own.
 
 ## Threat → mitigation summary
 
@@ -176,3 +194,5 @@ Until `mi-3gxz` wires a Keycloak admin client into the app:
 | `POST /api/v1/admin/journal/{id}/remove` | `admin` | Moderation removal of any journal entry. `409` if it has attachments. Audit-logged (`moderation.remove_journal`). |
 | `DELETE /api/v1/photos/{id}` | owner or `admin` | Owner-style photo delete (admin can delete any via superset). |
 | `DELETE /api/v1/journal/{id}` | owner or `admin` | Owner-style journal delete (admin can delete any via superset). |
+| `POST /api/v1/admin/users/{id}/suspend` | `devops:edit` | Suspend an account: disable in Keycloak, revoke sessions, set status `suspended`. Audit-logged (`admin.account.suspended`). |
+| `POST /api/v1/admin/users/{id}/unsuspend` | `devops:edit` | Lift a suspension: re-enable Keycloak, status back to `active`. Audit-logged (`admin.account.unsuspended`). |

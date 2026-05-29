@@ -168,6 +168,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/users/{id}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suspend a user account (operator action)
+         * @description Operator moderation action: suspends a user account (mi-3gxz). The account's Keycloak identity is disabled (blocking new logins and token issuance), its live sessions are revoked for immediate effect, and the app status flips to `suspended` so the auth gate fail-closes every authenticated request. Reversible via unsuspend. Only an `active` account can be suspended (pending/deleted return 409); already-suspended is an idempotent 200. An operator cannot suspend their own account, nor the system account. Gated on `devops:edit` (devops-admin/admin); audit-logged. Returns 502 when the identity provider is configured but unreachable — no change is made.
+         */
+        post: operations["admin-suspend-user"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{id}/unsuspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lift a user account suspension (operator action)
+         * @description Reverses a suspension (mi-3gxz): re-enables the Keycloak identity and flips the app status back to `active`. An account that is not currently suspended is an idempotent 200 (its status is returned unchanged). Gated on `devops:edit` (devops-admin/admin); audit-logged. Returns 502 when the identity provider is configured but unreachable — no change is made.
+         */
+        post: operations["admin-unsuspend-user"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collectors": {
         parameters: {
             query?: never;
@@ -735,6 +775,23 @@ export interface components {
             /** @description Must be the literal string "DELETE" to authorize the irreversible erasure. */
             confirm: string;
         };
+        AccountStatusResultBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/AccountStatusResultBody.json
+             */
+            readonly $schema?: string;
+            /** @description The affected user's opaque id. */
+            id: string;
+            /** @description Whether the Keycloak identity's enabled flag was synced (false when no admin client is configured). */
+            identity_synced: boolean;
+            /**
+             * @description The account status after the action.
+             * @enum {string}
+             */
+            status: "pending" | "active" | "suspended" | "deleted";
+        };
         AddQRSheetSpecimenBody: {
             /**
              * Format: uri
@@ -842,7 +899,7 @@ export interface components {
              * @description Account status.
              * @enum {string}
              */
-            status: "pending" | "active" | "deleted";
+            status: "pending" | "active" | "suspended" | "deleted";
         };
         ApiError: {
             /**
@@ -1767,6 +1824,16 @@ export interface components {
              */
             visibility_price?: "private" | "unlisted" | "public";
         };
+        SuspendUserInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/SuspendUserInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description Optional operator note recorded in the suspension audit log. */
+            reason?: string;
+        };
         TakedownSpecimenBody: {
             /**
              * Format: uri
@@ -2417,6 +2484,191 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "admin-suspend-user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Target user's opaque id (UUIDv7). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SuspendUserInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountStatusResultBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "admin-unsuspend-user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Target user's opaque id (UUIDv7). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountStatusResultBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
