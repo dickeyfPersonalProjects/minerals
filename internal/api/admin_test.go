@@ -194,6 +194,48 @@ func TestAdminOverview_SectionsFlipWhenAdminWired(t *testing.T) {
 	}
 }
 
+// TestAdminOverview_ModerationSectionAvailable confirms the moderation
+// section flips to "available" once content can be listed (AdminRepo) AND
+// the takedown action is wired (specimen repo) — the mi-jjzc signal the
+// SPA uses to render the moderation panel instead of a placeholder.
+func TestAdminOverview_ModerationSectionAvailable(t *testing.T) {
+	t.Parallel()
+
+	enf, err := authz.NewEnforcer(nil, nil)
+	if err != nil {
+		t.Fatalf("new enforcer: %v", err)
+	}
+	if err := authz.SeedDefaultPolicies(enf); err != nil {
+		t.Fatalf("seed policies: %v", err)
+	}
+	const adminSub = "00000000-0000-0000-0000-0000000000a3"
+	verifier := fakeVerifier{tokens: map[string]*oidc.Claims{
+		"admin-tok": {Subject: adminSub, Email: "admin@minerals.local", Roles: []string{"admin"}},
+	}}
+	repo := newFakeUserRepo()
+	repo.seed(domain.User{ID: uuid.MustParse(adminSub), KeycloakSub: adminSub, Email: "admin@minerals.local", Status: domain.UserStatusActive})
+
+	h := New(Deps{Users: repo, Verifier: verifier, Enforcer: enf, Admin: &fakeAdminRepo{}, Specimens: newFakeSpecimenRepo()})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/overview", nil)
+	req.Header.Set("Authorization", "Bearer admin-tok")
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	var body adminOverviewBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v; raw = %s", err, rec.Body.String())
+	}
+	for _, s := range body.Sections {
+		if s.Key == "moderation" && s.Status != "available" {
+			t.Errorf("moderation section status = %q, want available", s.Status)
+		}
+	}
+}
+
 // TestAdminUsers_RoleGate is the load-bearing access-control test for the
 // non-personal user list: anonymous → 401, non-admin user → 403, and the
 // devops/admin roles → 200.

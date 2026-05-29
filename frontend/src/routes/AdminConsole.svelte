@@ -21,6 +21,7 @@
   import type { components } from '../lib/api/schema';
 
   type Overview = components['schemas']['AdminOverviewBody'];
+  type ContentItem = components['schemas']['AdminContentView'];
 
   let loading = $state(true);
   let denied = $state(false);
@@ -32,6 +33,18 @@
   let regEnabled: boolean | null = $state(null);
   let regBusy = $state(false);
   let regError: string | null = $state(null);
+
+  // Moderation panel (mi-jjzc). Loaded only when the moderation section
+  // reports "available". It reuses the published-content review feed
+  // (mi-gtkp) as the surface the operator acts on: take a specimen down
+  // (force private), or remove a photo / journal entry — regardless of
+  // owner. Each action is audit-logged server-side.
+  let modItems: ContentItem[] = $state([]);
+  let modLoading = $state(false);
+  let modError: string | null = $state(null);
+  // id of the row whose action is in flight, so only its button shows a
+  // busy state and the rest stay clickable.
+  let modBusyId: string | null = $state(null);
 
   // Only probe the backend when the client-side role hint says the
   // user might have access — an anonymous/normal user gets the inline
@@ -57,8 +70,73 @@
       if (siteMgmt?.status === 'available') {
         await loadRegistration();
       }
+      const moderation = data.sections?.find((s) => s.key === 'moderation');
+      if (moderation?.status === 'available') {
+        await loadModeration();
+      }
     }
   });
+
+  async function loadModeration() {
+    modLoading = true;
+    modError = null;
+    const { data, error } = await client.GET('/api/v1/admin/published-content', {
+      headers: { 'x-suppress-toast': '1' },
+    });
+    modLoading = false;
+    if (error || !data) {
+      modError = 'Failed to load published content for review. Try again.';
+      return;
+    }
+    modItems = data.items ?? [];
+  }
+
+  // moderate applies the action appropriate to the item's kind: a
+  // specimen is forced private (takedown); a photo or journal entry is
+  // removed. On success the row leaves the feed (a private specimen is
+  // no longer published; removed content is gone).
+  async function moderate(item: ContentItem) {
+    if (modBusyId) return;
+    const verb = item.kind === 'specimen' ? 'take down' : 'remove';
+    if (
+      !window.confirm(
+        `${verb === 'take down' ? 'Take down' : 'Remove'} "${item.title}"? ` +
+          (item.kind === 'specimen'
+            ? 'It will be forced private and removed from public view.'
+            : 'This permanently deletes it and cannot be undone.'),
+      )
+    ) {
+      return;
+    }
+    modBusyId = item.id;
+    modError = null;
+    let ok: boolean;
+    if (item.kind === 'specimen') {
+      const { response } = await client.POST('/api/v1/admin/specimens/{id}/takedown', {
+        params: { path: { id: item.id } },
+        body: {},
+      });
+      ok = response.ok;
+    } else if (item.kind === 'photo') {
+      const { response } = await client.POST('/api/v1/admin/photos/{id}/remove', {
+        params: { path: { id: item.id } },
+        body: {},
+      });
+      ok = response.ok;
+    } else {
+      const { response } = await client.POST('/api/v1/admin/journal/{id}/remove', {
+        params: { path: { id: item.id } },
+        body: {},
+      });
+      ok = response.ok;
+    }
+    modBusyId = null;
+    if (!ok) {
+      modError = `Failed to ${verb} "${item.title}". Try again.`;
+      return;
+    }
+    modItems = modItems.filter((i) => !(i.kind === item.kind && i.id === item.id));
+  }
 
   async function loadRegistration() {
     const { data } = await client.GET('/api/v1/admin/registration', {
@@ -154,5 +232,80 @@
         </li>
       {/each}
     </ul>
+
+    {#if overview.sections?.find((s) => s.key === 'moderation')?.status === 'available'}
+      <section class="mt-10" data-testid="moderation-panel">
+        <h2 class="text-lg font-semibold tracking-tight text-[var(--color-text)]">Moderation</h2>
+        <p class="mt-1 text-sm text-[var(--color-text-muted)]">
+          Published content across all users, for usage-policy review. Take a specimen down (forces
+          it private) or remove a photo or journal entry — regardless of owner. Every action is
+          logged.
+        </p>
+
+        {#if modError}
+          <p
+            class="mt-3 text-sm text-[var(--color-danger)]"
+            role="alert"
+            data-testid="moderation-error"
+          >
+            {modError}
+          </p>
+        {/if}
+
+        {#if modLoading}
+          <p class="mt-4 text-sm text-[var(--color-text-muted)]" data-testid="moderation-loading">
+            Loading published content…
+          </p>
+        {:else if modItems.length === 0}
+          <p class="mt-4 text-sm text-[var(--color-text-muted)]" data-testid="moderation-empty">
+            No published content to review.
+          </p>
+        {:else}
+          <ul
+            class="mt-4 divide-y divide-[var(--color-border)] rounded-lg border border-[var(--color-border)]"
+            data-testid="moderation-list"
+          >
+            {#each modItems as item (item.kind + ':' + item.id)}
+              <li
+                class="flex items-center justify-between gap-4 p-3"
+                data-testid={`moderation-item-${item.id}`}
+              >
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span
+                      class="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-text-muted)]"
+                    >
+                      {item.kind}
+                    </span>
+                    <span class="truncate text-sm font-medium text-[var(--color-text)]"
+                      >{item.title}</span
+                    >
+                  </div>
+                  <p class="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
+                    {item.owner_display_name ?? 'Unknown owner'} · {item.visibility}{#if item.preview}
+                      · {item.preview}{/if}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="shrink-0 rounded-md border border-[var(--color-danger)] px-3 py-1 text-xs font-medium text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 disabled:opacity-50"
+                  disabled={modBusyId !== null}
+                  onclick={() => moderate(item)}
+                  data-testid={`moderation-action-${item.id}`}
+                >
+                  {#if modBusyId === item.id}
+                    Working…
+                  {:else if item.kind === 'specimen'}
+                    Take down
+                  {:else}
+                    Remove
+                  {/if}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    {/if}
   {/if}
 </section>

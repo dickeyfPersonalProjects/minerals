@@ -54,15 +54,32 @@ threat that is rare at this scale.
    target, which only the `admin` superset satisfies for content it does
    not own.
 
+## Console moderation actions (`mi-jjzc`)
+
+The admin console (`/admin`) now hosts a **Moderation** panel that turns
+the report-driven runbook into one-click actions. It lists the
+published-content review feed (`GET /api/v1/admin/published-content`,
+`mi-gtkp`) — every public/unlisted specimen, photo, and journal entry
+across all users — and offers a per-row action keyed to the content kind:
+
+- **Specimen → Take down** → `POST /api/v1/admin/specimens/{id}/takedown`
+  (force private; `event=moderation.takedown`).
+- **Photo → Remove** → `POST /api/v1/admin/photos/{id}/remove` (deletes
+  the photo + its files row + MinIO objects; `event=moderation.remove_photo`).
+- **Journal entry → Remove** → `POST /api/v1/admin/journal/{id}/remove`
+  (deletes the entry; `event=moderation.remove_journal`). Returns `409`
+  if the entry still has file attachments — remove those first.
+
+All three are named, audit-logged wrappers over capabilities the `admin`
+role already holds via its Casbin `*:*:*` superset (gated on
+`specimens:edit` / `photos:delete` / `journal:delete` for the target), so
+they are admin-only in practice. The panel renders only when the console
+is wired with the see-all repo (so content can be listed) and the action
+backends — `status: "available"` on the `moderation` section of
+`GET /api/v1/admin/overview`.
+
 ### Deferred (tracked as follow-up beads)
 
-- **Console takedown UI + photo/journal removal** — `mi-jjzc`. The
-  baseline takedown only force-privates a *specimen*. To remove an
-  individual abusive **photo** or **journal entry** today, the operator
-  uses the existing owner-style endpoints (the `admin` superset lets an
-  admin call them on any user's content):
-  - `DELETE /api/v1/photos/{id}`
-  - `DELETE /api/v1/journal/{id}`
 - **Account disable / suspension** — `mi-3gxz`. Disabling a Keycloak
   account requires a Keycloak **admin** REST client, which is not yet
   wired. Until then, disable accounts directly in the Keycloak admin
@@ -98,7 +115,9 @@ lookup.
 
 1. **Review.** Open the reported specimen: `/specimens/<specimen_id>`.
    Judge it against the usage policy (abusive/illegal/spam/etc.).
-2. **Take the content down** (if it violates policy):
+2. **Take the content down** (if it violates policy) — easiest from the
+   **Moderation** panel in the admin console (`/admin`), which lists all
+   published content with a per-row action button. The underlying calls:
    - **Whole specimen** → force it private:
      ```
      POST /api/v1/admin/specimens/<specimen_id>/takedown
@@ -106,9 +125,14 @@ lookup.
      ```
      This flips visibility to `private` (removing it from all public and
      unlisted reach) and logs `event=moderation.takedown`. Idempotent.
-   - **A single photo** → `DELETE /api/v1/photos/<photo_id>` (admin can
-     delete any user's photo).
-   - **A single journal entry** → `DELETE /api/v1/journal/<entry_id>`.
+   - **A single photo** → `POST /api/v1/admin/photos/<photo_id>/remove`
+     (`event=moderation.remove_photo`; admin can remove any user's photo).
+   - **A single journal entry** →
+     `POST /api/v1/admin/journal/<entry_id>/remove`
+     (`event=moderation.remove_journal`; `409` if it still has
+     attachments). The owner-style `DELETE /api/v1/photos/{id}` and
+     `DELETE /api/v1/journal/{id}` remain available and behave
+     identically for an admin via the superset.
 3. **Repeat / escalate** for a repeat offender → disable the account.
 4. **Record** the action if it constitutes a confidentiality incident
    (Law 25 register — admin console `incident-register` surface, planned
@@ -148,5 +172,7 @@ Until `mi-3gxz` wires a Keycloak admin client into the app:
 |---|---|---|
 | `POST /api/v1/specimens/{id}/report` | Public (anonymous OK) | File an abuse report. 404 if the specimen isn't visible to the caller (no leak). |
 | `POST /api/v1/admin/specimens/{id}/takedown` | `admin` | Force specimen → `private`. Audit-logged. Idempotent. |
-| `DELETE /api/v1/photos/{id}` | owner or `admin` | Remove a photo (admin can remove any). |
-| `DELETE /api/v1/journal/{id}` | owner or `admin` | Remove a journal entry (admin can remove any). |
+| `POST /api/v1/admin/photos/{id}/remove` | `admin` | Moderation removal of any photo. Audit-logged (`moderation.remove_photo`). |
+| `POST /api/v1/admin/journal/{id}/remove` | `admin` | Moderation removal of any journal entry. `409` if it has attachments. Audit-logged (`moderation.remove_journal`). |
+| `DELETE /api/v1/photos/{id}` | owner or `admin` | Owner-style photo delete (admin can delete any via superset). |
+| `DELETE /api/v1/journal/{id}` | owner or `admin` | Owner-style journal delete (admin can delete any via superset). |

@@ -258,6 +258,21 @@ func (specStubSettingsRepo) SetRegistrationEnabled(context.Context, bool, uuid.U
 	return nil
 }
 
+// specStubAdminRepo is a never-called stand-in so the type-derived
+// OpenAPI spec advertises the admin see-all routes — /api/v1/admin/users
+// and /api/v1/admin/published-content — during codegen (mi-n5av /
+// mi-gtkp). The published-content feed is the surface the console's
+// moderation panel (mi-jjzc) acts on, so the frontend client needs it
+// typed.
+type specStubAdminRepo struct{}
+
+func (specStubAdminRepo) ListUsers(context.Context, domain.Page) ([]domain.AdminUser, domain.Cursor, error) {
+	return nil, "", nil
+}
+func (specStubAdminRepo) ListPublishedContent(context.Context, domain.Page) ([]domain.AdminContent, domain.Cursor, error) {
+	return nil, "", nil
+}
+
 // runOpenAPI writes the type-derived OpenAPI spec served by the
 // running server at /api/v1/openapi.json to stdout. The frontend
 // codegen Makefile target consumes the output. Uses an in-process
@@ -294,6 +309,7 @@ func runOpenAPI(args []string) error {
 		Account:  &api.AccountServiceDeps{Eraser: specStubAccountEraser{}},
 		Users:    specStubUserRepo{},
 		Settings: specStubSettingsRepo{},
+		Admin:    specStubAdminRepo{},
 		JournalFiles: &api.JournalFileServiceDeps{
 			Entries:        specStubJournalRepo{},
 			Attachments:    specStubJournalAttachmentRepo{},

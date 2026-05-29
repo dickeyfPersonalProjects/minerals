@@ -116,6 +116,11 @@ type adminService struct {
 	// toggle (mi-pkn2) is available — i.e. a settings store is wired. It
 	// flips the site-management section from "planned" to "available".
 	registrationToggleWired bool
+	// moderationWired reports whether the console moderation surface is
+	// operable (mi-jjzc): content can be listed (AdminRepo) and at least
+	// the takedown action is wired (specimen repo). It flips the
+	// moderation section from "planned" to "available".
+	moderationWired bool
 }
 
 // registerAdminOperations wires the admin/devops console endpoints.
@@ -125,8 +130,8 @@ type adminService struct {
 // in the overview manifest. The users + published-content data surfaces
 // (mi-n5av / mi-gtkp) register only when admin is non-nil, matching the
 // optional-repo pattern every other content surface follows.
-func registerAdminOperations(api huma.API, mws authMiddlewares, guard authzGuard, incidentRegisterWired bool, admin domain.AdminRepo, registrationToggleWired bool) {
-	s := &adminService{guard: guard, incidentRegisterWired: incidentRegisterWired, admin: admin, registrationToggleWired: registrationToggleWired}
+func registerAdminOperations(api huma.API, mws authMiddlewares, guard authzGuard, incidentRegisterWired bool, admin domain.AdminRepo, registrationToggleWired bool, moderationWired bool) {
+	s := &adminService{guard: guard, incidentRegisterWired: incidentRegisterWired, admin: admin, registrationToggleWired: registrationToggleWired, moderationWired: moderationWired}
 
 	huma.Register(api, huma.Operation{
 		OperationID: "admin-overview",
@@ -221,6 +226,14 @@ func (s *adminService) sections() []adminConsoleSection {
 			// once the settings store is wired so the SPA renders the
 			// control rather than a placeholder.
 			if s.registrationToggleWired {
+				out[i].Status = "available"
+			}
+		case "moderation":
+			// Hosts the takedown/removal action hooks (mi-jjzc); available
+			// once content can be listed and the takedown action is wired,
+			// so the SPA renders the moderation panel rather than a
+			// placeholder.
+			if s.moderationWired {
 				out[i].Status = "available"
 			}
 		}

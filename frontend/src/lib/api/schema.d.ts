@@ -24,6 +24,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/journal/{id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove a journal entry (operator moderation)
+         * @description Operator moderation action: permanently removes any journal entry regardless of owner. Gated on `journal:delete`; only the `admin` role (Casbin `*:*:*` superset) can delete content it does not own, so this is admin-only in practice. Returns 409 when the entry still has file attachments — the operator removes those first (or uses photo removal for image attachments). The action is audit-logged (`moderation.remove_journal`).
+         */
+        post: operations["admin-remove-journal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/overview": {
         parameters: {
             query?: never;
@@ -36,6 +56,46 @@ export interface paths {
          * @description Returns the console landing manifest. Gated to the admin/devops role via the CONTRACT §13 v2 `devops` Casbin resource: anonymous callers receive 401, authenticated non-admin callers receive 403, and devops-viewer/devops-admin/admin receive 200. The foundation (mi-agff) ships the gated shell + a placeholder manifest only; the data-bearing surfaces follow as sub-beads.
          */
         get: operations["admin-overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/photos/{id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove a photo (operator moderation)
+         * @description Operator moderation action: permanently removes any photo — the photos row, its files row, and all three MinIO objects (original + display + thumbnail) — regardless of owner. Gated on `photos:delete` for the photo's parent specimen; only the `admin` role (Casbin `*:*:*` superset) can delete content it does not own, so this is admin-only in practice. The action is audit-logged (`moderation.remove_photo`). This is a named, logged wrapper over the capability admin already holds via the normal DELETE /api/v1/photos/{id}.
+         */
+        post: operations["admin-remove-photo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/published-content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List all published content (usage-policy review)
+         * @description Cursor-paginated, owner-attributed feed of ALL public/unlisted content across users — specimens, their non-private photos, and their journal entries (mi-gtkp) — for usage-policy compliance review. Owner attribution is display name + opaque id only (NO email). Gated on the CONTRACT §13 v2 `devops` resource; every access is audit-logged.
+         */
+        get: operations["admin-list-published-content"];
         put?: never;
         post?: never;
         delete?: never;
@@ -82,6 +142,26 @@ export interface paths {
          * @description Operator moderation action: forces any specimen's visibility to `private`, removing it from public/unlisted reach. Gated on `specimens:edit` for the target — only the `admin` role (Casbin `*:*:*` superset) can edit content it does not own, so this is admin-only in practice. Idempotent: a specimen that is already private returns 200 unchanged. The action is audit-logged. Photo/journal removal and the console UI follow as sub-beads (mi-jjzc).
          */
         post: operations["admin-takedown-specimen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List all users (non-personal fields)
+         * @description Cursor-paginated list of ALL users across the instance, exposing only NON-PERSONAL fields (mi-n5av): opaque id, display name, content counts, account status, and creation time. By the mayor's 2026-05-24 PII decision this view carries NO email, NO IP, and no auth identifiers beyond the opaque id. Gated on the CONTRACT §13 v2 `devops` resource (devops-viewer/devops-admin/admin); every access is audit-logged.
+         */
+        get: operations["admin-list-users"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -678,6 +758,35 @@ export interface components {
             /** @description Human-readable section title. */
             title: string;
         };
+        AdminContentView: {
+            /**
+             * Format: date-time
+             * @description Row creation timestamp (RFC 3339).
+             */
+            created_at: string;
+            /** @description Id of the content row (specimen, photo, or journal entry). */
+            id: string;
+            /**
+             * @description Content type.
+             * @enum {string}
+             */
+            kind: "specimen" | "photo" | "journal";
+            /** @description Owner display name; null when never set. */
+            owner_display_name: string | null;
+            /** @description Opaque owner id — no email. */
+            owner_id: string;
+            /** @description Short excerpt (journal body, first 200 chars); empty for specimens and photos. */
+            preview: string;
+            /** @description Id of the anchor specimen (equals id when kind=specimen). */
+            specimen_id: string;
+            /** @description Anchor specimen name. */
+            title: string;
+            /**
+             * @description Effective visibility of the row.
+             * @enum {string}
+             */
+            visibility: "public" | "unlisted";
+        };
         AdminOverviewBody: {
             /**
              * Format: uri
@@ -691,6 +800,49 @@ export interface components {
             message: string;
             /** @description Planned console surfaces (mi-agff decomposition). Each lands as a follow-up sub-bead. */
             sections: components["schemas"]["AdminConsoleSection"][] | null;
+        };
+        AdminUserListBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/AdminUserListBody.json
+             */
+            readonly $schema?: string;
+            /** @description Page of users in (created_at DESC, id DESC) order — non-personal fields only. */
+            items: components["schemas"]["AdminUserView"][] | null;
+            /** @description Cursor for the next page; null at end of results. */
+            next_cursor: string | null;
+        };
+        AdminUserView: {
+            /**
+             * Format: date-time
+             * @description Account creation timestamp (RFC 3339).
+             */
+            created_at: string;
+            /** @description User's chosen display name; null when never set. */
+            display_name: string | null;
+            /** @description Opaque user id (UUIDv7) — the only identifier exposed; no email or auth subject. */
+            id: string;
+            /**
+             * Format: int64
+             * @description Number of journal entries authored by this user.
+             */
+            journal_count: number;
+            /**
+             * Format: int64
+             * @description Number of photos across this user's specimens.
+             */
+            photo_count: number;
+            /**
+             * Format: int64
+             * @description Number of specimens authored by this user.
+             */
+            specimen_count: number;
+            /**
+             * @description Account status.
+             * @enum {string}
+             */
+            status: "pending" | "active" | "deleted";
         };
         ApiError: {
             /**
@@ -1078,6 +1230,18 @@ export interface components {
              */
             updated_at: string;
         };
+        ModerationActionAck: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/ModerationActionAck.json
+             */
+            readonly $schema?: string;
+            /** @description Correlation id for this action (matches the logged moderation event). */
+            action_id: string;
+            /** @description Operator-facing acknowledgement. */
+            message: string;
+        };
         PatchCollectorBody: {
             /**
              * Format: uri
@@ -1322,6 +1486,18 @@ export interface components {
             /** @description Public display name; required, 1–80 characters, trimmed. */
             display_name: string;
         };
+        PublishedContentListBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/PublishedContentListBody.json
+             */
+            readonly $schema?: string;
+            /** @description Page of published content in (created_at DESC, id DESC) order. */
+            items: components["schemas"]["AdminContentView"][] | null;
+            /** @description Cursor for the next page; null at end of results. */
+            next_cursor: string | null;
+        };
         PutSpecimenCollectorsBody: {
             /**
              * Format: uri
@@ -1411,6 +1587,16 @@ export interface components {
              * @enum {string}
              */
             source: "stored" | "default";
+        };
+        RemoveContentBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example //schemas/RemoveContentBody.json
+             */
+            readonly $schema?: string;
+            /** @description Optional operator note recorded in the removal audit log. */
+            reason?: string;
         };
         ReportAck: {
             /**
@@ -1676,6 +1862,96 @@ export interface operations {
             };
         };
     };
+    "admin-remove-journal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Journal entry UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveContentBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModerationActionAck"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     "admin-overview": {
         parameters: {
             query?: never;
@@ -1705,6 +1981,157 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "admin-remove-photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Photo UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveContentBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModerationActionAck"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "admin-list-published-content": {
+        parameters: {
+            query?: {
+                /** @description Page size (1-200; defaults to 50, values above 200 silently clamped). */
+                limit?: number;
+                /** @description Opaque pagination cursor from the previous page (CONTRACT.md §10.3). */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishedContentListBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1902,6 +2329,76 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    "admin-list-users": {
+        parameters: {
+            query?: {
+                /** @description Page size (1-200; defaults to 50, values above 200 silently clamped). */
+                limit?: number;
+                /** @description Opaque pagination cursor from the previous page (CONTRACT.md §10.3). */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserListBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
