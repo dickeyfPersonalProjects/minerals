@@ -185,3 +185,176 @@ func TestTakedownSpecimen(t *testing.T) {
 		}
 	})
 }
+
+// moderationRemovalTestServer extends the moderation harness with wired
+// photo + journal repos so the admin removal endpoints (mi-jjzc) are
+// registered. It seeds one photo (with its file row + MinIO objects) and
+// one journal entry, both on the public specimen owned by a non-admin
+// user — the cross-owner removal the operator must be able to perform.
+func moderationRemovalTestServer(t *testing.T) (h http.Handler, photos *fakePhotoRepo, files *fakeFileRepo, store *fakeStorage, journal *fakeJournalRepo, photoID, journalID, fileID uuid.UUID) {
+	t.Helper()
+
+	enf, err := authz.NewEnforcer(nil, nil)
+	if err != nil {
+		t.Fatalf("new enforcer: %v", err)
+	}
+	if err := authz.SeedDefaultPolicies(enf); err != nil {
+		t.Fatalf("seed policies: %v", err)
+	}
+
+	const (
+		ownerSub = "00000000-0000-0000-0000-0000000000c1"
+		otherSub = "00000000-0000-0000-0000-0000000000c2"
+		adminSub = "00000000-0000-0000-0000-0000000000c3"
+	)
+	verifier := fakeVerifier{tokens: map[string]*oidc.Claims{
+		"owner-tok": {Subject: ownerSub, Email: "owner@minerals.local", Roles: []string{"user"}},
+		"other-tok": {Subject: otherSub, Email: "other@minerals.local", Roles: []string{"user"}},
+		"admin-tok": {Subject: adminSub, Email: "admin@minerals.local", Roles: []string{"admin"}},
+	}}
+
+	users := newFakeUserRepo()
+	for _, sub := range []string{ownerSub, otherSub, adminSub} {
+		users.seed(domain.User{
+			ID: uuid.MustParse(sub), KeycloakSub: sub,
+			Email: sub + "@minerals.local", Status: domain.UserStatusActive,
+		})
+	}
+
+	ownerID := uuid.MustParse(ownerSub)
+	specimens := newFakeSpecimenRepo()
+	specimenID := uuid.New()
+	specimens.rows[specimenID] = domain.Specimen{
+		ID: specimenID, Type: domain.SpecimenMineral, Name: "Public Quartz",
+		Visibility: domain.VisibilityPublic, AuthorID: ownerID,
+	}
+
+	photos = newFakePhotoRepo()
+	files = newFakeFileRepo()
+	store = newFakeStorage()
+	photoID = uuid.New()
+	fileID = uuid.New()
+	photos.rows[photoID] = domain.Photo{ID: photoID, SpecimenID: specimenID, FileID: fileID, Position: 1}
+	files.rows[fileID] = domain.File{ID: fileID, S3Key: "files/" + fileID.String()}
+	for _, suffix := range []string{"", variantDisplaySuffix, variantThumbSuffix} {
+		store.objects["files/"+fileID.String()+suffix] = []byte("x")
+	}
+
+	journal = newFakeJournalRepo()
+	journalID = uuid.New()
+	journal.rows[journalID] = domain.JournalEntry{ID: journalID, SpecimenID: specimenID, AuthorID: ownerID, BodyMD: "abuse"}
+
+	h = New(Deps{
+		Specimens: specimens, Users: users, Verifier: verifier, Enforcer: enf,
+		Photos:  &PhotoServiceDeps{Photos: photos, Files: files, Storage: store, RunInTx: nullTxRunner, Specimens: specimens},
+		Journal: &JournalServiceDeps{Entries: journal},
+	})
+	return h, photos, files, store, journal, photoID, journalID, fileID
+}
+
+// TestModerationRemovePhoto covers the operator photo-removal action: an
+// admin can remove another user's photo (200; DB rows + MinIO objects
+// gone), a plain non-owner user cannot (403), anonymous is rejected
+// (401), and a missing photo is 404.
+func TestModerationRemovePhoto(t *testing.T) {
+	t.Parallel()
+	h, photos, files, store, _, photoID, _, fileID := moderationRemovalTestServer(t)
+
+	t.Run("non-admin user cannot remove others' photo -> 403", func(t *testing.T) {
+		rec := postJSON(t, h, "/api/v1/admin/photos/"+photoID.String()+"/remove", "other-tok", map[string]any{})
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403; body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("anonymous cannot remove -> 401", func(t *testing.T) {
+		rec := postJSON(t, h, "/api/v1/admin/photos/"+photoID.String()+"/remove", "", map[string]any{})
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("missing photo -> 404", func(t *testing.T) {
+		rec := postJSON(t, h, "/api/v1/admin/photos/"+uuid.New().String()+"/remove", "admin-tok", map[string]any{})
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404; body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("admin removes another user's photo -> 200 + rows/objects gone", func(t *testing.T) {
+		rec := postJSON(t, h, "/api/v1/admin/photos/"+photoID.String()+"/remove", "admin-tok",
+			map[string]any{"reason": "illegal content"})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+		}
+		var ack moderationActionAck
+		if err := json.Unmarshal(rec.Body.Bytes(), &ack); err != nil {
+			t.Fatalf("decode ack: %v; raw = %s", err, rec.Body.String())
+		}
+		if ack.ActionID == "" {
+			t.Error("action_id is empty")
+		}
+		if _, ok := photos.rows[photoID]; ok {
+			t.Error("photo row still present after removal")
+		}
+		if _, ok := files.rows[fileID]; ok {
+			t.Error("file row still present after removal")
+		}
+		for _, suffix := range []string{"", variantDisplaySuffix, variantThumbSuffix} {
+			if _, ok := store.objects["files/"+fileID.String()+suffix]; ok {
+				t.Errorf("MinIO object %q still present after removal", suffix)
+			}
+		}
+	})
+}
+
+// TestModerationRemoveJournal covers the operator journal-removal action:
+// an admin can remove another user's entry (200; row gone), a non-owner
+// user cannot (403), anonymous is rejected (401), a missing entry is 404,
+// and an entry with attachments returns 409.
+func TestModerationRemoveJournal(t *testing.T) {
+	t.Parallel()
+	h, _, _, _, journal, _, journalID, _ := moderationRemovalTestServer(t)
+
+	t.Run("non-admin user cannot remove others' entry -> 403", func(t *testing.T) {
+		rec := postJSON(t, h, "/api/v1/admin/journal/"+journalID.String()+"/remove", "other-tok", map[string]any{})
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403; body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("anonymous cannot remove -> 401", func(t *testing.T) {
+		rec := postJSON(t, h, "/api/v1/admin/journal/"+journalID.String()+"/remove", "", map[string]any{})
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("missing entry -> 404", func(t *testing.T) {
+		rec := postJSON(t, h, "/api/v1/admin/journal/"+uuid.New().String()+"/remove", "admin-tok", map[string]any{})
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404; body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("entry with attachments -> 409", func(t *testing.T) {
+		withFiles := uuid.New()
+		journal.rows[withFiles] = domain.JournalEntry{ID: withFiles, AuthorID: uuid.MustParse("00000000-0000-0000-0000-0000000000c1")}
+		journal.hasFilesFor[withFiles] = true
+		rec := postJSON(t, h, "/api/v1/admin/journal/"+withFiles.String()+"/remove", "admin-tok", map[string]any{})
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status = %d, want 409; body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("admin removes another user's entry -> 200 + row gone", func(t *testing.T) {
+		rec := postJSON(t, h, "/api/v1/admin/journal/"+journalID.String()+"/remove", "admin-tok",
+			map[string]any{"reason": "abusive text"})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+		}
+		if _, ok := journal.rows[journalID]; ok {
+			t.Error("journal row still present after removal")
+		}
+	})
+}

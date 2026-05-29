@@ -713,34 +713,39 @@ func (s *PhotoService) delete(ctx context.Context, in *deletePhotoInput) (*delet
 	if err := s.enforcePhoto(ctx, current.SpecimenID, current.ID, actDelete); err != nil {
 		return nil, err
 	}
+	if err := removePhotoBytes(ctx, s.deps, current); err != nil {
+		return nil, mapPhotoError(err)
+	}
+	return &deletePhotoOutput{}, nil
+}
 
-	originalKey := "files/" + current.FileID.String()
+// removePhotoBytes deletes a photo's DB rows (photos + files) in a
+// single transaction, then best-effort-removes its three MinIO objects
+// (original + display + thumbnail). Per CONTRACT.md §12 the DB is the
+// source of truth; if MinIO cleanup fails the orphan is logged and the
+// cleanup job picks it up later (deferred for v1). Shared by the
+// owner-facing DELETE handler and the admin moderation remove action
+// (mi-jjzc) so the cleanup lives in exactly one place.
+func removePhotoBytes(ctx context.Context, deps PhotoServiceDeps, p domain.Photo) error {
+	originalKey := "files/" + p.FileID.String()
 	displayKey := originalKey + variantDisplaySuffix
 	thumbKey := originalKey + variantThumbSuffix
 
-	// Remove DB rows first (in a transaction); then best-effort
-	// delete MinIO objects. Per CONTRACT.md §12 the DB is the source
-	// of truth; if MinIO cleanup fails the orphan-cleanup job picks
-	// it up later (deferred for v1).
-	txErr := s.deps.RunInTx(ctx, func(tx domain.Tx) error {
-		if err := s.deps.Photos.Delete(ctx, tx, current.ID); err != nil {
+	if txErr := deps.RunInTx(ctx, func(tx domain.Tx) error {
+		if err := deps.Photos.Delete(ctx, tx, p.ID); err != nil {
 			return err
 		}
-		if err := s.deps.Files.Delete(ctx, tx, current.FileID); err != nil {
-			return err
-		}
-		return nil
-	})
-	if txErr != nil {
-		return nil, mapPhotoError(txErr)
+		return deps.Files.Delete(ctx, tx, p.FileID)
+	}); txErr != nil {
+		return txErr
 	}
 
 	for _, k := range []string{originalKey, displayKey, thumbKey} {
-		if err := s.deps.Storage.Delete(ctx, k); err != nil {
+		if err := deps.Storage.Delete(ctx, k); err != nil {
 			slog.ErrorContext(ctx, "minio orphan after delete", "key", k, "err", err)
 		}
 	}
-	return &deletePhotoOutput{}, nil
+	return nil
 }
 
 func registerPhotoDownloadRoutes(mux *http.ServeMux, s *PhotoService, verifier auth.TokenVerifier) {

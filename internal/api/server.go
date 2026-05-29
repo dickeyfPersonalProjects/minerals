@@ -250,9 +250,14 @@ func New(deps Deps) http.Handler {
 	registerQRSheetOperations(humaAPI, authMW, guard, deps.QRSheets, deps.Specimens)
 	registerProfileOperations(humaAPI, authMW, deps.Users)
 	registerAccountOperations(humaAPI, authMW, deps.Account)
-	registerAdminOperations(humaAPI, authMW, guard, deps.IncidentRegister != nil, deps.Admin, registrationToggleWired(deps.Settings))
+	// Moderation actions land in the console's moderation surface; it is
+	// "available" once content can be listed (Admin) AND at least the
+	// takedown action is wired (Specimens). Photo/journal removal layer
+	// on when their repos are present.
+	moderationWired := deps.Admin != nil && deps.Specimens != nil
+	registerAdminOperations(humaAPI, authMW, guard, deps.IncidentRegister != nil, deps.Admin, registrationToggleWired(deps.Settings), moderationWired)
 	registerLegalOperations(humaAPI)
-	registerModerationOperations(humaAPI, authMW, guard, deps.Specimens)
+	registerModerationOperations(humaAPI, authMW, guard, deps.Specimens, deps.Photos, deps.Journal)
 	registerIncidentRegisterOperations(humaAPI, authMW, guard, deps.IncidentRegister)
 	registerRegistrationOperations(humaAPI, authMW, guard, deps.Settings, deps.RegistrationSync, deps.RegistrationDefault)
 	registerSpecimenRedirect(mux)
