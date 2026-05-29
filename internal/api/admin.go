@@ -14,6 +14,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -121,6 +122,26 @@ type adminService struct {
 	// the takedown action is wired (specimen repo). It flips the
 	// moderation section from "planned" to "available".
 	moderationWired bool
+	// suspend wires the operator account-suspension action (mi-3gxz).
+	// nil leaves the suspend/unsuspend endpoints unregistered (the
+	// unit-test path / a deployment without a user repo).
+	suspend *AdminSuspendDeps
+}
+
+// AdminSuspendDeps wires the operator account-suspension action
+// (mi-3gxz): POST .../users/{id}/suspend and .../unsuspend. Users is
+// required — a nil Users (or nil AdminSuspendDeps) leaves both
+// endpoints unregistered. Identity and Sessions are optional
+// collaborators:
+//   - Identity disables/enables the Keycloak user (blocks new logins).
+//     nil when no admin client is configured; the action then reports
+//     identity_synced=false and relies on the app-level block alone.
+//   - Sessions force-logs-out the suspended user's live sessions for
+//     immediate effect. nil skips that best-effort step.
+type AdminSuspendDeps struct {
+	Users    domain.UserRepo
+	Identity domain.IdentitySuspender
+	Sessions accountSessionRevoker
 }
 
 // registerAdminOperations wires the admin/devops console endpoints.
@@ -130,8 +151,8 @@ type adminService struct {
 // in the overview manifest. The users + published-content data surfaces
 // (mi-n5av / mi-gtkp) register only when admin is non-nil, matching the
 // optional-repo pattern every other content surface follows.
-func registerAdminOperations(api huma.API, mws authMiddlewares, guard authzGuard, incidentRegisterWired bool, admin domain.AdminRepo, registrationToggleWired bool, moderationWired bool) {
-	s := &adminService{guard: guard, incidentRegisterWired: incidentRegisterWired, admin: admin, registrationToggleWired: registrationToggleWired, moderationWired: moderationWired}
+func registerAdminOperations(api huma.API, mws authMiddlewares, guard authzGuard, incidentRegisterWired bool, admin domain.AdminRepo, registrationToggleWired bool, moderationWired bool, suspend *AdminSuspendDeps) {
+	s := &adminService{guard: guard, incidentRegisterWired: incidentRegisterWired, admin: admin, registrationToggleWired: registrationToggleWired, moderationWired: moderationWired, suspend: suspend}
 
 	huma.Register(api, huma.Operation{
 		OperationID: "admin-overview",
@@ -148,6 +169,42 @@ func registerAdminOperations(api huma.API, mws authMiddlewares, guard authzGuard
 		Errors:      []int{http.StatusUnauthorized, http.StatusForbidden},
 		Middlewares: mws.Protected(),
 	}, s.overview)
+
+	if suspend != nil && suspend.Users != nil {
+		huma.Register(api, huma.Operation{
+			OperationID: "admin-suspend-user",
+			Method:      http.MethodPost,
+			Path:        "/api/v1/admin/users/{id}/suspend",
+			Summary:     "Suspend a user account (operator action)",
+			Description: "Operator moderation action: suspends a user account (mi-3gxz). The " +
+				"account's Keycloak identity is disabled (blocking new logins and token " +
+				"issuance), its live sessions are revoked for immediate effect, and the app " +
+				"status flips to `suspended` so the auth gate fail-closes every authenticated " +
+				"request. Reversible via unsuspend. Only an `active` account can be suspended " +
+				"(pending/deleted return 409); already-suspended is an idempotent 200. An " +
+				"operator cannot suspend their own account, nor the system account. Gated on " +
+				"`devops:edit` (devops-admin/admin); audit-logged. Returns 502 when the " +
+				"identity provider is configured but unreachable — no change is made.",
+			Tags:        []string{"admin"},
+			Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusBadGateway},
+			Middlewares: mws.Protected(),
+		}, s.suspendUser)
+
+		huma.Register(api, huma.Operation{
+			OperationID: "admin-unsuspend-user",
+			Method:      http.MethodPost,
+			Path:        "/api/v1/admin/users/{id}/unsuspend",
+			Summary:     "Lift a user account suspension (operator action)",
+			Description: "Reverses a suspension (mi-3gxz): re-enables the Keycloak identity and " +
+				"flips the app status back to `active`. An account that is not currently " +
+				"suspended is an idempotent 200 (its status is returned unchanged). Gated on " +
+				"`devops:edit` (devops-admin/admin); audit-logged. Returns 502 when the " +
+				"identity provider is configured but unreachable — no change is made.",
+			Tags:        []string{"admin"},
+			Errors:      []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusBadGateway},
+			Middlewares: mws.Protected(),
+		}, s.unsuspendUser)
+	}
 
 	if admin == nil {
 		return
@@ -247,7 +304,7 @@ func (s *adminService) sections() []adminConsoleSection {
 type adminUserView struct {
 	ID            uuid.UUID `json:"id" doc:"Opaque user id (UUIDv7) — the only identifier exposed; no email or auth subject."`
 	DisplayName   *string   `json:"display_name" doc:"User's chosen display name; null when never set."`
-	Status        string    `json:"status" doc:"Account status." enum:"pending,active,deleted"`
+	Status        string    `json:"status" doc:"Account status." enum:"pending,active,suspended,deleted"`
 	SpecimenCount int       `json:"specimen_count" doc:"Number of specimens authored by this user."`
 	PhotoCount    int       `json:"photo_count" doc:"Number of photos across this user's specimens."`
 	JournalCount  int       `json:"journal_count" doc:"Number of journal entries authored by this user."`
@@ -362,6 +419,201 @@ func (s *adminService) listPublishedContent(ctx context.Context, in *listPublish
 	}
 	s.auditView(ctx, "published-content", len(items))
 	return &listPublishedContentOutput{Body: body}, nil
+}
+
+// suspendUserInput is the POST .../users/{id}/suspend request. The
+// optional reason is recorded verbatim in the audit log.
+type suspendUserInput struct {
+	ID   string `path:"id" doc:"Target user's opaque id (UUIDv7)."`
+	Body struct {
+		Reason string `json:"reason,omitempty" maxLength:"500" doc:"Optional operator note recorded in the suspension audit log."`
+	}
+}
+
+type unsuspendUserInput struct {
+	ID string `path:"id" doc:"Target user's opaque id (UUIDv7)."`
+}
+
+// accountStatusResultBody confirms the post-action account state. It
+// carries no PII — only the opaque id, the resulting status, and
+// whether the Keycloak identity was synced (false when no admin client
+// is configured, signalling the operator to disable/enable the user in
+// the Keycloak console directly).
+type accountStatusResultBody struct {
+	ID             uuid.UUID `json:"id" doc:"The affected user's opaque id."`
+	Status         string    `json:"status" doc:"The account status after the action." enum:"pending,active,suspended,deleted"`
+	IdentitySynced bool      `json:"identity_synced" doc:"Whether the Keycloak identity's enabled flag was synced (false when no admin client is configured)."`
+}
+
+type accountStatusOutput struct {
+	Body accountStatusResultBody
+}
+
+// suspendUser disables an account. Ordering mirrors the registration
+// toggle (registration.go): the identity provider is touched FIRST, so
+// a sync failure aborts with both the IdP and the app row at their
+// prior (active/enabled) state — consistent — rather than marking the
+// app suspended while the IdP user stays enabled. Only after the IdP
+// agrees do we persist the status flip and revoke sessions.
+func (s *adminService) suspendUser(ctx context.Context, in *suspendUserInput) (*accountStatusOutput, error) {
+	if err := s.guard.check(ctx, &authz.Resource{Type: adminConsoleResource}, actEdit); err != nil {
+		return nil, err
+	}
+	id, err := parseUUID(in.ID, "id")
+	if err != nil {
+		return nil, err
+	}
+
+	// An operator must not lock themselves out, and the system/stub
+	// account underpins legacy author_id FKs — neither is suspendable.
+	if caller := auth.FromContext(ctx); caller.ID == id {
+		return nil, newAPIError(http.StatusBadRequest, "cannot_suspend_self",
+			"you cannot suspend your own account", nil)
+	}
+	if id == auth.StubUser.ID {
+		return nil, newAPIError(http.StatusForbidden, "cannot_suspend_system",
+			"the system account cannot be suspended", nil)
+	}
+
+	u, err := s.suspend.Users.GetByID(ctx, id)
+	if err != nil {
+		return nil, mapUserLookupError(err)
+	}
+	switch u.Status {
+	case domain.UserStatusSuspended:
+		// Idempotent: already suspended, nothing to do.
+		return &accountStatusOutput{Body: accountStatusResultBody{
+			ID: id, Status: string(u.Status), IdentitySynced: s.suspend.Identity != nil,
+		}}, nil
+	case domain.UserStatusDeleted:
+		return nil, newAPIError(http.StatusConflict, "account_deleted",
+			"cannot suspend a deleted account", nil)
+	case domain.UserStatusActive:
+		// proceed
+	default: // pending
+		return nil, newAPIError(http.StatusConflict, "account_not_active",
+			"only an active account can be suspended", nil)
+	}
+
+	identitySynced, err := s.syncIdentityEnabled(ctx, u.KeycloakSub, false)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.suspend.Users.SetStatus(ctx, nil, id, domain.UserStatusSuspended, time.Now().UTC()); err != nil {
+		// The IdP is already disabled (when synced) — the account is
+		// still blocked, the app status just didn't record it. Fail
+		// loudly so the operator can retry; this is the safe direction.
+		slog.ErrorContext(ctx, "account suspend: status persist failed",
+			"event", "admin.account.suspend_persist_failed", "user_id", id, "err", err)
+		return nil, newAPIError(http.StatusInternalServerError, "internal_error",
+			"failed to persist the suspension", nil)
+	}
+
+	// Best-effort immediate logout. The auth gate already fail-closes on
+	// the suspended status, so a revoke failure cannot leave the account
+	// usable — it only delays the cookie's own invalidation.
+	revoked := true
+	if s.suspend.Sessions != nil {
+		if err := s.suspend.Sessions.RevokeAllForUser(ctx, id); err != nil {
+			revoked = false
+			slog.ErrorContext(ctx, "account suspend: session revoke failed",
+				"event", "admin.account.suspend_revoke_failed", "user_id", id, "err", err)
+		}
+	}
+
+	s.auditAccountAction(ctx, "admin.account.suspended", id, identitySynced, revoked, in.Body.Reason)
+	return &accountStatusOutput{Body: accountStatusResultBody{
+		ID: id, Status: string(domain.UserStatusSuspended), IdentitySynced: identitySynced,
+	}}, nil
+}
+
+// unsuspendUser lifts a suspension. Symmetric to suspendUser: re-enable
+// the IdP first (a failure aborts with both sides still suspended),
+// then flip the app status back to active.
+func (s *adminService) unsuspendUser(ctx context.Context, in *unsuspendUserInput) (*accountStatusOutput, error) {
+	if err := s.guard.check(ctx, &authz.Resource{Type: adminConsoleResource}, actEdit); err != nil {
+		return nil, err
+	}
+	id, err := parseUUID(in.ID, "id")
+	if err != nil {
+		return nil, err
+	}
+
+	u, err := s.suspend.Users.GetByID(ctx, id)
+	if err != nil {
+		return nil, mapUserLookupError(err)
+	}
+	if u.Status != domain.UserStatusSuspended {
+		// Idempotent: not suspended, nothing to lift. Return the
+		// current status unchanged.
+		return &accountStatusOutput{Body: accountStatusResultBody{
+			ID: id, Status: string(u.Status), IdentitySynced: s.suspend.Identity != nil,
+		}}, nil
+	}
+
+	identitySynced, err := s.syncIdentityEnabled(ctx, u.KeycloakSub, true)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.suspend.Users.SetStatus(ctx, nil, id, domain.UserStatusActive, time.Now().UTC()); err != nil {
+		slog.ErrorContext(ctx, "account unsuspend: status persist failed",
+			"event", "admin.account.unsuspend_persist_failed", "user_id", id, "err", err)
+		return nil, newAPIError(http.StatusInternalServerError, "internal_error",
+			"failed to persist the unsuspension", nil)
+	}
+
+	s.auditAccountAction(ctx, "admin.account.unsuspended", id, identitySynced, false, "")
+	return &accountStatusOutput{Body: accountStatusResultBody{
+		ID: id, Status: string(domain.UserStatusActive), IdentitySynced: identitySynced,
+	}}, nil
+}
+
+// syncIdentityEnabled flips the Keycloak user's enabled flag when an
+// admin client is configured, returning whether the sync ran. A sync
+// failure is surfaced as 502 so the caller aborts before mutating app
+// state, keeping the IdP and the app row consistent.
+func (s *adminService) syncIdentityEnabled(ctx context.Context, sub string, enabled bool) (bool, error) {
+	if s.suspend.Identity == nil {
+		return false, nil
+	}
+	if err := s.suspend.Identity.SetIdentityEnabled(ctx, sub, enabled); err != nil {
+		slog.ErrorContext(ctx, "account suspend: keycloak identity sync failed",
+			"event", "admin.account.identity_sync_failed", "enabled", enabled, "err", err)
+		return false, newAPIError(http.StatusBadGateway, "identity_sync_failed",
+			"failed to update the account at the identity provider; no change was made", nil)
+	}
+	return true, nil
+}
+
+// mapUserLookupError maps a UserRepo.GetByID error to the API envelope:
+// a missing row is 404, anything else is a 500.
+func mapUserLookupError(err error) error {
+	if errors.Is(err, domain.ErrUserNotFound) {
+		return newAPIError(http.StatusNotFound, "user_not_found", "no such user", nil)
+	}
+	return newAPIError(http.StatusInternalServerError, "internal_error", "failed to load user", nil)
+}
+
+// auditAccountAction emits the structured audit event for a suspend or
+// unsuspend. No PII: the actor and target are opaque ids, roles come
+// from the JWT.
+func (s *adminService) auditAccountAction(ctx context.Context, event string, target uuid.UUID, identitySynced, sessionsRevoked bool, reason string) {
+	u := auth.FromContext(ctx)
+	actor := "unknown"
+	if u.ID != uuid.Nil {
+		actor = u.ID.String()
+	}
+	slog.WarnContext(ctx, "admin account action",
+		"event", event,
+		"target_id", target.String(),
+		"actor", actor,
+		"roles", strings.Join(u.Roles, ","),
+		"identity_synced", identitySynced,
+		"sessions_revoked", sessionsRevoked,
+		"reason", reason,
+	)
 }
 
 // auditView emits the structured audit-trail event the bead requires:

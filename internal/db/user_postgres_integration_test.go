@@ -295,3 +295,54 @@ func TestIntegration_User_UpdateDefaultSpecimenVisibilityUnknownID(t *testing.T)
 		t.Fatalf("unknown id: want ErrUserNotFound, got %v", err)
 	}
 }
+
+// TestIntegration_User_SetStatus exercises the suspend/unsuspend status
+// write (mi-3gxz), including that the 'suspended' value satisfies the
+// migration-0019 CHECK constraint and round-trips back to 'active'.
+func TestIntegration_User_SetStatus(t *testing.T) {
+	pool := scopedDB(t)
+	repo := db.NewUserPostgres(pool)
+	ctx := context.Background()
+
+	u := mkUser(t, "setstatus-"+uuid.NewString())
+	if err := repo.Create(ctx, nil, u); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	bumped := u.UpdatedAt.Add(time.Second)
+	if err := repo.SetStatus(ctx, nil, u.ID, domain.UserStatusSuspended, bumped); err != nil {
+		t.Fatalf("set suspended: %v", err)
+	}
+	got, err := repo.GetBySub(ctx, u.KeycloakSub)
+	if err != nil {
+		t.Fatalf("get after suspend: %v", err)
+	}
+	if got.Status != domain.UserStatusSuspended {
+		t.Errorf("status: got %s, want suspended", got.Status)
+	}
+	if !got.UpdatedAt.Equal(bumped) {
+		t.Errorf("updated_at: got %v, want %v", got.UpdatedAt, bumped)
+	}
+
+	bumped2 := bumped.Add(time.Second)
+	if err := repo.SetStatus(ctx, nil, u.ID, domain.UserStatusActive, bumped2); err != nil {
+		t.Fatalf("set active: %v", err)
+	}
+	got, err = repo.GetBySub(ctx, u.KeycloakSub)
+	if err != nil {
+		t.Fatalf("get after unsuspend: %v", err)
+	}
+	if got.Status != domain.UserStatusActive {
+		t.Errorf("status: got %s, want active", got.Status)
+	}
+}
+
+func TestIntegration_User_SetStatusUnknownID(t *testing.T) {
+	pool := scopedDB(t)
+	repo := db.NewUserPostgres(pool)
+
+	err := repo.SetStatus(context.Background(), nil, uuid.New(), domain.UserStatusSuspended, time.Now().UTC())
+	if !errors.Is(err, domain.ErrUserNotFound) {
+		t.Fatalf("unknown id: want ErrUserNotFound, got %v", err)
+	}
+}

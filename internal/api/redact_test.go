@@ -108,6 +108,13 @@ func (r *redactFakeUserRepo) UpdateDefaultSpecimenVisibility(_ context.Context, 
 	return nil
 }
 
+func (r *redactFakeUserRepo) SetStatus(_ context.Context, _ domain.Tx, id uuid.UUID, status domain.UserStatus, _ time.Time) error {
+	u := r.byID[id]
+	u.Status = status
+	r.byID[id] = u
+	return nil
+}
+
 // visPtr is a one-shot Visibility pointer helper for the table; the
 // matrix needs the explicit pointer-vs-nil distinction to drive the
 // override-layer dimension.
@@ -628,6 +635,9 @@ func (r *countingUserRepo) UpdateFieldDefaults(ctx context.Context, tx domain.Tx
 }
 func (r *countingUserRepo) UpdateDefaultSpecimenVisibility(ctx context.Context, tx domain.Tx, id uuid.UUID, visibility *domain.Visibility, t time.Time) error {
 	return r.inner.UpdateDefaultSpecimenVisibility(ctx, tx, id, visibility, t)
+}
+func (r *countingUserRepo) SetStatus(ctx context.Context, tx domain.Tx, id uuid.UUID, status domain.UserStatus, t time.Time) error {
+	return r.inner.SetStatus(ctx, tx, id, status, t)
 }
 
 // reflectivePeek is a tiny utility used by the matrix's failure path

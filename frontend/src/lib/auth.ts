@@ -52,6 +52,19 @@ export const canAccessAdminConsole: Readable<boolean> = derived(store, ($s) =>
   ($s.user?.roles ?? []).some((r) => ADMIN_CONSOLE_ROLES.includes(r)),
 );
 
+// Realm roles that hold `devops:edit` (write actions like the
+// registration toggle and account suspend/unsuspend): devops-admin and
+// the admin superset — NOT the view-only devops-viewer. UI-gating hint
+// only; the backend enforces `devops:edit` per endpoint.
+const DEVOPS_EDIT_ROLES = ['admin', 'devops-admin'];
+
+// True iff the current user may perform devops write actions. Hides
+// destructive console controls from a view-only devops-viewer so they
+// don't click a guaranteed-403; the server is still authoritative.
+export const canEditDevops: Readable<boolean> = derived(store, ($s) =>
+  ($s.user?.roles ?? []).some((r) => DEVOPS_EDIT_ROLES.includes(r)),
+);
+
 let inflight: Promise<AuthUser | null> | null = null;
 
 /**
