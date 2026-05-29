@@ -633,6 +633,28 @@ by individual feature beads against
 `prometheus.DefaultRegisterer`. No additional wiring is required to
 surface them on `/metrics`; registration alone is sufficient.
 
+### Alerting, routing & dashboards
+
+Scraping metrics is only half of observability — someone (or something)
+has to *watch* them. [`observability.md`](./observability.md) is the
+operator's guide to the rest (mi-vp0w):
+
+- **Alerting rules** (`PrometheusRule`) for the failure modes already
+  seen — pod NotReady (the mi-hkh6 incident), DB-pool/session slowness,
+  5xx/429 rate, CrashLoop/OOM, stale Postgres backups (mi-lhsu), and TLS
+  cert expiry.
+- **Alert routing** (`AlertmanagerConfig`) — where alerts GO: a single
+  operator email plus a webhook is the solo-ops minimum.
+- **A Grafana dashboard** — minerals overview (request rate/latency/error,
+  pod health, DB/session metrics, memory).
+
+The example overlays ship all of these
+([`example/prod/`](./example/prod/) carries the full set;
+[`example/staging/`](./example/staging/) carries warning-only rules). See
+[`observability.md`](./observability.md) for the ingress-controller caveat
+on the request-rate alerts, the selector-mismatch gotchas, and the
+end-to-end alert test.
+
 ---
 
 ## Verifying the example renders

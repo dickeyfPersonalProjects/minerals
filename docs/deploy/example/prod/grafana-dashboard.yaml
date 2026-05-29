@@ -1,0 +1,253 @@
+# Grafana dashboard — minerals overview (mi-vp0w).
+#
+# Delivery mechanism: the kube-prometheus-stack Grafana runs a sidecar
+# that watches ConfigMaps cluster-wide for the label `grafana_dashboard: "1"`
+# and imports their JSON automatically — no Grafana API call, no manual
+# upload. (Confirm your stack enables the sidecar:
+#   helm get values <release> | grep -A3 'sidecar:' )
+#
+# The dashboard is env-agnostic: a `namespace` template variable (default
+# mineral-prod) drives every query, so the same ConfigMap visualises any
+# minerals namespace. The sidecar imports it once cluster-wide; you do not
+# need a copy per overlay. It lives in the prod overlay because prod is the
+# launch-blocking surface; staging operators can switch the namespace
+# variable to mineral-staging.
+#
+# Panels (sources mirror prometheusrule.yaml):
+#   - Pod ready / target up         (kube-state-metrics, up)
+#   - Request rate by status, 5xx%  (ingress-nginx)
+#   - Request latency p50/p95/p99   (ingress-nginx)
+#   - 429 rate-limit rate           (ingress-nginx)
+#   - Active sessions, session p99  (app /metrics)
+#   - Memory vs limit, restarts     (cAdvisor, kube-state-metrics)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: minerals-dashboard
+  namespace: mineral-prod
+  labels:
+    app: minerals
+    grafana_dashboard: "1"
+data:
+  minerals.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "graphTooltip": 1,
+      "title": "Minerals — Overview",
+      "uid": "minerals-overview",
+      "tags": ["minerals"],
+      "timezone": "",
+      "time": { "from": "now-6h", "to": "now" },
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "label": "Data source",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {},
+            "hide": 0
+          },
+          {
+            "name": "namespace",
+            "label": "Namespace",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "${datasource}" },
+            "query": "label_values(kube_pod_labels{label_app=\"minerals\"}, namespace)",
+            "current": { "text": "mineral-prod", "value": "mineral-prod" },
+            "refresh": 2,
+            "includeAll": false,
+            "hide": 0
+          }
+        ]
+      },
+      "panels": [
+        {
+          "title": "Availability",
+          "type": "row",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+        },
+        {
+          "title": "Pods Ready",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "sum(max by (namespace, pod) (kube_pod_status_ready{condition=\"true\", namespace=\"$namespace\"} * on (namespace, pod) group_left() kube_pod_labels{namespace=\"$namespace\", label_app=\"minerals\"}))"
+            }
+          ]
+        },
+        {
+          "title": "Scrape Up",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } } },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "max(up{job=\"minerals\", namespace=\"$namespace\"})"
+            }
+          ]
+        },
+        {
+          "title": "Active Sessions",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "sum(minerals_session_active{namespace=\"$namespace\"})"
+            }
+          ]
+        },
+        {
+          "title": "Container Restarts (1h)",
+          "type": "stat",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+          "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 3 } ] } } },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\", container=\"minerals\"}[1h]))"
+            }
+          ]
+        },
+        {
+          "title": "Traffic & Errors",
+          "type": "row",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }
+        },
+        {
+          "title": "Request Rate by Status",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "fieldConfig": { "defaults": { "unit": "reqps" } },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "sum by (status) (rate(nginx_ingress_controller_requests{exported_namespace=\"$namespace\"}[5m]))",
+              "legendFormat": "{{status}}"
+            }
+          ]
+        },
+        {
+          "title": "5xx Error Ratio",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.05 } ] } } },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "sum(rate(nginx_ingress_controller_requests{exported_namespace=\"$namespace\", status=~\"5..\"}[5m])) / sum(rate(nginx_ingress_controller_requests{exported_namespace=\"$namespace\"}[5m]))",
+              "legendFormat": "5xx ratio"
+            }
+          ]
+        },
+        {
+          "title": "Request Latency (p50/p95/p99)",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(nginx_ingress_controller_request_duration_seconds_bucket{exported_namespace=\"$namespace\"}[5m])))",
+              "legendFormat": "p50"
+            },
+            {
+              "refId": "B",
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(nginx_ingress_controller_request_duration_seconds_bucket{exported_namespace=\"$namespace\"}[5m])))",
+              "legendFormat": "p95"
+            },
+            {
+              "refId": "C",
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(nginx_ingress_controller_request_duration_seconds_bucket{exported_namespace=\"$namespace\"}[5m])))",
+              "legendFormat": "p99"
+            }
+          ]
+        },
+        {
+          "title": "Rate-limit (429) Rate",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+          "fieldConfig": { "defaults": { "unit": "reqps" } },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "sum(rate(nginx_ingress_controller_requests{exported_namespace=\"$namespace\", status=\"429\"}[5m]))",
+              "legendFormat": "429/s"
+            }
+          ]
+        },
+        {
+          "title": "Database & Resources",
+          "type": "row",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 }
+        },
+        {
+          "title": "Session Lookup Latency (p99)",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+          "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.5 } ] } } },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(minerals_session_lookup_duration_seconds_bucket{namespace=\"$namespace\"}[5m])))",
+              "legendFormat": "lookup p99"
+            },
+            {
+              "refId": "B",
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(minerals_session_refresh_duration_seconds_bucket{namespace=\"$namespace\"}[5m])))",
+              "legendFormat": "refresh p99"
+            }
+          ]
+        },
+        {
+          "title": "Memory: working set vs limit",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+          "fieldConfig": { "defaults": { "unit": "bytes" } },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "max by (pod) (container_memory_working_set_bytes{namespace=\"$namespace\", container=\"minerals\"})",
+              "legendFormat": "{{pod}} working set"
+            },
+            {
+              "refId": "B",
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "max(kube_pod_container_resource_limits{namespace=\"$namespace\", container=\"minerals\", resource=\"memory\"})",
+              "legendFormat": "limit"
+            }
+          ]
+        }
+      ]
+    }
