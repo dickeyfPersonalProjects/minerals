@@ -43,6 +43,29 @@ type Config struct {
 	MaxUploadBytes              int64
 	LogLevel                    string
 	Env                         string
+
+	// WebServeMode controls whether the backend serves the SPA frontend
+	// (mi-zomq). Two values:
+	//
+	//   "embedded" (default) — the binary serves the SPA from its embedded
+	//        dist/ via the web.Handler() catch-all on "/". This is the v1
+	//        single-source-of-truth behavior: fine for single-replica, but
+	//        it is the root cause of the multi-replica asset skew (each pod
+	//        embeds its OWN hashed bundle, so a cross-version mix serves an
+	//        index.html whose /assets/<hash>.js lands on a pod that doesn't
+	//        have it -> 404 -> blank page).
+	//
+	//   "disabled" — the backend serves API/docs/health ONLY; the "/"
+	//        catch-all is not registered. Use this once the SPA is served
+	//        from a single shared source (MinIO/CDN) at the static/ingress
+	//        layer, decoupling the frontend from the N backend replicas.
+	//
+	// Read from WEB_SERVE_MODE; defaults to "embedded" so existing
+	// single-source deploys are unchanged. The prod overlay flips it to
+	// "disabled" only after the MinIO-hosted bundle + ingress route are
+	// live (see docs/design/spa-decoupling.md).
+	WebServeMode string
+
 	// MindatAPIKey is the credential for the Mindat REST API used by
 	// the mineral-species lookup pipeline (mi-dtg / F-1). Optional in
 	// every environment — when unset, the system falls back to
@@ -242,6 +265,11 @@ const (
 	defaultMaxUploadBytes    = int64(104857600) // 100 MiB
 	defaultLogLevel          = "info"
 	defaultEnv               = "dev"
+	// defaultWebServeMode keeps the embedded-SPA behavior unless an
+	// overlay opts into API-only serving (mi-zomq).
+	defaultWebServeMode = webModeEmbedded
+	webModeEmbedded     = "embedded"
+	webModeDisabled     = "disabled"
 	// defaultOIDCIssuerURL / defaultOIDCClientID point at the local
 	// dev Keycloak realm (docker-compose). Prod overlays override
 	// both via the minerals-config ConfigMap.
@@ -294,6 +322,7 @@ func loadFrom(get func(string) string) (*Config, error) {
 	cfg.Port = orDefault(get("PORT"), defaultPort)
 	cfg.AdminPort = orDefault(get("ADMIN_PORT"), defaultAdminPort)
 	cfg.LogLevel = orDefault(get("LOG_LEVEL"), defaultLogLevel)
+	cfg.WebServeMode = orDefault(get("WEB_SERVE_MODE"), defaultWebServeMode)
 	cfg.S3Region = orDefault(get("S3_REGION"), defaultS3Region)
 	cfg.MindatAPIKey = strings.TrimSpace(get("MINDAT_API_KEY"))
 	// No default in any environment — unset means the register is
@@ -413,6 +442,12 @@ func loadFrom(get func(string) string) (*Config, error) {
 	case "debug", "info", "warn", "error":
 	default:
 		return nil, fmt.Errorf("config: LOG_LEVEL must be one of debug|info|warn|error, got %q", cfg.LogLevel)
+	}
+
+	switch cfg.WebServeMode {
+	case webModeEmbedded, webModeDisabled:
+	default:
+		return nil, fmt.Errorf("config: WEB_SERVE_MODE must be one of embedded|disabled, got %q", cfg.WebServeMode)
 	}
 
 	return cfg, nil
@@ -563,3 +598,9 @@ func (c *Config) ValidateForMigrate() error {
 // IsDev reports whether the binary should apply dev-only behavior
 // (bucket auto-create, default credentials, etc.).
 func (c *Config) IsDev() bool { return c.Env != "prod" }
+
+// ServeFrontend reports whether the backend should serve the embedded
+// SPA on the "/" catch-all (mi-zomq). False in WEB_SERVE_MODE=disabled,
+// where the frontend is served from a single shared source (MinIO/CDN)
+// at the static/ingress layer and the backend is API/docs/health only.
+func (c *Config) ServeFrontend() bool { return c.WebServeMode != webModeDisabled }
