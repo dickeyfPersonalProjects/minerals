@@ -144,6 +144,49 @@ func (c *AdminClient) SetRegistrationAllowed(ctx context.Context, enabled bool) 
 	return fmt.Errorf("keycloak: update realm: unexpected status %d", resp.StatusCode)
 }
 
+// SetIdentityEnabled flips the `enabled` flag on a Keycloak user via
+// the admin REST API (PUT /admin/realms/{realm}/users/{id}) so an
+// operator can disable (suspend) or re-enable an account at the IdP
+// (mi-3gxz). A disabled user cannot log in or obtain fresh tokens. The
+// service account behind ClientID/ClientSecret must hold the
+// realm-management `manage-users` role (the same role account erasure
+// already requires).
+//
+// The body is a partial UserRepresentation — Keycloak merges the
+// `enabled` field onto the existing user, leaving every other attribute
+// (email, roles, credentials) untouched. A 404 is reported as an error,
+// not swallowed: unlike erasure (where an absent user is the desired
+// idempotent end-state), a suspension that cannot find its target has
+// not taken effect, and the caller must surface that rather than mark
+// the account suspended app-side while the IdP user stays enabled.
+func (c *AdminClient) SetIdentityEnabled(ctx context.Context, sub string, enabled bool) error {
+	if sub == "" {
+		return errors.New("keycloak: empty sub")
+	}
+	payload, err := json.Marshal(struct {
+		Enabled bool `json:"enabled"`
+	}{Enabled: enabled})
+	if err != nil {
+		return fmt.Errorf("keycloak: marshal user update: %w", err)
+	}
+	endpoint := c.usersURL + "/" + url.PathEscape(sub)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("keycloak: build user update request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("keycloak: update user: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	return fmt.Errorf("keycloak: update user: unexpected status %d", resp.StatusCode)
+}
+
 // NoopDeleter is the domain.IdentityDeleter used when admin credentials
 // are not configured. DeleteIdentity is a no-op: the application row
 // and sessions are already gone, and the orphaned IdP user can only log
