@@ -5,7 +5,6 @@
 
 import { describe, expect, it } from 'vitest';
 import * as fc from 'fast-check';
-import { ZodFastCheck } from 'zod-fast-check';
 import type { components } from '../api/schema';
 import {
   emptyFormValues,
@@ -130,10 +129,20 @@ describe('specimenFormSchema property tests', () => {
     );
   });
 
-  it('zod-fast-check inputs for rockDataSchema validate cleanly', () => {
-    // Smoke test of the zod-fast-check integration: derived arbitraries
-    // must satisfy the source schema they were derived from.
-    const rockArb = ZodFastCheck().inputOf(rockDataSchema);
+  it('hand-written rockDataSchema arbitrary validates cleanly', () => {
+    // Hand-written arbitrary mirroring rockDataSchema's fields/constraints
+    // (formerly derived via zod-fast-check, dropped for fast-check 4 — it
+    // peer-caps at <4.0.0 and is unmaintained). Inputs satisfy the schema.
+    const rockArb = fc.record({
+      r_rock_type: fc.constantFrom<'' | 'igneous' | 'sedimentary' | 'metamorphic'>(
+        '',
+        'igneous',
+        'sedimentary',
+        'metamorphic',
+      ),
+      r_composition: fc.string({ maxLength: 500 }),
+      r_formation_context: fc.string({ maxLength: 500 }),
+    });
     fc.assert(
       fc.property(rockArb, (v) => {
         expect(rockDataSchema.safeParse(v).success).toBe(true);
