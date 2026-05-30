@@ -1,0 +1,100 @@
+# =============================================================================
+# SPA-publish credential — PART B: ESO push to GitHub Actions secrets (mi-1im1)
+# =============================================================================
+#
+# Closes the gitops loop: the scoped MinIO key that web-publisher.yaml landed
+# in the K8s Secret `minerals-web-publisher-creds` is pushed OUT to the
+# minerals GitHub repo's Actions secrets by the External Secrets Operator
+# (ESO). The CI publish workflow then reads them as repo secrets — no human
+# ever copies a key into the GitHub UI, and a key rotation in MinIO flows all
+# the way to GitHub automatically:
+#
+#   MinIO svcacct rotates
+#     -> web-publisher.yaml updates minerals-web-publisher-creds
+#       -> ESO PushSecret re-pushes
+#         -> GitHub Actions secrets S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY update
+#
+# -----------------------------------------------------------------------------
+# !!! VERIFY-BEFORE-APPLY (operator) — capabilities evolve !!!
+# -----------------------------------------------------------------------------
+#   1. The ESO `github` provider is WRITE-ONLY and supports pushing to GitHub
+#      *Actions* secrets (repository / org / environment). Confirmed against
+#      external-secrets.io docs + provider source. CONFIRM it is present in the
+#      ESO version INSTALLED in fleet-infra before relying on it.
+#   2. GAP vs the bead's "GitHub App (preferred) or PAT": the provider supports
+#      GitHub *App* auth ONLY — there is NO PAT path on `provider.github`.
+#      (A PAT-based `GithubAccessToken` *generator* exists but is a different
+#      resource and does not push secrets.) We therefore use a GitHub App.
+#   3. apiVersions intentionally differ by stability:
+#        SecretStore  -> external-secrets.io/v1       (GA)
+#        PushSecret   -> external-secrets.io/v1alpha1  (still alpha upstream)
+#      Confirm these are the versions served by the installed ESO CRDs.
+#
+# -----------------------------------------------------------------------------
+# Required external Secret (overlay-provided, NOT in this base):
+#   github-app-eso (Opaque), key `privateKey` = the GitHub App's PEM private
+#   key. Placeholder SealedSecret stub: docs/deploy/example/prod/github-app-eso.yaml.
+#   The App must be installed on the target repo with Actions secrets: write.
+#
+# Non-publishing-env GATE: the base ships placeholder appID / installationID.
+# Until an overlay patches REAL values AND provides the github-app-eso key, the
+# SecretStore cannot authenticate, so its PushSecret pushes nothing. That is the
+# guard that stops two environments (which share one GitHub repo) from racing on
+# the same Actions secrets — only the opted-in publishing overlay pushes. See
+# docs/deploy/spa-publish-creds.md.
+# =============================================================================
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: github-actions
+spec:
+  provider:
+    github:
+      # NON-SECRET identifiers. Placeholders here; the publishing overlay
+      # patches the real App ID + installation ID (see
+      # docs/deploy/example/prod/github-actions-store-patch.yaml). Leaving the
+      # placeholders is the per-env gate described in the header.
+      appID: "REPLACE_WITH_GITHUB_APP_ID"
+      installationID: "REPLACE_WITH_GITHUB_APP_INSTALLATION_ID"
+      # Repo owner + repo. Hardcoded — this is the one minerals repo, not a
+      # multi-tenant base. Repository scope => writes *repository* Actions
+      # secrets (set `environment:` as well for environment-scoped secrets).
+      organization: dickeyfPersonalProjects
+      repository: minerals
+      auth:
+        privateKey:
+          name: github-app-eso
+          key: privateKey
+---
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: minerals-web-publisher-to-github
+spec:
+  # Re-push on this cadence so a rotated MinIO key reaches GitHub without a
+  # manual nudge.
+  refreshInterval: 1h
+  # Replace = ESO is the source of truth and overwrites the GitHub secret.
+  updatePolicy: Replace
+  # None = leave the GitHub Actions secret in place if this PushSecret is
+  # deleted, so tearing down the pipeline does not silently break CI mid-flight.
+  deletionPolicy: None
+  secretStoreRefs:
+    - name: github-actions
+      kind: SecretStore
+  selector:
+    secret:
+      # Materialised at runtime by the web-publisher-init Job.
+      name: minerals-web-publisher-creds
+  data:
+    # K8s Secret key (AWS SDK name) -> GitHub Actions secret name (S3_* per the
+    # mi-1im1 contract). The CI publish workflow maps S3_* back to AWS_* envs.
+    - match:
+        secretKey: AWS_ACCESS_KEY_ID
+        remoteRef:
+          remoteKey: S3_ACCESS_KEY_ID
+    - match:
+        secretKey: AWS_SECRET_ACCESS_KEY
+        remoteRef:
+          remoteKey: S3_SECRET_ACCESS_KEY

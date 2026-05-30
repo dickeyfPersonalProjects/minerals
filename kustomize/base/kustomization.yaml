@@ -33,6 +33,14 @@
 #       user (or reuses root) and writes its creds here under the exact key
 #       names the app reads.
 #
+#   - github-app-eso                (Opaque)  [publishing env only]
+#       key  privateKey             GitHub App PEM private key.
+#       Consumed by: ESO SecretStore github-actions (web-publisher-eso.yaml).
+#       Only the SPA-publishing overlay provides it (plus patched App IDs);
+#       without it the SecretStore is non-functional and pushes nothing — the
+#       per-env gate that stops two envs racing on the shared GitHub repo.
+#       See docs/deploy/spa-publish-creds.md.
+#
 # Auto-generated Secrets (created by operators, NOT to be committed):
 #
 #   - minerals-pg-app               (CNPG-generated)
@@ -66,3 +74,12 @@ resources:
   # to WEB_SERVE_MODE=disabled so the two no longer overlap. See
   # docs/design/spa-decoupling.md.
   - web.yaml
+  # SPA-publish credential pipeline (mi-1im1). PART A: an idempotent mc Job
+  # provisions a write-only MinIO service account scoped to the `minerals-web`
+  # bucket and materialises it into the Secret minerals-web-publisher-creds.
+  # PART B: ESO pushes that Secret to the minerals repo's GitHub Actions
+  # secrets (S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY). Self-gated to the
+  # publishing overlay via placeholder GitHub App IDs — see
+  # web-publisher-eso.yaml and docs/deploy/spa-publish-creds.md.
+  - web-publisher.yaml
+  - web-publisher-eso.yaml

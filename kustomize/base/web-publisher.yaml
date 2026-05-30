@@ -1,0 +1,225 @@
+# =============================================================================
+# SPA-publish credential — PART A: scoped MinIO service account (mi-1im1)
+# =============================================================================
+#
+# The CI "publish the SPA bundle" job needs an S3 key that can WRITE to the
+# `minerals-web` bucket and NOTHING else. This file provisions that key with
+# no human ever touching the secret value:
+#
+#   1. A write-only inline policy (PutObject/DeleteObject/ListBucket on
+#      `minerals-web` only — NOT admin, NOT GetObject).
+#   2. A MinIO *service account* bound to that policy. MinIO Operator has no
+#      first-class svcacct CRD, so — exactly like
+#      docs/deploy/example/prod/postgres-backup-bucket-init.yaml — this is a
+#      small idempotent `mc` Job against the in-cluster Tenant.
+#   3. The resulting access key + secret materialise into the K8s Secret
+#      `minerals-web-publisher-creds` (keys AWS_ACCESS_KEY_ID /
+#      AWS_SECRET_ACCESS_KEY). From there ESO pushes them to GitHub Actions —
+#      see web-publisher-eso.yaml.
+#
+# Why a service account and not an IAM user:
+#   A MinIO service account carries an INLINE session policy that is
+#   intersected with its parent's. Parented to root, the intersection is just
+#   the inline write-only policy below — a single object, strictly scoped, no
+#   separate named-policy/user pair to keep in sync. (svcaccts cannot reference
+#   a named policy by name; the policy is always inline. We therefore do NOT
+#   `mc admin policy create` a vestigial named policy.)
+#
+# Idempotency / rotation:
+#   - First reconcile: the gen step finds no Secret, generates a fresh key
+#     pair, register creates the svcacct, publish writes the Secret.
+#   - Re-reconcile: gen reuses the existing Secret's keys, register sees the
+#     svcacct already exists and `edit`s its policy (no-op if unchanged),
+#     publish re-applies the identical Secret. Stable — no key churn, no
+#     orphaned svcaccts.
+#   - To ROTATE: delete the Secret AND the svcacct, then delete this Job so
+#     Flux re-creates it:
+#       kubectl -n <ns> delete secret minerals-web-publisher-creds
+#       # (also remove the svcacct in MinIO: mc admin user svcacct rm ...)
+#       kubectl -n <ns> delete job minerals-web-publisher-init
+#     A fresh key pair is generated, the Secret updates, and ESO's PushSecret
+#     re-pushes it to GitHub automatically (see web-publisher-eso.yaml).
+#
+# Per-env note: each environment runs its OWN MinIO Tenant, so the bucket,
+# svcacct, and Secret created here are namespace-local and harmless even in a
+# non-publishing env. Only the GitHub push is globally shared, and that is
+# gated separately in web-publisher-eso.yaml (placeholder appID until an
+# overlay opts in).
+#
+# !!! VERIFY-BEFORE-APPLY (operator) !!!
+#   - `mc admin user svcacct add/edit/info` flags are stable across recent mc
+#     releases, but confirm against the mc shipped by the INSTALLED MinIO
+#     Operator's tenant image before first apply.
+#   - The Job mounts MinIO ROOT creds (minerals-minio-config) — same surface
+#     the operator's own bucket-init Jobs already use.
+#   - Images: `minio/mc` (mc, as the existing bucket-init Jobs use) and
+#     `alpine/k8s` (kubectl + busybox sh/base64/head/tr). The kubectl steps
+#     only need kubectl + a POSIX shell + base64/head/tr — swap to any image
+#     that has them. Pin `alpine/k8s` to the cluster's kubectl minor version
+#     and confirm the tag exists.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: minerals-web-publisher-init
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: minerals-web-publisher-init
+rules:
+  # `create` cannot be restricted by resourceName, so it is its own rule.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  # Read/update is pinned to the single Secret this Job manages.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["minerals-web-publisher-creds"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: minerals-web-publisher-init
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: minerals-web-publisher-init
+subjects:
+  - kind: ServiceAccount
+    name: minerals-web-publisher-init
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minerals-web-publisher-init
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: minerals
+        component: web-publisher-init
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: minerals-web-publisher-init
+      # Shared scratch for the generated key pair + the inline policy JSON,
+      # handed between the three steps below.
+      volumes:
+        - name: shared
+          emptyDir: {}
+        - name: minio-config
+          secret:
+            secretName: minerals-minio-config
+      initContainers:
+        # ---- Step 1: decide the key pair (reuse if the Secret already exists).
+        - name: gen
+          image: alpine/k8s:1.31.1
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              if kubectl get secret minerals-web-publisher-creds >/dev/null 2>&1; then
+                echo "minerals-web-publisher-creds exists — reusing its keys (idempotent)"
+                AK=$(kubectl get secret minerals-web-publisher-creds \
+                       -o jsonpath='{.data.AWS_ACCESS_KEY_ID}' | base64 -d)
+                SK=$(kubectl get secret minerals-web-publisher-creds \
+                       -o jsonpath='{.data.AWS_SECRET_ACCESS_KEY}' | base64 -d)
+              else
+                echo "no existing Secret — generating a fresh key pair"
+                # /dev/urandom only; no openssl dependency. Access keys are
+                # alnum; MinIO accepts custom svcacct keys of this length.
+                AK=$(head -c 16 /dev/urandom | base64 | tr -dc 'A-Z0-9' | head -c 20)
+                SK=$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)
+              fi
+              printf 'AK=%s\nSK=%s\n' "$AK" "$SK" > /shared/creds.env
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+        # ---- Step 2: bucket + scoped service account in MinIO.
+        - name: register
+          image: minio/mc:latest
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              . /shared/creds.env
+              # config.env exports MINIO_ROOT_USER + MINIO_ROOT_PASSWORD
+              # (shell-style; same format the MinIO Operator consumes).
+              . /etc/minio-config/config.env
+
+              mc alias set local http://minerals-hl:9000 \
+                "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+
+              # Ensure the publish target bucket exists. Serving the bucket
+              # (public-read + ingress routing) is a separate follow-up bead;
+              # here we only need it to exist so the policy + PUT target are
+              # valid.
+              mc mb --ignore-existing local/minerals-web
+
+              # Write-only inline policy: list/locate the bucket; put/delete
+              # objects (delete + multipart needed for the publish job's
+              # manifest-based GC and large-asset uploads). NO GetObject — the
+              # publisher cannot read back, by design.
+              cat > /shared/policy.json <<'EOF'
+              {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Effect": "Allow",
+                    "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+                    "Resource": ["arn:aws:s3:::minerals-web"]
+                  },
+                  {
+                    "Effect": "Allow",
+                    "Action": [
+                      "s3:PutObject",
+                      "s3:DeleteObject",
+                      "s3:AbortMultipartUpload",
+                      "s3:ListMultipartUploadParts"
+                    ],
+                    "Resource": ["arn:aws:s3:::minerals-web/*"]
+                  }
+                ]
+              }
+              EOF
+
+              if mc admin user svcacct info local "$AK" >/dev/null 2>&1; then
+                echo "svcacct $AK exists — updating its inline policy"
+                mc admin user svcacct edit --policy /shared/policy.json local "$AK"
+              else
+                echo "creating svcacct $AK under root with write-only inline policy"
+                mc admin user svcacct add \
+                  --access-key "$AK" --secret-key "$SK" \
+                  --policy /shared/policy.json \
+                  local "$MINIO_ROOT_USER"
+              fi
+
+              # Evidence in the Job log that the scoped svcacct landed.
+              mc admin user svcacct info local "$AK"
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+            - name: minio-config
+              mountPath: /etc/minio-config
+              readOnly: true
+      # ---- Step 3: materialise the K8s Secret ESO will push to GitHub.
+      containers:
+        - name: publish
+          image: alpine/k8s:1.31.1
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              . /shared/creds.env
+              # Idempotent apply: identical on re-run (keys were reused), a
+              # create on first run. Key names equal the AWS SDK env vars so a
+              # consumer can envFrom this Secret directly (CONTRACT.md §15).
+              kubectl create secret generic minerals-web-publisher-creds \
+                --from-literal=AWS_ACCESS_KEY_ID="$AK" \
+                --from-literal=AWS_SECRET_ACCESS_KEY="$SK" \
+                --dry-run=client -o yaml | kubectl apply -f -
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
