@@ -1,0 +1,43 @@
+# SealedSecret for the GitHub App private key that ESO uses to push the SPA
+# publish credentials to the minerals repo's GitHub Actions secrets (mi-1im1).
+#
+# This is the ONE secret that opts a given environment into publishing. Only
+# the env that owns the public SPA bundle should ship it; without it (and the
+# patched App IDs in github-actions-store-patch.yaml) the base SecretStore
+# `github-actions` cannot authenticate and pushes nothing. See
+# docs/deploy/spa-publish-creds.md.
+#
+# Consumer contract (base/web-publisher-eso.yaml SecretStore):
+#   name: github-app-eso   key: privateKey   value: the App's PEM private key.
+#
+# Provisioning the real value (operator, one-time):
+#   1. Create a GitHub App (org or personal account `dickeyfPersonalProjects`)
+#      with Repository permission "Secrets: Read and write" (Actions secrets),
+#      install it on the `minerals` repo, and note the App ID + installation ID
+#      (those go in github-actions-store-patch.yaml — they are NOT secret).
+#   2. Generate a private key for the App and download the .pem.
+#   3. Seal it (ciphertext is namespace-scoped — re-seal per env):
+#        kubectl create secret generic github-app-eso \
+#          --namespace mineral-prod \
+#          --from-file=privateKey=./minerals-eso.private-key.pem \
+#          --dry-run=client -o yaml \
+#        | kubeseal --format yaml > github-app-eso.yaml
+#   See docs/deploy/encrypt.md for the kubeseal workflow and commit rules.
+#
+# Rotation: generate a new App private key, re-seal, commit. ESO re-auths on
+# its next sync; the pushed Actions secrets are unaffected by an App-key
+# rotation (only the MinIO key rotation changes their VALUE).
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: github-app-eso
+  namespace: mineral-prod
+spec:
+  encryptedData:
+    privateKey: REPLACE_WITH_KUBESEAL_OUTPUT
+  template:
+    metadata:
+      name: github-app-eso
+      namespace: mineral-prod
+    type: Opaque

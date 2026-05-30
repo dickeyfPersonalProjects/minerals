@@ -85,6 +85,27 @@ spec:
           OIDC_ISSUER_URL: https://auth.example.com/realms/minerals
           OIDC_CLIENT_ID: minerals-frontend
           OIDC_REDIRECT_URI: https://www.example.com/auth/callback
+    # SPA-publish credential pipeline (mi-1im1). This patch + the
+    # github-app-eso SealedSecret are what opt PROD in as the SPA publisher:
+    # they fill the base ESO SecretStore's placeholder GitHub App IDs with the
+    # real (non-secret) App ID + installation ID. An env that omits this patch
+    # keeps the placeholders, so its SecretStore stays non-functional and never
+    # races on the shared GitHub repo's Actions secrets. The IDs below are
+    # examples — replace with the App's real values (see
+    # docs/deploy/spa-publish-creds.md and example/prod/github-app-eso.yaml).
+    - target:
+        kind: SecretStore
+        name: github-actions
+      patch: |-
+        apiVersion: external-secrets.io/v1
+        kind: SecretStore
+        metadata:
+          name: github-actions
+        spec:
+          provider:
+            github:
+              appID: "123456"
+              installationID: "12345678"
     # CNPG backup → in-cluster MinIO (mi-jgzi). Prod-only; staging has
     # no Cluster patch and therefore no backups. The companion resources
     # (bucket-init Job, ScheduledBackup, dedicated SealedSecret) are

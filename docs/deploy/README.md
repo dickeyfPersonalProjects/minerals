@@ -700,6 +700,7 @@ small:
 - Keycloak setup (operator base/overlay + realm Terraform + dev quickstart): [`keycloak.md`](./keycloak.md).
 - Secret inventory + new-secret workflow: [`secrets.md`](./secrets.md).
 - App contract / non-secret env vars / secret env vars: [`CONTRACT.md`](../../CONTRACT.md) §15.
+- SPA-publish credential pipeline (MinIO write-only svcacct → ESO PushSecret → GitHub Actions secrets): [`spa-publish-creds.md`](./spa-publish-creds.md).
 - IaC layout rule (base in app repo, overlay in GitOps repo): `CONTRACT.md` §2.
 - App scratch-filesystem rule (`/tmp` only): `CONTRACT.md` §17.
 - Migration init-container pattern: `CONTRACT.md` §6.4.

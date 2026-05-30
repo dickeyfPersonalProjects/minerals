@@ -13,6 +13,12 @@ resources:
   - minerals-s3-creds.yaml
   - minerals-oidc-secret.yaml
   - minerals-pg-backup-creds.yaml
+  # GitHub App private key for the ESO SPA-publish pipeline (mi-1im1). Prod is
+  # the SPA publisher, so prod provides this key (+ the SecretStore App-ID
+  # patch in mineral.yaml). Staging omits both, keeping its base SecretStore
+  # non-functional — only prod pushes to the shared GitHub repo's Actions
+  # secrets. See docs/deploy/spa-publish-creds.md.
+  - github-app-eso.yaml
   # SMTP password for Alertmanager email routing (mi-vp0w). Before the
   # AlertmanagerConfig that references it.
   - minerals-alertmanager-smtp.yaml
