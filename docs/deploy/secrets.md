@@ -226,6 +226,10 @@ workflow. It composes with — does not replace — the
   [`CONFIG.md`](../../CONFIG.md).
 - IaC layout rule (base in app repo, overlay in GitOps repo):
   `CONTRACT.md` §2.
+- SealedSecret `.sec/` convention — committed = sealed
+  `<dir>/<name>.yaml`; plaintext = gitignored `<dir>/.sec/<name>.yaml`;
+  seal with `kubeseal`: `CONTRACT.md` §17, "SealedSecrets & the
+  `.sec/` plaintext convention".
 - Required external Secrets contract (canonical key list):
   [`kustomize/base/kustomization.yaml`](../../kustomize/base/kustomization.yaml) header.
 - SPA-publish credential pipeline (MinIO svcacct → ESO → GitHub Actions):

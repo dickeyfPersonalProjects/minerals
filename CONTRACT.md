@@ -28,6 +28,7 @@ do**; the design docs tell you **why we chose to do it that way**.
 15. [Configuration & env vars](#15--configuration--env-vars)
 16. [Dependencies & libraries](#16--dependencies--libraries)
 17. [Security never-do list](#17--security-never-do-list)
+    - [SealedSecrets & the `.sec/` plaintext convention](#sealedsecrets--the-sec-plaintext-convention)
 18. [Git, commits, PRs](#18--git-commits-prs)
 19. [Polecat workflow & definition of done](#19--polecat-workflow--definition-of-done)
 20. [References & glossary](#20--references--glossary)
@@ -238,7 +239,11 @@ in tracked source" list above. The two MUST stay in sync.
 - **Build artifacts**: `/minerals`, `/bin/`, `/dist/`
 - **Go test/coverage output**: `*.test`, `*.out`, `coverage.txt`,
   `coverage.html`
-- **Environment files**: `.env`, `.env.local`, `.env.*.local`
+- **Environment files**: `.env`, `.env.local`, `.env.*.local`,
+  `.env.bff`
+- **Plaintext SealedSecret sources**: `.sec/`, `**/.sec/` — the
+  kubeseal input for GitOps secret examples; only the sealed
+  `<dir>/<name>.yaml` is committed (§17, `docs/deploy/encrypt.md`)
 - **Frontend dependencies**: `node_modules/`
 - **Editor / OS noise**: `.DS_Store`, `.idea/`, `.vscode/`, `*.swp`
 
@@ -4181,6 +4186,61 @@ changes:
 - **NEVER** disable `.gitignore` or `.dockerignore` patterns
   to "just see if it works." The patterns are part of the
   security surface (cross-ref §2).
+
+## SealedSecrets & the `.sec/` plaintext convention
+
+Every secret manifest in the GitOps examples
+(`docs/deploy/example/**`) follows one convention. It is the rule for
+ALL current and future secret examples in this repo, not a one-off:
+
+- **Committed = the SealedSecret only.** The encrypted manifest lives
+  at `<dir>/<name>.yaml` (e.g.
+  [`docs/deploy/example/prod/github-app-eso.yaml`](docs/deploy/example/prod/github-app-eso.yaml)).
+  Ciphertext is safe to commit — only the target cluster's
+  `sealed-secrets` controller can decrypt it.
+- **Plaintext = `.sec/`, never committed.** The plaintext source
+  Secret lives at `<dir>/.sec/<name>.yaml` and is kept **locally by
+  the operator only**. `.sec/` is gitignored fleet-wide (`.sec/` and
+  `**/.sec/` in [`.gitignore`](.gitignore)); plaintext must never
+  land in the repo. Because `.sec/` is gitignored, an example
+  plaintext template is shown as a fenced block in the docs, never as
+  a tracked `.sec/` file.
+- **Seal with `kubeseal`.** The committed file is produced by sealing
+  the `.sec/` plaintext:
+
+  ```bash
+  kubeseal --format yaml \
+    --controller-name=<sealed-secrets-controller> \
+    --controller-namespace=<ns> \
+    < <dir>/.sec/<name>.yaml > <dir>/<name>.yaml
+  ```
+
+  Offline / pinned-cert form (encrypts without cluster access using a
+  saved copy of the controller's public cert):
+
+  ```bash
+  kubeseal --format yaml --cert <sealed-secrets-cert.pem> \
+    < <dir>/.sec/<name>.yaml > <dir>/<name>.yaml
+  ```
+
+  The controller name/namespace (and cert) are **operator-specific**:
+  set them to this fleet's actual `sealed-secrets` install. Those real
+  values live in the operator's separate fleet-infra GitOps repo
+  (under `clusters/new-k3s/mineral`), **not** in this repo — do NOT
+  hardcode a guessed controller name here. Upstream defaults are
+  `sealed-secrets-controller` in `kube-system`; if `kubectl` is
+  configured against the cluster, `kubeseal` auto-fetches the cert and
+  the `--controller-*` flags can be omitted (the short form in
+  `encrypt.md`).
+
+Ciphertext is bound to **namespace + name**, so each environment
+requires its own sealing pass — see
+[`docs/deploy/encrypt.md`](docs/deploy/encrypt.md) for scope, rotation,
+and multi-key mechanics, and [`docs/deploy/secrets.md`](docs/deploy/secrets.md)
+for the inventory of every Secret and its provenance. Producing real
+ciphertext and committing it to the GitOps repo is a human-approved
+step; polecats stop at the redacted example stub (cross-ref §2 IaC
+layout, and "Repository hygiene" above).
 
 ## Filesystem usage
 

@@ -17,6 +17,11 @@ junit.xml
 # dev-seed.sh writes this; carries OIDC_CLIENT_SECRET + OAUTH_STATE_HMAC_KEY
 # for the V2 BFF stack (mi-1d5i / mi-sap2).
 .env.bff
+# Plaintext SealedSecret sources (kubeseal input). Committed = the sealed
+# <dir>/<name>.yaml; plaintext stays local at <dir>/.sec/<name>.yaml. Never
+# commit .sec/ — see CONTRACT.md §17 + docs/deploy/encrypt.md.
+.sec/
+**/.sec/
 
 # Frontend
 node_modules/
