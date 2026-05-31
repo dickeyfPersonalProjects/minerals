@@ -179,4 +179,10 @@ PR if anything differs):
 
 - Base/overlay split, Flux flow: [`README.md`](./README.md).
 - kubeseal mechanics, scope, commit rules: [`encrypt.md`](./encrypt.md).
+- SealedSecret `.sec/` convention (committed sealed `<dir>/<name>.yaml`,
+  gitignored plaintext at `<dir>/.sec/<name>.yaml`): `CONTRACT.md` §17,
+  "SealedSecrets & the `.sec/` plaintext convention". The
+  [`example/prod/github-app-eso.yaml`](./example/prod/github-app-eso.yaml)
+  header carries the concrete `.sec/` plaintext template + kubeseal command
+  for the App private key.
 - Full Secret inventory: [`secrets.md`](./secrets.md).

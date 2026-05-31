@@ -52,8 +52,8 @@ spec:
   provider:
     github:
       # NON-SECRET identifiers. Placeholders here; the publishing overlay
-      # patches the real App ID + installation ID (see
-      # docs/deploy/example/prod/github-actions-store-patch.yaml). Leaving the
+      # patches the real App ID + installation ID (see the SecretStore patch in
+      # docs/deploy/example/prod/mineral.yaml). Leaving the
       # placeholders is the per-env gate described in the header.
       appID: "REPLACE_WITH_GITHUB_APP_ID"
       installationID: "REPLACE_WITH_GITHUB_APP_INSTALLATION_ID"

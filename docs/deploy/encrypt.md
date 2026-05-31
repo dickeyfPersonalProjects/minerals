@@ -43,9 +43,13 @@ with a SealedSecret as soon as practical.
 
 ## The `.sec/` staging convention
 
-Plaintext Secret manifests live in a `.sec/` directory at the root of
-your working copy. `.sec/` is gitignored fleet-wide; it never gets
-committed.
+Plaintext Secret manifests live in a `.sec/` directory **alongside the
+sealed manifests they produce** — for a manifest committed at
+`<dir>/<name>.yaml`, its plaintext source is `<dir>/.sec/<name>.yaml`
+(seal from `<dir>` and the `.sec/` path below is relative to it). `.sec/`
+is gitignored fleet-wide (`.sec/` and `**/.sec/`); it never gets
+committed. This is the repo-wide rule for every secret example — see
+`CONTRACT.md` §17, "SealedSecrets & the `.sec/` plaintext convention".
 
 ```
 .sec/
