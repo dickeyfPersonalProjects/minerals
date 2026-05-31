@@ -16,10 +16,43 @@ working deployment.
 > [`secrets.md`](./secrets.md) for the inventory of every Secret the
 > deployment consumes, [`keycloak.md`](./keycloak.md) for the full
 > Keycloak/OIDC setup that auth depends on,
+> [`spa-publish-creds.md`](./spa-publish-creds.md) for the SPA-publish
+> credential pipeline (MinIO → K8s → GitHub Actions),
 > [`../upgrade/v1-to-v2.md`](../upgrade/v1-to-v2.md) for the one-shot
 > V1 → V2 data-claim runbook (`bootstrap-claim-orphans`), and
 > [`CONFIG.md`](../../CONFIG.md) for the canonical list of every env
 > var the app reads.
+
+---
+
+## Deploy steps / components index
+
+**Start here.** This file is the canonical top-level deploy guide; the
+rest of the deploy docs are detail pages it indexes. The table below
+covers every component the example overlay provisions — each row links
+the doc that explains it and the example manifest(s) that implement it.
+It is an index, not a copy: follow the links for the details.
+
+Read [`secrets.md`](./secrets.md) as the inventory of every Secret the
+deployment consumes and [`CONFIG.md`](../../CONFIG.md) as the canonical
+list of every env var the app reads — both span multiple rows below.
+
+| # | Component | Detailed doc | Example manifest(s) |
+|---|-----------|--------------|---------------------|
+| 1 | **Namespace** — the per-env boundary everything else lands in | [base/overlay split](#the-baseoverlay-split) | [`namespace.yaml`](./example/prod/namespace.yaml) |
+| 2 | **SealedSecrets via kubeseal** — encrypt the overlay's Secrets; plaintext stays in gitignored `.sec/` | [`encrypt.md`](./encrypt.md) · `CONTRACT.md` [§17 `.sec/` convention](../../CONTRACT.md#sealedsecrets--the-sec-plaintext-convention) | [`minerals-minio-config`](./example/prod/minerals-minio-config.yaml), [`minerals-s3-creds`](./example/prod/minerals-s3-creds.yaml), [`minerals-oidc-secret`](./example/prod/minerals-oidc-secret.yaml), [`minerals-pg-backup-creds`](./example/prod/minerals-pg-backup-creds.yaml), [`github-app-eso`](./example/prod/github-app-eso.yaml), [`minerals-alertmanager-smtp`](./example/prod/minerals-alertmanager-smtp.yaml) |
+| 3 | **Postgres + scheduled backups** — CNPG-managed DB (base); prod-only weekly backup → MinIO; offsite is opt-in | [`secrets.md`](./secrets.md) (`minerals-pg-app`) · [`restore.md`](./restore.md) (restore runbook) · [`external-b2/README.md`](./example/prod/external-b2/README.md) (offsite to B2) | [`scheduledbackup.yaml`](./example/prod/scheduledbackup.yaml), [`postgres-backup-bucket-init.yaml`](./example/prod/postgres-backup-bucket-init.yaml) |
+| 4 | **MinIO + image mirror** — object store for app + image buckets; prod-only server-side mirror as a local safety net | [`secrets.md`](./secrets.md) (`minerals-minio-config`, `minerals-s3-creds`) | [`minio-image-mirror-init.yaml`](./example/prod/minio-image-mirror-init.yaml) |
+| 5 | **OIDC / Keycloak** — the realm + clients login depends on | [`keycloak.md`](./keycloak.md) · [Authentication setup](#authentication-setup) | [`minerals-oidc-secret.yaml`](./example/prod/minerals-oidc-secret.yaml), [`keycloak/`](./example/prod/keycloak/) |
+| 6 | **The app** — Flux `Kustomization` pulling `kustomize/base/` into the namespace, with the per-env ENV/OIDC ConfigMap patch | [Required configuration](#required-configuration) · [How Flux reconciles this app](#how-flux-reconciles-this-app) | [`mineral.yaml`](./example/prod/mineral.yaml) |
+| 7 | **Ingress + TLS certificates** — public hostname + cert-manager `Certificate` → `web-crt` Secret | [base/overlay split](#the-baseoverlay-split) | [`ingress.yaml`](./example/prod/ingress.yaml), [`ingress-split.yaml`](./example/prod/ingress-split.yaml), [`certificate.yaml`](./example/prod/certificate.yaml) |
+| 8 | **Monitoring stack** — scrape target, alert rules, alert routing (+ SMTP), Grafana dashboard | [`observability.md`](./observability.md) · [Observability](#observability) | [`servicemonitor.yaml`](./example/prod/servicemonitor.yaml), [`prometheusrule.yaml`](./example/prod/prometheusrule.yaml), [`alertmanagerconfig.yaml`](./example/prod/alertmanagerconfig.yaml), [`grafana-dashboard.yaml`](./example/prod/grafana-dashboard.yaml), [`minerals-alertmanager-smtp.yaml`](./example/prod/minerals-alertmanager-smtp.yaml) |
+| 9 | **SPA-publish credential pipeline** — MinIO write-only svcacct → ESO `PushSecret` → GitHub Actions secrets (prod is the publisher) | [`spa-publish-creds.md`](./spa-publish-creds.md) | [`github-app-eso.yaml`](./example/prod/github-app-eso.yaml) |
+
+**Related ops docs** (not provisioned by the overlay, but part of running the deploy):
+[`rate-limiting.md`](./rate-limiting.md) (API rate-limit tuning) and
+[`../upgrade/v1-to-v2.md`](../upgrade/v1-to-v2.md) (one-shot V1 → V2
+data-claim runbook).
 
 ---
 

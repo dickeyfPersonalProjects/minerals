@@ -151,12 +151,16 @@ See [docs/deploy/README.md](docs/deploy/README.md) for full deployment instructi
 - **[CONFIG.md](CONFIG.md)** — Reference for every setting the application
   supports (env vars, ConfigMap keys, feature flags) plus the secrets
   inventory.
-- **[docs/deploy/README.md](docs/deploy/README.md)** — Full Kubernetes/Flux
-  deployment guide.
+- **[docs/deploy/README.md](docs/deploy/README.md)** — **Start here.** The
+  canonical Kubernetes/Flux deployment guide and index of every deploy step.
 - **[docs/deploy/keycloak.md](docs/deploy/keycloak.md)** — How to set up
   OIDC authentication with Keycloak.
 - **[docs/deploy/secrets.md](docs/deploy/secrets.md)** — Inventory of every
   Secret the deployment consumes.
+- **[docs/deploy/encrypt.md](docs/deploy/encrypt.md)** — The kubeseal /
+  SealedSecret `.sec/` workflow for the secrets the overlay ships.
+- **[docs/deploy/spa-publish-creds.md](docs/deploy/spa-publish-creds.md)** —
+  The SPA-publish credential pipeline (MinIO → K8s → GitHub Actions).
 
 ## For AI agents (polecats)
 
